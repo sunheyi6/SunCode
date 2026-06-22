@@ -106,6 +106,7 @@ export interface BackgroundProcess {
   startTime: number;
   status: 'running' | 'completed' | 'error';
   exitCode?: number;
+  endTime?: number;
 }
 
 /** Tool implementation interface */
