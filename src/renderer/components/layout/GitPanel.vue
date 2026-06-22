@@ -111,13 +111,26 @@ async function generateCommitMessage(): Promise<void> {
 async function doCommit(): Promise<void> {
   const dir = activeSession.value?.workingDirectory;
   if (!dir) return;
-  const msg = commitMessage.value.trim();
+  let msg = commitMessage.value.trim();
+
+  // Auto-generate if empty
   if (!msg) {
-    commitFeedback.value = '❌ 提交信息不能为空';
-    return;
+    generatingCommitMsg.value = true;
+    commitFeedback.value = '🤖 AI 正在生成提交信息...';
+    try {
+      const result = await bridge.generateCommitMessage(dir);
+      msg = result.message;
+      commitMessage.value = msg;
+    } catch {
+      commitFeedback.value = '❌ AI 生成失败';
+      return;
+    } finally {
+      generatingCommitMsg.value = false;
+    }
   }
+
   committing.value = true;
-  commitFeedback.value = '';
+  commitFeedback.value = '⏳ 正在提交...';
   try {
     const result = await bridge.gitCommit(dir, msg);
     if (result.success) {
