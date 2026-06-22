@@ -40,6 +40,7 @@ export const useChatStore = defineStore('chat', () => {
       id: nextId(),
       role: 'assistant',
       content: '',
+      thinking: '',
       timestamp: Date.now(),
       isStreaming: true,
     };
@@ -69,10 +70,15 @@ export const useChatStore = defineStore('chat', () => {
         msg.isStreaming = false;
         isStreaming.value = false;
         // Save message
-        bridge.saveMessage({
-          role: 'assistant',
-          content: [{ type: 'text', text: msg.content }],
-        });
+        {
+          const content: Message['content'] = [];
+          if (msg.thinking) content.push({ type: 'thinking', text: msg.thinking });
+          content.push({ type: 'text', text: msg.content });
+          void bridge.saveMessage({
+            role: 'assistant',
+            content,
+          });
+        }
         break;
       case 'toolcall_start':
         if (!msg.toolCalls) msg.toolCalls = [];

@@ -8,7 +8,9 @@ const props = defineProps<{
 }>();
 
 const hasContent = computed(() => props.message.content.length > 0);
-const hasThinking = computed(() => Boolean(props.message.thinking));
+const hasThinking = computed(
+  () => props.message.isStreaming || Boolean(props.message.thinking),
+);
 const hasToolCalls = computed(() => Boolean(props.message.toolCalls?.length));
 </script>
 
@@ -22,7 +24,7 @@ const hasToolCalls = computed(() => Boolean(props.message.toolCalls?.length));
         </summary>
         <div class="thinking-content">
           <StreamingText
-            :text="message.thinking || ''"
+            :text="message.thinking || '等待模型返回思考内容…'"
             :is-streaming="message.isStreaming"
           />
         </div>

@@ -33,6 +33,7 @@ interface PiAssistantMessage {
 type CompleteSimple = (
   model: unknown,
   context: Record<string, unknown>,
+  options?: Record<string, unknown>,
 ) => Promise<PiAssistantMessage>;
 
 /**
@@ -122,7 +123,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // Build context for pi-ai
       const piContext = {
-        system: systemPrompt,
+        systemPrompt,
         messages: contextMessages.filter((m) => m.role !== 'system').map(convertMessage),
         tools: toolDefs.map(convertToolDef),
       };
@@ -130,7 +131,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       console.log(`[AgentLoop] Calling completeSimple with ${piContext.messages.length} messages`);
 
       // Call the LLM
-      const assistantMsg = await completeSimple(model, piContext);
+      const assistantMsg = await completeSimple(model, piContext, {
+        reasoning: settings.thinkingLevel,
+        signal: abortSignal,
+      });
 
       console.log(`[AgentLoop] Got response:`, {
         role: assistantMsg.role,
@@ -163,20 +167,33 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             // Simulate streaming
             onStream({ type: 'text_delta', text });
           } else if (block.type === 'thinking') {
-            thinkingText += (block.text as string) || '';
-            onStream({ type: 'thinking_delta', text: block.text as string });
-          } else if (block.type === 'tool_use' || block.type === 'tool_call') {
+            const thinking = (block.thinking as string) || (block.text as string) || '';
+            if (thinking) {
+              if (!thinkingText) onStream({ type: 'thinking_start' });
+              thinkingText += thinking;
+              onStream({ type: 'thinking_delta', text: thinking });
+            }
+          } else if (
+            block.type === 'toolUse' ||
+            block.type === 'toolCall' ||
+            block.type === 'tool_use' ||
+            block.type === 'tool_call'
+          ) {
             const tc: ToolCallContent = {
               type: 'tool_call',
               id: (block.id as string) || `tc_${toolCalls.length}`,
               name: (block.name as string) || '',
               arguments:
-                typeof block.input === 'string' ? block.input : JSON.stringify(block.input || {}),
+                typeof block.arguments === 'string'
+                  ? block.arguments
+                  : JSON.stringify(block.arguments || block.input || {}),
             };
             toolCalls.push(tc);
           }
         }
       }
+
+      if (thinkingText) onStream({ type: 'thinking_end' });
 
       if (!assistantText && toolCalls.length === 0 && !thinkingText) {
         throw new Error(
