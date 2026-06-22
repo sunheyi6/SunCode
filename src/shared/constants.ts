@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS = {
   autoCompact: true,
   compactThreshold: 0.7,
   theme: 'system' as const,
+  permissionMode: 'full_access' as const,
   mcpServers: [],
   skills: [],
   envApiKeys: {},

@@ -2,6 +2,7 @@
 import type { SessionMeta } from '@shared/types';
 import { computed, onMounted, ref } from 'vue';
 import { useSessionsStore } from '../../stores/sessions';
+import { bridge } from '../../api/bridge';
 
 const sessionsStore = useSessionsStore();
 const searchOpen = ref(false);
@@ -10,6 +11,12 @@ const searchQuery = ref('');
 onMounted(() => {
   void sessionsStore.init();
 });
+
+async function handleCreateSession(): Promise<void> {
+  const selectedPath = await bridge.selectDirectory();
+  if (!selectedPath) return; // User cancelled
+  await sessionsStore.createSession(selectedPath);
+}
 
 function projectName(path: string): string {
   const segments = path.split(/[\\/]/).filter(Boolean);
@@ -55,29 +62,32 @@ function formatTime(value: string): string {
 <template>
   <div class="conversation-sidebar">
     <div class="sidebar-actions">
-      <button class="primary-action" @click="sessionsStore.createSession()">
-        <span class="action-icon">＋</span>
-        <span>新建对话</span>
-      </button>
-      <button
-        class="icon-action"
-        :class="{ active: searchOpen }"
-        title="全局查询"
-        @click="searchOpen = !searchOpen"
-      >
-        ⌕
-      </button>
-    </div>
-
-    <div v-if="searchOpen" class="global-search">
-      <span>⌕</span>
-      <input
-        v-model="searchQuery"
-        autofocus
-        placeholder="查询所有项目和对话..."
-        @keyup.escape="searchOpen = false"
-      />
-      <button v-if="searchQuery" @click="searchQuery = ''">×</button>
+      <template v-if="!searchOpen">
+        <button class="primary-action" @click="handleCreateSession()">
+          <span class="action-icon">＋</span>
+          <span>新建对话</span>
+        </button>
+        <button
+          class="icon-action"
+          title="全局查询"
+          @click="searchOpen = true"
+        >
+          ⌕
+        </button>
+      </template>
+      <template v-else>
+        <div class="global-search">
+          <span>⌕</span>
+          <input
+            v-model="searchQuery"
+            autofocus
+            placeholder="查询所有项目和对话..."
+            @keyup.escape="searchOpen = false"
+          />
+          <button v-if="searchQuery" @click="searchQuery = ''">×</button>
+          <button class="search-close" @click="searchOpen = false; searchQuery = ''">✕</button>
+        </div>
+      </template>
     </div>
 
     <div class="conversation-list">
@@ -155,17 +165,17 @@ function formatTime(value: string): string {
   font-size: 21px;
 }
 
-.icon-action:hover,
-.icon-action.active {
+.icon-action:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
 
 .global-search {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: 6px;
-  margin: 8px 10px 2px;
+  height: 36px;
   padding: 0 9px;
   border: 1px solid var(--color-accent);
   border-radius: var(--border-radius-sm);
@@ -185,6 +195,11 @@ function formatTime(value: string): string {
   padding: 0 2px;
   background: transparent;
   color: var(--color-text-muted);
+}
+
+.search-close {
+  font-size: 14px;
+  padding: 0 4px;
 }
 
 .conversation-list {

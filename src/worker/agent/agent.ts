@@ -1,17 +1,21 @@
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type {
-  AppSettings,
-  StreamEvent,
   AgentStatus,
-  ToolResult,
+  AppSettings,
+  BackgroundProcess,
   Message,
+  StreamEvent,
   ToolCallContent,
+  ToolResult,
 } from '@shared/types';
-import { runAgentLoop } from './agent-loop';
-import type { Tool } from '../tools/types';
-import { createToolRegistry } from '../tools/registry';
 import { createMcpManager } from '../mcp/manager';
-import { createSkillsLoader } from './skills';
 import { createModelRegistry } from '../models/registry';
+import { createToolRegistry } from '../tools/registry';
+import type { Tool } from '../tools/types';
+import { runAgentLoop } from './agent-loop';
+import { createSkillsLoader } from './skills';
 
 export class Agent {
   private workingDir: string;
@@ -29,6 +33,8 @@ export class Agent {
   private onToolEnd: (result: ToolResult) => void;
   private onDone: (message: Message) => void;
   private onError: (message: string) => void;
+  private onBackgroundStart: (proc: BackgroundProcess) => void;
+  private onBackgroundComplete: (pid: number, exitCode: number) => void;
 
   constructor(
     workingDir: string,
@@ -39,6 +45,8 @@ export class Agent {
     onToolEnd: (result: ToolResult) => void,
     onDone: (message: Message) => void,
     onError: (message: string) => void,
+    onBackgroundStart: (proc: BackgroundProcess) => void,
+    onBackgroundComplete: (pid: number, exitCode: number) => void,
   ) {
     this.workingDir = workingDir;
     this.settings = settings;
@@ -48,14 +56,19 @@ export class Agent {
     this.onToolEnd = onToolEnd;
     this.onDone = onDone;
     this.onError = onError;
+    this.onBackgroundStart = onBackgroundStart;
+    this.onBackgroundComplete = onBackgroundComplete;
 
     void this.initialize();
   }
 
   private async initialize(): Promise<void> {
     try {
-      // Load built-in tools
-      const registry = createToolRegistry(this.workingDir);
+      // Load built-in tools (with background process callbacks)
+      const registry = createToolRegistry(this.workingDir, {
+        onBackgroundStart: (proc) => this.onBackgroundStart(proc),
+        onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
+      });
       this.tools = registry.getAll();
 
       // Load MCP tools
@@ -77,6 +90,27 @@ export class Agent {
 
   updateSettings(settings: AppSettings): void {
     this.settings = settings;
+  }
+
+  /**
+   * Change the working directory without recreating the entire agent.
+   * Rebuilds built-in tools to enforce the new sandbox boundary.
+   * MCP tools and message history are preserved.
+   */
+  setWorkingDir(path: string): void {
+    if (this.workingDir === path) return;
+    this.workingDir = path;
+
+    // Rebuild built-in tools with the new working directory
+    const registry = createToolRegistry(path, {
+      onBackgroundStart: (proc) => this.onBackgroundStart(proc),
+      onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
+    });
+    const newBuiltInTools = registry.getAll();
+
+    // Replace built-in tools while keeping MCP tools
+    const builtInNames = new Set(newBuiltInTools.map((t) => t.name));
+    this.tools = [...newBuiltInTools, ...this.tools.filter((t) => !builtInNames.has(t.name))];
   }
 
   setMessages(messages: Message[]): void {
@@ -151,17 +185,21 @@ export class Agent {
 
   private async runLoop(): Promise<void> {
     const modelRegistry = createModelRegistry();
-    const model = await modelRegistry.getModel(this.settings.activeProvider, this.settings.activeModel);
+    const model = await modelRegistry.getModel(
+      this.settings.activeProvider,
+      this.settings.activeModel,
+    );
 
     if (!model) {
-      this.onError(
-        `Model not found: ${this.settings.activeProvider}/${this.settings.activeModel}`,
-      );
+      this.onError(`Model not found: ${this.settings.activeProvider}/${this.settings.activeModel}`);
       return;
     }
 
     const skillsLoader = createSkillsLoader(this.workingDir, this.settings.skills);
     const skillsContent = await skillsLoader.loadAll();
+
+    // Load .agents.md (Codex convention): project-level, then user-level
+    const agentsMdContent = await loadAgentsMd(this.workingDir);
 
     const result = await runAgentLoop({
       model,
@@ -170,6 +208,7 @@ export class Agent {
       settings: this.settings,
       workingDir: this.workingDir,
       skillsContent,
+      agentsMdContent,
       abortSignal: this.abortController!.signal,
       onStream: (event) => {
         this.onStream(event);
@@ -215,4 +254,45 @@ export class Agent {
   getWorkingDir(): string {
     return this.workingDir;
   }
+}
+
+/**
+ * Load .agents.md files following the Codex convention.
+ * Reads project-level (.agents.md in project root) and user-level (~/.agents.md).
+ * Both are combined into a single instructions block for the system prompt.
+ */
+async function loadAgentsMd(workingDir: string): Promise<string> {
+  const parts: string[] = [];
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
+
+  // Project-level .agents.md (also try AGENTS.md as fallback)
+  for (const name of ['.agents.md', 'AGENTS.md']) {
+    const projectPath = join(workingDir, name);
+    if (existsSync(projectPath)) {
+      try {
+        const content = await readFile(projectPath, 'utf-8');
+        if (content.trim()) {
+          parts.push(content.trim());
+        }
+        break; // Only load the first one found
+      } catch {
+        // Skip unreadable files
+      }
+    }
+  }
+
+  // User-level ~/.agents.md
+  const userPath = join(homeDir, '.agents.md');
+  if (existsSync(userPath)) {
+    try {
+      const content = await readFile(userPath, 'utf-8');
+      if (content.trim()) {
+        parts.push(content.trim());
+      }
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return parts.join('\n\n');
 }

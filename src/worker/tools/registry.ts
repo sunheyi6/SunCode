@@ -2,7 +2,7 @@ import { BaseTool, type Tool } from './types';
 import { createReadTool } from './read';
 import { createWriteTool } from './write';
 import { createEditTool } from './edit';
-import { createBashTool } from './bash';
+import { createBashTool, type BashToolCallbacks } from './bash';
 import { createGrepTool } from './grep';
 import { createGlobTool } from './glob';
 
@@ -70,13 +70,16 @@ export class ToolRegistry {
 /**
  * Create a ToolRegistry pre-populated with the 6 built-in tools.
  */
-export function createToolRegistry(workingDir: string): ToolRegistry {
+export function createToolRegistry(
+  workingDir: string,
+  callbacks?: BashToolCallbacks,
+): ToolRegistry {
   const registry = new ToolRegistry();
 
   registry.register(createReadTool(workingDir));
   registry.register(createWriteTool(workingDir));
   registry.register(createEditTool(workingDir));
-  registry.register(createBashTool(workingDir));
+  registry.register(createBashTool(workingDir, callbacks));
   registry.register(createGrepTool(workingDir));
   registry.register(createGlobTool(workingDir));
 

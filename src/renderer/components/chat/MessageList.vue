@@ -1,35 +1,62 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import { useChatStore } from '../../stores/chat';
-import UserMessage from './UserMessage.vue';
 import AssistantMessage from './AssistantMessage.vue';
+import UserMessage from './UserMessage.vue';
 
 const chatStore = useChatStore();
 const messageListRef = ref<HTMLElement | null>(null);
 
+/** Scroll to the bottom of the message list, after DOM layout is complete. */
+function scrollToBottom(): void {
+  const el = messageListRef.value;
+  if (!el) return;
+
+  // Double rAF ensures the browser has finished layout after v-html updates
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  });
+}
+
+/** Check if the user is visually near the bottom of the scroll area. */
+function isNearBottom(): boolean {
+  const el = messageListRef.value;
+  if (!el) return false;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+}
+
+// Scroll to bottom when a new message is added (user or assistant start)
 watch(
   () => chatStore.messages.length,
-  async () => {
-    await nextTick();
-    if (messageListRef.value) {
-      messageListRef.value.scrollTop = messageListRef.value.scrollHeight;
-    }
+  () => {
+    void nextTick().then(() => scrollToBottom());
   },
 );
 
+// Scroll to bottom continuously during streaming, as content grows
 watch(
   () => {
     const lastMsg = chatStore.messages[chatStore.messages.length - 1];
     return lastMsg?.content;
   },
-  async () => {
-    await nextTick();
-    if (messageListRef.value) {
-      const el = messageListRef.value;
-      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-      if (isNearBottom) {
-        el.scrollTop = el.scrollHeight;
-      }
+  () => {
+    // During streaming, always scroll to follow the output.
+    // When idle, only scroll if user is already near the bottom (let them read history).
+    if (chatStore.isStreaming || isNearBottom()) {
+      scrollToBottom();
+    }
+  },
+);
+
+// When streaming finishes, do a final scroll to ensure the complete response is visible
+watch(
+  () => chatStore.isStreaming,
+  (streaming) => {
+    if (!streaming) {
+      // Small delay to let the final DOM update settle, then ensure we're at the bottom
+      setTimeout(() => scrollToBottom(), 50);
     }
   },
 );

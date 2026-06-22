@@ -29,22 +29,24 @@ export abstract class BaseTool implements Tool {
     };
   }
 
-  protected success(output: string): ToolResult {
+  protected success(output: string, details?: ToolResult['details']): ToolResult {
     return {
       toolCallId: '',
       name: this.name,
       success: true,
       output,
+      details,
     };
   }
 
-  protected failure(error: string): ToolResult {
+  protected failure(error: string, details?: ToolResult['details']): ToolResult {
     return {
       toolCallId: '',
       name: this.name,
       success: false,
       error,
       output: '',
+      details,
     };
   }
 }

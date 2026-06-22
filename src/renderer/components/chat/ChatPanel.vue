@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useAgent } from '../../composables/useAgent';
+import ChatHeader from './ChatHeader.vue';
 import MessageList from './MessageList.vue';
 import ChatInput from './ChatInput.vue';
 import PendingPromptQueue from './PendingPromptQueue.vue';
@@ -13,6 +14,9 @@ function handleSend(text: string): void {
 
 <template>
   <div class="chat-panel">
+    <!-- Header: conversation title, folder, git branch -->
+    <ChatHeader />
+
     <!-- Message list -->
     <MessageList />
 

@@ -1,12 +1,18 @@
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
-import { BaseTool, p, obj } from './types';
+import type { BackgroundProcess } from '@shared/types';
+import { BaseTool, obj, p } from './types';
 
-export function createBashTool(workingDir: string) {
+export interface BashToolCallbacks {
+  onBackgroundStart?: (proc: BackgroundProcess) => void;
+  onBackgroundComplete?: (pid: number, exitCode: number) => void;
+}
+
+export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks) {
   return new (class BashTool extends BaseTool {
     readonly name = 'bash';
     readonly description =
-      'Executes a bash command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds. Use this tool to run tests, build commands, git operations, and other shell tasks.\n\nIMPORTANT: Each invocation runs in a fresh shell. Use && to chain commands.\n\nSecurity: Commands that are obviously destructive (rm -rf /, etc.) will be blocked.';
+      'Executes a bash command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds. Use this tool to run tests, build commands, git operations, and other shell tasks.\n\nIMPORTANT: Each invocation runs in a fresh shell. Use && to chain commands.\n\nSet run_in_background: true for long-running processes (dev servers, etc.). Background processes will keep running and their status is shown in the UI.\n\nSecurity: Commands that are obviously destructive (rm -rf /, etc.) will be blocked.';
     readonly parameters = obj(
       {
         command: p('string', 'The bash command to execute'),
@@ -15,15 +21,30 @@ export function createBashTool(workingDir: string) {
           'string',
           'A short description of what this command does (5-10 words preferred)',
         ),
+        run_in_background: p(
+          'boolean',
+          'Set to true to run this command in the background (e.g. for dev servers). The command will keep running across turns.',
+        ),
       },
       ['command'],
     );
 
     async execute(params: Record<string, unknown>): Promise<ReturnType<BaseTool['execute']>> {
-      const command = params.command as string;
+      const command = (params.command as string) || '';
       const timeout = Math.min((params.timeout as number) || 60000, 300000);
+      const runInBg = Boolean(params.run_in_background);
+      const cwd = resolve(workingDir);
+      const commandFailure = (message: string) =>
+        this.failure(message, {
+          type: 'command',
+          command,
+          cwd,
+          exitCode: null,
+          stdout: '',
+          stderr: message,
+        });
 
-      if (!command) return this.failure('command is required');
+      if (!command) return commandFailure('command is required');
 
       // Basic security check
       const dangerousPatterns = [
@@ -36,17 +57,62 @@ export function createBashTool(workingDir: string) {
 
       for (const pattern of dangerousPatterns) {
         if (pattern.test(command)) {
-          return this.failure(`Command blocked for security reasons: dangerous pattern detected`);
+          return commandFailure('Command blocked for security reasons: dangerous pattern detected');
         }
       }
 
+      const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
+      const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
+
+      // ── Background mode: spawn and detach ──
+      if (runInBg) {
+        try {
+          const child = spawn(shell, shellArgs, {
+            cwd,
+            env: process.env,
+            stdio: 'ignore',
+            detached: true,
+          });
+
+          const pid = child.pid;
+          if (!pid) return commandFailure('Failed to get PID for background process');
+
+          // Don't wait for the child — unref so it lives independently
+          child.unref();
+
+          const proc: BackgroundProcess = {
+            pid,
+            command,
+            startTime: Date.now(),
+            status: 'running',
+          };
+
+          // Notify listeners
+          callbacks?.onBackgroundStart?.(proc);
+
+          // Listen for completion in the background
+          child.on('close', (code) => {
+            callbacks?.onBackgroundComplete?.(pid, code ?? -1);
+          });
+          child.on('error', () => {
+            callbacks?.onBackgroundComplete?.(pid, -1);
+          });
+
+          return this.success(`Background process started (PID: ${pid})\nCommand: ${command}`, {
+            type: 'command',
+            command,
+            cwd,
+            exitCode: null,
+            stdout: '',
+            stderr: '',
+          });
+        } catch (error) {
+          return commandFailure(`Failed to start background process: ${(error as Error).message}`);
+        }
+      }
+
+      // ── Foreground mode: wait for completion ──
       return new Promise((resolveResult) => {
-        const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
-        const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
-
-        // Resolve working directory
-        const cwd = resolve(workingDir);
-
         const child = spawn(shell, shellArgs, {
           cwd,
           env: process.env,
@@ -59,7 +125,6 @@ export function createBashTool(workingDir: string) {
 
         child.stdout?.on('data', (data: Buffer) => {
           stdout += data.toString();
-          // Limit output size
           if (stdout.length > 100_000) {
             child.kill();
           }
@@ -73,7 +138,6 @@ export function createBashTool(workingDir: string) {
         });
 
         child.on('close', (code, signal) => {
-          // Truncate output if too long
           const truncateLimit = 50_000;
           const truncatedStdout =
             stdout.length > truncateLimit
@@ -99,11 +163,21 @@ export function createBashTool(workingDir: string) {
             parts.push('\n(no output)');
           }
 
-          resolveResult(this.success(parts.join('\n')));
+          resolveResult(
+            this.success(parts.join('\n'), {
+              type: 'command',
+              command,
+              cwd,
+              exitCode: code,
+              signal: signal || undefined,
+              stdout: truncatedStdout,
+              stderr: truncatedStderr,
+            }),
+          );
         });
 
         child.on('error', (error) => {
-          resolveResult(this.failure(`Command execution failed: ${error.message}`));
+          resolveResult(commandFailure(`Command execution failed: ${error.message}`));
         });
       });
     }

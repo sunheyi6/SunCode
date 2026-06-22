@@ -10,6 +10,8 @@ export interface AgentLoopInput {
   settings: AppSettings;
   workingDir: string;
   skillsContent: string;
+  /** Content from .agents.md (Codex convention) */
+  agentsMdContent?: string;
   abortSignal: AbortSignal;
   onStream: (event: StreamEvent) => void;
   onToolStart: (toolCallId: string, toolName: string) => void;
@@ -46,6 +48,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     settings,
     workingDir,
     skillsContent,
+    agentsMdContent,
     abortSignal,
     onStream,
     onToolStart,
@@ -84,6 +87,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     tools: toolDefs,
     skillsContent,
     maxTurns: settings.maxTurns,
+    agentsMdContent,
   });
 
   // Prepend system message
