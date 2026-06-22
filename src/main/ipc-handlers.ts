@@ -416,6 +416,18 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.handle('git:commit', async (_event, workingDir: string, message: string) => {
     try {
+      // Check if there are staged changes
+      const staged = execFileSync('git', ['diff', '--staged', '--name-only'], {
+        cwd: workingDir,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        timeout: 10000,
+      }).trim();
+
+      if (!staged) {
+        return { success: false, error: '没有暂存的更改。请先用 git add 暂存文件。' };
+      }
+
       const output = execFileSync('git', ['commit', '-m', message], {
         cwd: workingDir,
         encoding: 'utf-8',
