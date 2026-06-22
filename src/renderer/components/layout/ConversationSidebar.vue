@@ -13,9 +13,11 @@ onMounted(() => {
 });
 
 async function handleCreateSession(): Promise<void> {
-  const selectedPath = await bridge.selectDirectory();
-  if (!selectedPath) return; // User cancelled
-  await sessionsStore.createSession(selectedPath);
+  // Create a new conversation in the current project directory
+  const dir = sessionsStore.sessions.find(
+    (s) => s.id === sessionsStore.activeSessionId,
+  )?.workingDirectory;
+  await sessionsStore.createSession(dir);
 }
 
 function projectName(path: string): string {
