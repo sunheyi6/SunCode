@@ -7,6 +7,7 @@ import type {
   StreamEvent,
   AgentStatus,
   Message,
+  ToolCallContent,
   ToolResult,
   SessionMeta,
 } from '@shared/types';
@@ -66,12 +67,9 @@ const suncodeAPI = {
   },
 
   /** Listen for tool execution start */
-  onToolStart(callback: (toolCallId: string, toolName: string) => void): () => void {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      toolCallId: string,
-      toolName: string,
-    ): void => callback(toolCallId, toolName);
+  onToolStart(callback: (toolCall: ToolCallContent) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, toolCall: ToolCallContent): void =>
+      callback(toolCall);
     ipcRenderer.on('agent:tool-start', handler);
     return () => ipcRenderer.removeListener('agent:tool-start', handler);
   },

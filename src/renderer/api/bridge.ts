@@ -8,6 +8,7 @@ import type {
   StreamEvent,
   AgentStatus,
   Message,
+  ToolCallContent,
   ToolResult,
   FileNode,
   AppSettings,
@@ -46,7 +47,7 @@ export const bridge = {
     return api().onDone(callback);
   },
 
-  onToolStart(callback: (toolCallId: string, toolName: string) => void): () => void {
+  onToolStart(callback: (toolCall: ToolCallContent) => void): () => void {
     return api().onToolStart(callback);
   },
 

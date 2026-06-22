@@ -14,7 +14,7 @@ export interface AgentLoopInput {
   agentsMdContent?: string;
   abortSignal: AbortSignal;
   onStream: (event: StreamEvent) => void;
-  onToolStart: (toolCallId: string, toolName: string) => void;
+  onToolStart: (toolCall: ToolCallContent) => void;
   onToolEnd: (result: ToolResult) => void;
   initialTurnCount: number;
 }
@@ -63,6 +63,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const contextMessages: Message[] = [...initialMessages];
   let turnCount = initialTurnCount;
   const tokenUsage = { input: 0, output: 0, total: 0 };
+  const completedToolCalls: ToolCallContent[] = [];
 
   const identityReply = getIdentityReply(initialMessages);
   if (identityReply) {
@@ -72,6 +73,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       finalMessage: {
         role: 'assistant',
         content: [{ type: 'text', text: identityReply }],
+        toolCalls: completedToolCalls.length > 0 ? completedToolCalls : undefined,
       },
       turnCount: initialTurnCount + 1,
       tokenUsage,
@@ -169,13 +171,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           } else if (block.type === 'thinking') {
             thinkingText += (block.text as string) || '';
             onStream({ type: 'thinking_delta', text: block.text as string });
-          } else if (block.type === 'tool_use' || block.type === 'tool_call') {
+          } else if (block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
+            const args = block.arguments || block.input;
             const tc: ToolCallContent = {
               type: 'tool_call',
               id: (block.id as string) || `tc_${toolCalls.length}`,
               name: (block.name as string) || '',
               arguments:
-                typeof block.input === 'string' ? block.input : JSON.stringify(block.input || {}),
+                typeof args === 'string' ? args : JSON.stringify(args || {}),
             };
             toolCalls.push(tc);
           }
@@ -202,6 +205,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           finalMessage: {
             role: 'assistant',
             content: contentBlocks,
+            toolCalls: completedToolCalls.length > 0 ? completedToolCalls : undefined,
           },
           turnCount,
           tokenUsage,
@@ -219,7 +223,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           throw err2;
         }
 
-        onToolStart(tc.id, tc.name);
+        tc.status = 'running';
+        completedToolCalls.push(tc);
+        onToolStart({ ...tc });
 
         const tool = tools.find((t) => t.name === tc.name);
         if (!tool) {
@@ -230,6 +236,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             error: `未知工具: ${tc.name}`,
             output: '',
           };
+          tc.status = 'error';
+          tc.result = err;
           toolResults.push(err);
           onToolEnd(err);
           console.warn(`[AgentLoop] Unknown tool: ${tc.name}`);
@@ -247,6 +255,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             error: `参数解析失败: ${tc.arguments}`,
             output: '',
           };
+          tc.status = 'error';
+          tc.result = err;
           toolResults.push(err);
           onToolEnd(err);
           continue;
@@ -256,6 +266,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           console.log(`[AgentLoop] Executing tool: ${tc.name}`);
           const result = await tool.execute(params);
           result.toolCallId = tc.id;
+          tc.status = result.success ? 'done' : 'error';
+          tc.result = result;
           toolResults.push(result);
           onToolEnd(result);
           console.log(`[AgentLoop] Tool ${tc.name} result:`, result.success ? 'success' : 'error');
@@ -267,6 +279,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             error: (error as Error).message,
             output: '',
           };
+          tc.status = 'error';
+          tc.result = err;
           toolResults.push(err);
           onToolEnd(err);
         }
@@ -277,12 +291,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       if (assistantText) {
         assistantBlocks.push({ type: 'text', text: assistantText });
       }
+      // Include tool calls as content blocks so pi-ai can process them on subsequent turns
+      for (const tc of toolCalls) {
+        assistantBlocks.push({
+          type: 'toolCall',
+          id: tc.id,
+          name: tc.name,
+          arguments: safeParseJson(tc.arguments),
+        });
+      }
+      if (assistantBlocks.length === 0) {
+        assistantBlocks.push({ type: 'text', text: assistantText || 'Done.' });
+      }
       const assistantMsg2: Message = {
         role: 'assistant',
-        content:
-          assistantBlocks.length > 0
-            ? (assistantBlocks as Message['content'])
-            : assistantText || '处理中...',
+        content: assistantBlocks as Message['content'],
         toolCalls,
       };
       contextMessages.push(assistantMsg2);
@@ -310,6 +333,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     finalMessage: {
       role: 'assistant',
       content: `已达到最大轮次限制（${settings.maxTurns}轮）。请尝试更具体的提问，或调整设置中的最大轮次。`,
+      toolCalls: completedToolCalls.length > 0 ? completedToolCalls : undefined,
     },
     turnCount,
     tokenUsage,
@@ -369,6 +393,8 @@ function convertMessage(msg: Message): Record<string, unknown> {
         name: block.name,
         input: safeParseJson(block.arguments),
       };
+    // pi-ai uses 'toolCall' natively — pass through as-is
+    if (block.type === 'toolCall') return block;
     return block;
   });
 

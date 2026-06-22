@@ -7,6 +7,7 @@ import type {
   StreamEvent,
   AgentStatus,
   Message,
+  ToolCallContent,
   ToolResult,
   FileNode,
   AppSettings,
@@ -24,7 +25,7 @@ declare global {
       onStatusChange(callback: (status: AgentStatus) => void): () => void;
       onError(callback: (message: string) => void): () => void;
       onDone(callback: (message: Message) => void): () => void;
-      onToolStart(callback: (toolCallId: string, toolName: string) => void): () => void;
+      onToolStart(callback: (toolCall: ToolCallContent) => void): () => void;
       onToolEnd(callback: (result: ToolResult) => void): () => void;
 
       // File system

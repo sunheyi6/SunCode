@@ -108,7 +108,7 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
           settings,
           (event) => post({ type: 'stream', event }),
           (status) => post({ type: 'status', status }),
-          (toolCallId, toolName) => post({ type: 'toolStart', toolCallId, toolName }),
+          (toolCall) => post({ type: 'toolStart', toolCall }),
           (toolResult) => post({ type: 'toolEnd', toolResult }),
           (message) => post({ type: 'done', message }),
           (errorMsg) => post({ type: 'error', message: errorMsg }),

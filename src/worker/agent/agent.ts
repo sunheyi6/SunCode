@@ -29,7 +29,7 @@ export class Agent {
 
   private onStream: (event: StreamEvent) => void;
   private onStatus: (status: AgentStatus) => void;
-  private onToolStart: (toolCallId: string, toolName: string) => void;
+  private onToolStart: (toolCall: ToolCallContent) => void;
   private onToolEnd: (result: ToolResult) => void;
   private onDone: (message: Message) => void;
   private onError: (message: string) => void;
@@ -41,7 +41,7 @@ export class Agent {
     settings: AppSettings,
     onStream: (event: StreamEvent) => void,
     onStatus: (status: AgentStatus) => void,
-    onToolStart: (toolCallId: string, toolName: string) => void,
+    onToolStart: (toolCall: ToolCallContent) => void,
     onToolEnd: (result: ToolResult) => void,
     onDone: (message: Message) => void,
     onError: (message: string) => void,
@@ -213,9 +213,9 @@ export class Agent {
       onStream: (event) => {
         this.onStream(event);
       },
-      onToolStart: (id, name) => {
+      onToolStart: (toolCall) => {
         this.emitStatus('executing');
-        this.onToolStart(id, name);
+        this.onToolStart(toolCall);
       },
       onToolEnd: (result) => {
         this.onToolEnd(result);

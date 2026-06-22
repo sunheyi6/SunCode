@@ -92,7 +92,7 @@ function getAgentWorker(): Worker {
           mainWindow.webContents.send('agent:done', msg.message);
           break;
         case 'toolStart':
-          mainWindow.webContents.send('agent:tool-start', msg.toolCallId, msg.toolName);
+          mainWindow.webContents.send('agent:tool-start', msg.toolCall);
           break;
         case 'toolEnd':
           mainWindow.webContents.send('agent:tool-end', msg.toolResult);
