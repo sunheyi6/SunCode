@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, watch, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
@@ -399,6 +400,78 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.handle('git:getInfo', async (_event, workingDir: string) => {
     return getGitInfo(workingDir);
   });
+
+  ipcMain.handle('git:getStagedDiff', async (_event, workingDir: string) => {
+    try {
+      return execFileSync('git', ['diff', '--staged'], {
+        cwd: workingDir,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        timeout: 15000,
+      });
+    } catch {
+      return '';
+    }
+  });
+
+  ipcMain.handle('git:commit', async (_event, workingDir: string, message: string) => {
+    try {
+      const output = execFileSync('git', ['commit', '-m', message], {
+        cwd: workingDir,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        timeout: 30000,
+      });
+      return { success: true, output: output.trim() };
+    } catch (error) {
+      const err = error as { stderr?: string; message?: string };
+      return { success: false, error: err.stderr || err.message || 'Commit failed' };
+    }
+  });
+
+  ipcMain.handle(
+    'git:generateCommitMessage',
+    async (_event, workingDir: string) => {
+      try {
+        const diff = execFileSync('git', ['diff', '--staged'], {
+          cwd: workingDir,
+          encoding: 'utf-8',
+          maxBuffer: 1024 * 1024,
+          timeout: 15000,
+        });
+        if (!diff.trim()) return { message: 'chore: update' };
+
+        const pi = await import('@earendil-works/pi-ai');
+        const model = pi.getModel(currentSettings.activeProvider, currentSettings.activeModel);
+        const result = await pi.completeSimple(model, {
+          system:
+            'You are a commit message generator. Write a concise Conventional Commit message (e.g. "feat(scope): summary") based on the git diff. Use types: feat, fix, refactor, chore, docs, style, test. Keep it under 72 characters. Return ONLY the message, no quotes, no explanation.',
+          messages: [
+            {
+              role: 'user',
+              content: `Generate a Conventional Commit message for this diff:\n\n${diff.slice(0, 4000)}`,
+            },
+          ],
+          tools: [],
+        });
+
+        if (Array.isArray(result.content) && result.content.length > 0) {
+          const textBlock = result.content.find(
+            (b: { type: string; text?: string }) => b.type === 'text',
+          );
+          if (textBlock && 'text' in textBlock && textBlock.text) {
+            return { message: textBlock.text.trim() };
+          }
+        }
+        if (typeof result.content === 'string' && result.content.trim()) {
+          return { message: result.content.trim() };
+        }
+        return { message: 'chore: update' };
+      } catch {
+        return { message: 'chore: update' };
+      }
+    },
+  );
 
   // ===== Model Discovery =====
   ipcMain.handle('models:getProviders', async () => {

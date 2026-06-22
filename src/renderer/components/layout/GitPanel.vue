@@ -19,6 +19,11 @@ const gitStatus = ref<GitInfo>({
   stagedFiles: 0,
 });
 const collapsed = ref(true);
+const showCommitForm = ref(false);
+const commitMessage = ref('');
+const generatingCommitMsg = ref(false);
+const committing = ref(false);
+const commitFeedback = ref('');
 const now = ref(Date.now());
 const panelRef = ref<HTMLElement | null>(null);
 const { processes } = useBackgroundProcesses();
@@ -76,6 +81,58 @@ watch(
 
 function togglePanel(): void {
   collapsed.value = !collapsed.value;
+  if (collapsed.value) {
+    showCommitForm.value = false;
+  }
+}
+
+function toggleCommitForm(): void {
+  showCommitForm.value = !showCommitForm.value;
+  commitFeedback.value = '';
+  if (!showCommitForm.value) {
+    commitMessage.value = '';
+  }
+}
+
+async function generateCommitMessage(): Promise<void> {
+  const dir = activeSession.value?.workingDirectory;
+  if (!dir) return;
+  generatingCommitMsg.value = true;
+  try {
+    const result = await bridge.generateCommitMessage(dir);
+    commitMessage.value = result.message;
+  } catch {
+    commitFeedback.value = '❌ AI 生成失败';
+  } finally {
+    generatingCommitMsg.value = false;
+  }
+}
+
+async function doCommit(): Promise<void> {
+  const dir = activeSession.value?.workingDirectory;
+  if (!dir) return;
+  const msg = commitMessage.value.trim();
+  if (!msg) {
+    commitFeedback.value = '❌ 提交信息不能为空';
+    return;
+  }
+  committing.value = true;
+  commitFeedback.value = '';
+  try {
+    const result = await bridge.gitCommit(dir, msg);
+    if (result.success) {
+      commitFeedback.value = '✓ 提交成功';
+      commitMessage.value = '';
+      showCommitForm.value = false;
+      void refreshGit();
+    } else {
+      commitFeedback.value = `❌ ${result.error || '提交失败'}`;
+    }
+  } catch {
+    commitFeedback.value = '❌ 提交失败';
+  } finally {
+    committing.value = false;
+  }
 }
 
 function onDocumentClick(e: MouseEvent): void {
@@ -134,9 +191,37 @@ onUnmounted(() => {
         </span>
       </div>
       <div class="info-row"><span>⑂　{{ gitStatus.branch || 'HEAD' }}</span></div>
-      <button type="button" class="commit-row" title="提交功能将在后续流程中接入">
-        <span>─　提交</span><span>•••</span>
+      <button type="button" class="commit-row" title="创建提交" @click="toggleCommitForm">
+        <span>─　提交</span><span>{{ showCommitForm ? '收起' : '•••' }}</span>
       </button>
+
+      <div v-if="showCommitForm" class="commit-form">
+        <textarea
+          v-model="commitMessage"
+          class="commit-textarea"
+          placeholder="输入提交信息（留空可点 AI 生成）"
+          rows="3"
+        />
+        <div class="commit-actions">
+          <button
+            type="button"
+            class="ai-gen-btn"
+            :disabled="generatingCommitMsg"
+            @click="generateCommitMessage"
+          >
+            {{ generatingCommitMsg ? '⚡ 生成中...' : '🤖 AI 生成' }}
+          </button>
+          <button
+            type="button"
+            class="commit-submit-btn"
+            :disabled="committing"
+            @click="doCommit"
+          >
+            {{ committing ? '⏳ 提交中...' : '提交' }}
+          </button>
+        </div>
+        <div v-if="commitFeedback" class="commit-feedback">{{ commitFeedback }}</div>
+      </div>
 
       <div class="section-divider" />
       <section class="process-section">
@@ -334,5 +419,84 @@ onUnmounted(() => {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.commit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 14px 12px;
+}
+
+.commit-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: 8px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  resize: vertical;
+  min-height: 56px;
+}
+
+.commit-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.commit-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.commit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-gen-btn,
+.commit-submit-btn {
+  flex: 1;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ai-gen-btn {
+  background: var(--color-surface);
+  color: var(--color-accent);
+}
+
+.ai-gen-btn:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.ai-gen-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.commit-submit-btn {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+.commit-submit-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.commit-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.commit-feedback {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  text-align: center;
 }
 </style>

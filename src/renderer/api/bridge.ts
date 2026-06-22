@@ -141,6 +141,18 @@ export const bridge = {
     return api().getGitInfo(workingDir);
   },
 
+  async getStagedDiff(workingDir: string): Promise<string> {
+    return api().getStagedDiff(workingDir);
+  },
+
+  async gitCommit(workingDir: string, message: string): Promise<{ success: boolean; output?: string; error?: string }> {
+    return api().gitCommit(workingDir, message);
+  },
+
+  async generateCommitMessage(workingDir: string): Promise<{ message: string }> {
+    return api().generateCommitMessage(workingDir);
+  },
+
   // ===== Background Processes =====
   onBgProcessStarted(callback: (proc: BackgroundProcess) => void): () => void {
     return api().onBgProcessStarted(callback);

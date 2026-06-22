@@ -72,6 +72,9 @@ declare global {
 
       // Git
       getGitInfo(workingDir: string): Promise<GitInfo>;
+      getStagedDiff(workingDir: string): Promise<string>;
+      gitCommit(workingDir: string, message: string): Promise<{ success: boolean; output?: string; error?: string }>;
+      generateCommitMessage(workingDir: string): Promise<{ message: string }>;
 
       // Background Processes
       onBgProcessStarted(callback: (proc: BackgroundProcess) => void): () => void;

@@ -208,6 +208,21 @@ const suncodeAPI = {
     return ipcRenderer.invoke('git:getInfo', workingDir);
   },
 
+  /** Get staged diff for commit message generation */
+  async getStagedDiff(workingDir: string): Promise<string> {
+    return ipcRenderer.invoke('git:getStagedDiff', workingDir);
+  },
+
+  /** Execute git commit */
+  async gitCommit(workingDir: string, message: string): Promise<{ success: boolean; output?: string; error?: string }> {
+    return ipcRenderer.invoke('git:commit', workingDir, message);
+  },
+
+  /** Generate commit message via AI */
+  async generateCommitMessage(workingDir: string): Promise<{ message: string }> {
+    return ipcRenderer.invoke('git:generateCommitMessage', workingDir);
+  },
+
   // ===== Background Processes =====
 
   /** Listen for background process started events */
