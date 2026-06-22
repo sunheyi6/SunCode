@@ -1,0 +1,78 @@
+/* CodeMirror theme overrides for SunCode dark theme */
+.cm-editor {
+  background: var(--color-bg-tertiary) !important;
+  color: var(--color-text) !important;
+  border-radius: var(--border-radius);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.cm-editor .cm-gutters {
+  background: var(--color-bg-secondary) !important;
+  border-right: 1px solid var(--border-color) !important;
+  color: var(--color-text-muted) !important;
+}
+
+.cm-editor .cm-activeLineGutter {
+  background: var(--color-surface) !important;
+}
+
+.cm-editor .cm-activeLine {
+  background: var(--color-surface) !important;
+}
+
+.cm-editor .cm-cursor {
+  border-left-color: var(--color-accent) !important;
+}
+
+.cm-editor .cm-selectionBackground {
+  background: var(--color-accent) !important;
+  opacity: 0.3;
+}
+
+/* CodeMirror merge view */
+.cm-merge-view {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+}
+
+.cm-merge-view .cm-merge-pane {
+  background: var(--color-bg-tertiary);
+}
+
+/* Inline code blocks in chat */
+.code-block-wrapper {
+  position: relative;
+  margin: var(--spacing-sm) 0;
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px var(--spacing-md);
+  background: var(--color-surface);
+  border: 1px solid var(--border-color);
+  border-bottom: none;
+  border-radius: var(--border-radius) var(--border-radius) 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.code-block-header + .cm-editor {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.copy-btn {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.copy-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}

@@ -1,0 +1,65 @@
+:root {
+  /* Catppuccin Mocha-inspired palette */
+  --color-bg: #1e1e2e;
+  --color-bg-secondary: #1c1c2a;
+  --color-bg-tertiary: #16161f;
+  --color-surface: #28283a;
+  --color-surface-hover: #33334a;
+  --color-overlay: #585870;
+  --color-text: #cdd6f4;
+  --color-text-secondary: #a6adc8;
+  --color-text-muted: #6c7086;
+  --color-accent: #89b4fa;
+  --color-accent-hover: #74c7ec;
+  --color-green: #a6e3a1;
+  --color-red: #f38ba8;
+  --color-yellow: #f9e2af;
+  --color-orange: #fab387;
+  --color-purple: #cba6f7;
+  --color-teal: #94e2d5;
+
+  /* Subtle borders — much softer than before */
+  --border-color: rgba(108, 112, 134, 0.15);
+  --border-color-strong: rgba(108, 112, 134, 0.25);
+  --border-radius: 8px;
+  --border-radius-sm: 5px;
+
+  /* spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  /* font */
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+
+  /* sizes */
+  --sidebar-width: 260px;
+  --statusbar-height: 28px;
+  --input-height: 80px;
+}
+
+/* Light theme */
+:root[data-theme='light'] {
+  --color-bg: #eff1f5;
+  --color-bg-secondary: #e8eaf0;
+  --color-bg-tertiary: #dce0e8;
+  --color-surface: #e0e3eb;
+  --color-surface-hover: #ccd0da;
+  --color-overlay: #9ca0b0;
+  --color-text: #4c4f69;
+  --color-text-secondary: #5c5f77;
+  --color-text-muted: #8c8fa1;
+  --color-accent: #1e66f5;
+  --color-accent-hover: #2a6ef5;
+  --color-green: #40a02b;
+  --color-red: #d20f39;
+  --color-yellow: #df8e1d;
+  --color-orange: #fe640b;
+  --color-purple: #8839ef;
+  --color-teal: #179299;
+  --border-color: rgba(140, 143, 161, 0.15);
+  --border-color-strong: rgba(140, 143, 161, 0.25);
+}

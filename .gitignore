@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+release/
+
+# Local SunCode configuration and API keys
+.suncode/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+nul
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# TypeScript cache
+*.tsbuildinfo

@@ -1,0 +1,121 @@
+/**
+ * Type-safe wrapper around the window.suncode API.
+ * Provides a clean interface for Vue components to interact with the agent.
+ */
+import type { StreamEvent, AgentStatus, Message, ToolResult, FileNode, AppSettings, SessionMeta } from '@shared/types';
+
+const api = (): Window['suncode'] => window.suncode;
+
+export const bridge = {
+  // ===== Agent =====
+  prompt(text: string): void {
+    api().prompt(text);
+  },
+
+  abort(): void {
+    api().abort();
+  },
+
+  continue(): void {
+    api().continue();
+  },
+
+  onStreamEvent(callback: (event: StreamEvent) => void): () => void {
+    return api().onStreamEvent(callback);
+  },
+
+  onStatusChange(callback: (status: AgentStatus) => void): () => void {
+    return api().onStatusChange(callback);
+  },
+
+  onError(callback: (message: string) => void): () => void {
+    return api().onError(callback);
+  },
+
+  onDone(callback: (message: Message) => void): () => void {
+    return api().onDone(callback);
+  },
+
+  onToolStart(callback: (toolCallId: string, toolName: string) => void): () => void {
+    return api().onToolStart(callback);
+  },
+
+  onToolEnd(callback: (result: ToolResult) => void): () => void {
+    return api().onToolEnd(callback);
+  },
+
+  // ===== Files =====
+  async getFileTree(rootPath?: string): Promise<FileNode[]> {
+    return api().getFileTree(rootPath);
+  },
+
+  async readFile(filePath: string, offset?: number, limit?: number): Promise<string> {
+    return api().readFile(filePath, offset, limit);
+  },
+
+  async selectDirectory(): Promise<string | null> {
+    return api().selectDirectory();
+  },
+
+  // ===== Session =====
+  async getSessions(): Promise<SessionMeta[]> {
+    return api().getSessions();
+  },
+
+  async createSession(name: string): Promise<SessionMeta> {
+    return api().createSession(name);
+  },
+
+  async loadSession(id: string): Promise<Message[]> {
+    return api().loadSession(id);
+  },
+
+  async saveMessage(message: Message): Promise<void> {
+    return api().saveMessage(message);
+  },
+
+  // ===== Settings =====
+  async getSettings(): Promise<AppSettings> {
+    return api().getSettings();
+  },
+
+  async updateSettings(partial: Partial<AppSettings>): Promise<AppSettings> {
+    return api().updateSettings(partial);
+  },
+
+  onSettingsChanged(callback: (settings: AppSettings) => void): () => void {
+    return api().onSettingsChanged(callback);
+  },
+
+  // ===== Model Discovery =====
+  async getProviders(): Promise<string[]> {
+    return api().getProviders();
+  },
+
+  async getModels(provider: string): Promise<Array<{
+    id: string; name: string; provider: string;
+    contextWindow: number; maxTokens: number;
+    supportsReasoning: boolean; supportsImages: boolean;
+  }>> {
+    return api().getModels(provider);
+  },
+
+  async getRecommendedModels(): Promise<Array<{ provider: string; model: string; label: string }>> {
+    return api().getRecommendedModels();
+  },
+
+  // ===== API Keys =====
+  async setApiKey(provider: string, key: string): Promise<boolean> {
+    return api().setApiKey(provider, key);
+  },
+
+  // ===== Dialog =====
+  async confirm(title: string, message: string): Promise<boolean> {
+    return api().confirm(title, message);
+  },
+
+  // ===== App =====
+  async getWorkingDir(): Promise<string> {
+    return api().getWorkingDir();
+  },
+};

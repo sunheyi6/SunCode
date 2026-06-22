@@ -1,0 +1,69 @@
+import { defineStore } from 'pinia';
+import { ref } from 'vue';
+import type { AppSettings } from '@shared/types';
+import { bridge } from '../api/bridge';
+
+export const useSettingsStore = defineStore('settings', () => {
+  const settings = ref<AppSettings>({
+    activeModel: 'claude-sonnet-4-5',
+    activeProvider: 'anthropic',
+    thinkingLevel: 'medium',
+    maxTurns: 50,
+    autoCompact: true,
+    compactThreshold: 0.7,
+    theme: 'system',
+    mcpServers: [],
+    skills: [],
+    envApiKeys: {},
+  });
+
+  const isLoaded = ref(false);
+
+  async function load(): Promise<void> {
+    try {
+      const s = await bridge.getSettings();
+      settings.value = { ...settings.value, ...s };
+      applyTheme(settings.value.theme);
+      isLoaded.value = true;
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    }
+  }
+
+  async function update(partial: Partial<AppSettings>): Promise<void> {
+    try {
+      const updated = await bridge.updateSettings(partial);
+      settings.value = updated;
+    } catch (error) {
+      console.error('Failed to update settings:', error);
+    }
+  }
+
+  function resolveTheme(theme: AppSettings['theme']): 'light' | 'dark' {
+    if (theme !== 'system') return theme;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  function applyTheme(theme: AppSettings['theme']): void {
+    document.documentElement.setAttribute('data-theme', resolveTheme(theme));
+  }
+
+  function setTheme(theme: AppSettings['theme']): void {
+    applyTheme(theme);
+    update({ theme });
+  }
+
+  const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+  systemTheme.addEventListener('change', () => {
+    if (settings.value.theme === 'system') applyTheme('system');
+  });
+
+  return {
+    settings,
+    isLoaded,
+    load,
+    update,
+    applyTheme,
+    setTheme,
+  };
+});
