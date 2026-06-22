@@ -72,13 +72,15 @@ export function useAgent() {
     );
 
     cleanups.push(
-      bridge.onToolStart((toolCallId, toolName) => {
-        agentStore.startToolExecution(toolCallId, toolName);
+      bridge.onToolStart((toolCall) => {
+        chatStore.startToolExecution(toolCall);
+        agentStore.startToolExecution(toolCall.id, toolCall.name);
       }),
     );
 
     cleanups.push(
       bridge.onToolEnd((result) => {
+        chatStore.endToolExecution(result);
         agentStore.endToolExecution(result);
       }),
     );

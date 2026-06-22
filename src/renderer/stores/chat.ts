@@ -1,7 +1,8 @@
-import type { Message, StreamEvent, ToolCallContent } from '@shared/types';
+import type { Message, StreamEvent, ToolCallContent, ToolResult } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';
+import { completeToolCall, startToolCall } from './tool-call-state';
 
 export interface ChatMessage {
   id: string;
@@ -52,6 +53,28 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming.value = true;
   }
 
+  /**
+   * Called when the worker emits a toolStart event with the full ToolCallContent.
+   * Creates or updates a running tool call on the current assistant message.
+   */
+  function startToolExecution(toolCall: ToolCallContent): void {
+    const msg = currentAssistantMsg;
+    if (!msg) return;
+    if (!msg.toolCalls) msg.toolCalls = [];
+    startToolCall(msg.toolCalls, toolCall);
+  }
+
+  /**
+   * Called when the worker emits a toolEnd event.
+   * Attaches the completed result to the matching tool call on the current assistant message.
+   */
+  function endToolExecution(result: ToolResult): void {
+    const msg = currentAssistantMsg;
+    if (!msg) return;
+    if (!msg.toolCalls) msg.toolCalls = [];
+    completeToolCall(msg.toolCalls, result);
+  }
+
   function handleStreamEvent(event: StreamEvent): void {
     const msg = currentAssistantMsg;
     if (!msg) return;
@@ -68,15 +91,12 @@ export const useChatStore = defineStore('chat', () => {
       case 'text_end':
         msg.isStreaming = false;
         isStreaming.value = false;
-        // Save message
-        bridge.saveMessage({
-          role: 'assistant',
-          content: [{ type: 'text', text: msg.content }],
-        });
+        // Message persistence is deferred to the 'done' event so that
+        // completed tool calls are included in the saved message.
         break;
       case 'toolcall_start':
         if (!msg.toolCalls) msg.toolCalls = [];
-        msg.toolCalls.push({
+        startToolCall(msg.toolCalls, {
           type: 'tool_call',
           id: event.toolCallId || '',
           name: event.toolName || '',
@@ -91,9 +111,20 @@ export const useChatStore = defineStore('chat', () => {
         break;
       }
       case 'toolcall_end':
-        // Tool call completed
+        // Tool call argument streaming complete
         break;
       case 'done':
+        // Merge tool calls from the worker's final message (repairs any missed live events)
+        if (event.message?.toolCalls?.length) {
+          if (!msg.toolCalls) msg.toolCalls = [];
+          for (const tc of event.message.toolCalls) {
+            startToolCall(msg.toolCalls, tc);
+            if (tc.result) {
+              completeToolCall(msg.toolCalls, tc.result);
+            }
+          }
+        }
+
         if (!msg.content && event.message) {
           const finalContent = event.message.content;
           if (typeof finalContent === 'string') {
@@ -105,6 +136,18 @@ export const useChatStore = defineStore('chat', () => {
               .join('');
           }
         }
+
+        // Build and persist the complete assistant message
+        const savedMessage: Message = {
+          role: 'assistant',
+          content: [
+            ...(msg.thinking ? [{ type: 'thinking' as const, text: msg.thinking }] : []),
+            { type: 'text' as const, text: msg.content },
+          ],
+          toolCalls: msg.toolCalls,
+        };
+        void bridge.saveMessage(savedMessage);
+
         msg.isStreaming = false;
         isStreaming.value = false;
         currentAssistantMsg = null;
@@ -175,6 +218,8 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     addUserMessage,
     startAssistantMessage,
+    startToolExecution,
+    endToolExecution,
     handleStreamEvent,
     finishCurrentResponse,
     clearMessages,

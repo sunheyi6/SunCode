@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
+import ToolOperationList from '../tools/ToolOperationList.vue';
 import StreamingText from './StreamingText.vue';
 
 const props = defineProps<{
@@ -10,6 +11,44 @@ const props = defineProps<{
 const hasContent = computed(() => props.message.content.length > 0);
 const hasThinking = computed(() => Boolean(props.message.thinking));
 const hasToolCalls = computed(() => Boolean(props.message.toolCalls?.length));
+const copied = ref(false);
+
+const timeLabel = computed(() => {
+  const d = new Date(props.message.timestamp);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+});
+
+const fullTextForCopy = computed(() => {
+  const parts: string[] = [];
+  if (props.message.thinking) {
+    parts.push(props.message.thinking);
+  }
+  if (props.message.content) {
+    parts.push(props.message.content);
+  }
+  return parts.join('\n\n');
+});
+
+async function copyContent() {
+  try {
+    await navigator.clipboard.writeText(fullTextForCopy.value);
+    copied.value = true;
+    setTimeout(() => { copied.value = false; }, 1500);
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = fullTextForCopy.value;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    copied.value = true;
+    setTimeout(() => { copied.value = false; }, 1500);
+  }
+}
 </script>
 
 <template>
@@ -44,21 +83,30 @@ const hasToolCalls = computed(() => Boolean(props.message.toolCalls?.length));
       </div>
 
       <!-- 工具调用 -->
-      <div v-if="hasToolCalls && message.toolCalls" class="tool-calls">
-        <div
-          v-for="tc in message.toolCalls"
-          :key="tc.id"
-          class="tool-call-badge"
-        >
-          🔧 {{ tc.name }}
-        </div>
-      </div>
+      <ToolOperationList
+        v-if="hasToolCalls && message.toolCalls"
+        :calls="message.toolCalls"
+      />
+    </div>
+    <div v-if="!message.isStreaming" class="message-footer">
+      <span class="message-time">{{ timeLabel }}</span>
+      <button
+        class="copy-btn"
+        :class="{ copied }"
+        title="复制回复"
+        @click="copyContent"
+      >
+        {{ copied ? '✓ 已复制' : '📋' }}
+      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
 .assistant-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   padding: var(--spacing-sm) var(--spacing-xl);
 }
 
@@ -119,19 +167,43 @@ const hasToolCalls = computed(() => Boolean(props.message.toolCalls?.length));
   40% { opacity: 1; transform: scale(1); }
 }
 
-.tool-calls {
+.message-footer {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
-  margin-top: 8px;
+  margin-top: 2px;
+  padding-left: 4px;
 }
 
-.tool-call-badge {
+.message-time {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.copy-btn {
+  padding: 1px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
   font-size: 12px;
-  padding: 2px 8px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+}
+
+.assistant-message:hover .copy-btn {
+  opacity: 0.7;
+}
+
+.copy-btn:hover {
+  opacity: 1 !important;
   background: var(--color-surface);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  color: var(--color-text-secondary);
+}
+
+.copy-btn.copied {
+  opacity: 1;
+  color: var(--color-green);
+  font-size: 11px;
 }
 </style>
