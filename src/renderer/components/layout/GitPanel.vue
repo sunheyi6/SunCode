@@ -83,6 +83,8 @@ function togglePanel(): void {
   collapsed.value = !collapsed.value;
   if (collapsed.value) {
     showCommitForm.value = false;
+  } else {
+    void refreshGit();
   }
 }
 
@@ -154,19 +156,34 @@ function onDocumentClick(e: MouseEvent): void {
   }
 }
 
-let timer: ReturnType<typeof setInterval> | undefined;
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+let gitTimer: ReturnType<typeof setInterval> | undefined;
 
 onMounted(() => {
   void refreshGit();
   document.addEventListener('click', onDocumentClick);
-  timer = setInterval(() => {
+  clockTimer = setInterval(() => {
     now.value = Date.now();
   }, 1000);
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick);
-  if (timer) clearInterval(timer);
+  if (clockTimer) clearInterval(clockTimer);
+  if (gitTimer) clearInterval(gitTimer);
+});
+
+// Periodically refresh git info while the panel is expanded
+watch(collapsed, (isCollapsed) => {
+  if (gitTimer) {
+    clearInterval(gitTimer);
+    gitTimer = undefined;
+  }
+  if (!isCollapsed) {
+    gitTimer = setInterval(() => {
+      void refreshGit();
+    }, 15000);
+  }
 });
 </script>
 
