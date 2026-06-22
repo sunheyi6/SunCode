@@ -56,4 +56,23 @@ describe('countLineChanges', () => {
       removedLines: 50_000,
     });
   });
+
+  test('keeps exact counts when bounded Myers work leaves matching middle lines', () => {
+    const sharedLines = Array.from({ length: 100 }, (_, index) => `shared-${index}`);
+    const oldContent = [
+      ...Array.from({ length: 1_000 }, (_, index) => `old-before-${index}`),
+      ...sharedLines,
+      ...Array.from({ length: 1_000 }, (_, index) => `old-after-${index}`),
+    ].join('\n');
+    const newContent = [
+      ...Array.from({ length: 1_000 }, (_, index) => `new-before-${index}`),
+      ...sharedLines,
+      ...Array.from({ length: 1_000 }, (_, index) => `new-after-${index}`),
+    ].join('\n');
+
+    expect(countLineChanges(oldContent, newContent, { maxWork: 1 })).toEqual({
+      addedLines: 2_000,
+      removedLines: 2_000,
+    });
+  });
 });

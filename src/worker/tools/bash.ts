@@ -66,49 +66,81 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
 
       // ── Background mode: spawn and detach ──
       if (runInBg) {
-        try {
-          const child = spawn(shell, shellArgs, {
-            cwd,
-            env: process.env,
-            stdio: 'ignore',
-            detached: true,
-          });
+        return new Promise((resolveResult) => {
+          let child: ReturnType<typeof spawn>;
+          try {
+            child = spawn(shell, shellArgs, {
+              cwd,
+              env: process.env,
+              stdio: 'ignore',
+              detached: true,
+            });
+          } catch (error) {
+            resolveResult(
+              commandFailure(`Failed to start background process: ${(error as Error).message}`),
+            );
+            return;
+          }
 
-          const pid = child.pid;
-          if (!pid) return commandFailure('Failed to get PID for background process');
+          let startupSettled = false;
+          let startedPid: number | undefined;
+          let completionNotified = false;
 
-          // Don't wait for the child — unref so it lives independently
-          child.unref();
-
-          const proc: BackgroundProcess = {
-            pid,
-            command,
-            startTime: Date.now(),
-            status: 'running',
+          const failStartup = (message: string) => {
+            if (startupSettled) return;
+            startupSettled = true;
+            resolveResult(commandFailure(`Failed to start background process: ${message}`));
           };
 
-          // Notify listeners
-          callbacks?.onBackgroundStart?.(proc);
+          const notifyComplete = (exitCode: number) => {
+            if (!startedPid || completionNotified) return;
+            completionNotified = true;
+            callbacks?.onBackgroundComplete?.(startedPid, exitCode);
+          };
 
-          // Listen for completion in the background
+          child.on('error', (error) => {
+            failStartup(error.message);
+            notifyComplete(-1);
+          });
+
           child.on('close', (code) => {
-            callbacks?.onBackgroundComplete?.(pid, code ?? -1);
-          });
-          child.on('error', () => {
-            callbacks?.onBackgroundComplete?.(pid, -1);
+            if (!startupSettled) {
+              failStartup(`process closed before startup (exit code: ${code ?? 'null'})`);
+            }
+            notifyComplete(code ?? -1);
           });
 
-          return this.success(`Background process started (PID: ${pid})\nCommand: ${command}`, {
-            type: 'command',
-            command,
-            cwd,
-            exitCode: null,
-            stdout: '',
-            stderr: '',
+          child.once('spawn', () => {
+            const pid = child.pid;
+            if (!pid) {
+              failStartup('Failed to get PID');
+              return;
+            }
+
+            startupSettled = true;
+            startedPid = pid;
+            child.unref();
+
+            const proc: BackgroundProcess = {
+              pid,
+              command,
+              startTime: Date.now(),
+              status: 'running',
+            };
+            callbacks?.onBackgroundStart?.(proc);
+
+            resolveResult(
+              this.success(`Background process started (PID: ${pid})\nCommand: ${command}`, {
+                type: 'command',
+                command,
+                cwd,
+                exitCode: null,
+                stdout: '',
+                stderr: '',
+              }),
+            );
           });
-        } catch (error) {
-          return commandFailure(`Failed to start background process: ${(error as Error).message}`);
-        }
+        });
       }
 
       // ── Foreground mode: wait for completion ──

@@ -66,6 +66,46 @@ function shortestEditDistance(
   return undefined;
 }
 
+function longestCommonSubsequenceLength(oldLines: string[], newLines: string[]): number {
+  const newLinePositions = new Map<string, number[]>();
+
+  for (let index = 0; index < newLines.length; index += 1) {
+    const line = newLines[index];
+    const positions = newLinePositions.get(line);
+    if (positions) {
+      positions.push(index);
+    } else {
+      newLinePositions.set(line, [index]);
+    }
+  }
+
+  const increasingTails: number[] = [];
+
+  for (const line of oldLines) {
+    const positions = newLinePositions.get(line);
+    if (!positions) continue;
+
+    for (let positionIndex = positions.length - 1; positionIndex >= 0; positionIndex -= 1) {
+      const position = positions[positionIndex];
+      let low = 0;
+      let high = increasingTails.length;
+
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (increasingTails[middle] < position) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+
+      increasingTails[low] = position;
+    }
+  }
+
+  return increasingTails.length;
+}
+
 export function countLineChanges(
   oldContent: string,
   newContent: string,
@@ -95,9 +135,10 @@ export function countLineChanges(
   const distance = shortestEditDistance(oldMiddle, newMiddle, maxWork);
 
   if (distance === undefined) {
+    const commonLines = longestCommonSubsequenceLength(oldMiddle, newMiddle);
     return {
-      addedLines: newMiddle.length,
-      removedLines: oldMiddle.length,
+      addedLines: newMiddle.length - commonLines,
+      removedLines: oldMiddle.length - commonLines,
     };
   }
 

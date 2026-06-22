@@ -1,3 +1,4 @@
+// @ts-expect-error Bun test types are provided by the Bun runtime.
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
