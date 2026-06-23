@@ -212,7 +212,9 @@ export type WorkerOutMessage =
   | { type: 'toolStart'; toolCall: ToolCallContent }
   | { type: 'toolEnd'; toolResult: ToolResult }
   | { type: 'bgProcessStarted'; process: BackgroundProcess }
-  | { type: 'bgProcessCompleted'; pid: number; exitCode: number };
+  | { type: 'bgProcessCompleted'; pid: number; exitCode: number }
+  | { type: 'runStarted'; runId: string }
+  | { type: 'runEvent'; event: RunEvent };
 
 /** Streaming event types from the LLM */
 export type StreamEventType =
@@ -245,7 +247,40 @@ export interface StreamEvent {
   hasToolCalls?: boolean;
   error?: string;
   message?: Message; // final message on 'done'
+  /** Unique identifier for the current agent run (LLM invocation chain). */
+  runId?: string;
 }
+
+// ===== Run Event Types =====
+
+/** Unique identifier for an agent run. */
+export type RunId = string;
+
+/** Events recorded in the per-run JSONL event log. */
+export type RunEvent =
+  | { type: 'run_started'; runId: RunId; timestamp: string }
+  | { type: 'turn_started'; runId: RunId; turnNumber: number; timestamp: string }
+  | { type: 'stream_event'; runId: RunId; event: StreamEvent; timestamp: string }
+  | { type: 'tool_started'; runId: RunId; toolCallId: string; toolName: string; timestamp: string }
+  | {
+      type: 'tool_completed';
+      runId: RunId;
+      toolCallId: string;
+      toolName: string;
+      success: boolean;
+      timestamp: string;
+    }
+  | {
+      type: 'turn_completed';
+      runId: RunId;
+      turnNumber: number;
+      hasToolCalls: boolean;
+      timestamp: string;
+    }
+  | { type: 'run_completed'; runId: RunId; turnCount: number; timestamp: string }
+  | { type: 'run_failed'; runId: RunId; error: string; timestamp: string }
+  | { type: 'run_aborted'; runId: RunId; timestamp: string }
+  | { type: 'run_recovered'; runId: RunId; reason: string; timestamp: string };
 
 // ===== IPC API Types (Renderer ↔ Main) =====
 

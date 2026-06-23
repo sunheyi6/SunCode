@@ -62,9 +62,7 @@ export class WindowManager {
       </body>
       </html>
     `;
-    this.settingsWindow.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent(settingsHtml)}`,
-    );
+    this.settingsWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(settingsHtml)}`);
 
     this.settingsWindow.on('closed', () => {
       this.settingsWindow = null;

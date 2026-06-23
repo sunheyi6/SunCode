@@ -107,7 +107,11 @@ export function createModelRegistry() {
         { provider: 'google', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
         { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
         { provider: 'xai', model: 'grok-code-fast-1', label: 'Grok Code Fast' },
-        { provider: 'openrouter', model: 'openai/gpt-5.1-codex', label: 'GPT-5.1 Codex (OpenRouter)' },
+        {
+          provider: 'openrouter',
+          model: 'openai/gpt-5.1-codex',
+          label: 'GPT-5.1 Codex (OpenRouter)',
+        },
       ];
     },
 

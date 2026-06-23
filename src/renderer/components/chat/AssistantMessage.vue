@@ -9,9 +9,7 @@ const props = defineProps<{
 }>();
 
 const hasContent = computed(() => props.message.content.length > 0);
-const hasThinking = computed(
-  () => props.message.isStreaming || Boolean(props.message.thinking),
-);
+const hasThinking = computed(() => props.message.isStreaming || Boolean(props.message.thinking));
 const hasToolCalls = computed(() => Boolean(props.message.toolCalls?.length));
 const copied = ref(false);
 
@@ -64,16 +62,16 @@ const fullTextForCopy = computed(() => {
 const thinkingTimeline = computed(() => {
   const thinking = props.message.thinking || '';
   const calls = props.message.toolCalls ?? [];
-  type Entry = { type: 'thinking'; text: string } | { type: 'tool'; calls: [typeof calls[number]] };
+  type Entry =
+    | { type: 'thinking'; text: string }
+    | { type: 'tool'; calls: [(typeof calls)[number]] };
 
   if (calls.length === 0) {
     return thinking ? [{ type: 'thinking' as const, text: thinking }] : [];
   }
 
   // Sort by thinkingOffset so chunks appear in the order the model produced them
-  const sorted = [...calls].sort(
-    (a, b) => (a.thinkingOffset ?? 0) - (b.thinkingOffset ?? 0),
-  );
+  const sorted = [...calls].sort((a, b) => (a.thinkingOffset ?? 0) - (b.thinkingOffset ?? 0));
 
   const timeline: Entry[] = [];
   let prevEnd = 0;
@@ -131,7 +129,10 @@ const thinkingSummary = computed(() => {
   const parts: string[] = ['🧠 思考过程'];
   if (max > 0) parts.push(` (${max}轮)`);
   if (calls.length > 0) {
-    const names = calls.slice(0, 3).map((t) => t.name).join(', ');
+    const names = calls
+      .slice(0, 3)
+      .map((t) => t.name)
+      .join(', ');
     const more = calls.length > 3 ? ` 等${calls.length}项` : '';
     parts.push(`· ${names}${more}`);
   }
@@ -142,7 +143,9 @@ async function copyContent() {
   try {
     await navigator.clipboard.writeText(fullTextForCopy.value);
     copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
+    setTimeout(() => {
+      copied.value = false;
+    }, 1500);
   } catch {
     const textarea = document.createElement('textarea');
     textarea.value = fullTextForCopy.value;
@@ -153,7 +156,9 @@ async function copyContent() {
     document.execCommand('copy');
     document.body.removeChild(textarea);
     copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
+    setTimeout(() => {
+      copied.value = false;
+    }, 1500);
   }
 }
 </script>

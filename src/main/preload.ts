@@ -214,7 +214,10 @@ const suncodeAPI = {
   },
 
   /** Execute git commit */
-  async gitCommit(workingDir: string, message: string): Promise<{ success: boolean; output?: string; error?: string }> {
+  async gitCommit(
+    workingDir: string,
+    message: string,
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
     return ipcRenderer.invoke('git:commit', workingDir, message);
   },
 

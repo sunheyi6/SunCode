@@ -5,6 +5,7 @@ import { createEditTool } from './edit';
 import { createBashTool, type BashToolCallbacks } from './bash';
 import { createGrepTool } from './grep';
 import { createGlobTool } from './glob';
+import { createTaskCompleteTool } from './task-complete';
 
 /**
  * Tool Registry manages all available tools (built-in + MCP).
@@ -82,6 +83,7 @@ export function createToolRegistry(
   registry.register(createBashTool(workingDir, callbacks));
   registry.register(createGrepTool(workingDir));
   registry.register(createGlobTool(workingDir));
+  registry.register(createTaskCompleteTool());
 
   return registry;
 }

@@ -65,9 +65,7 @@ export class McpManager {
    * Get the names of connected MCP servers.
    */
   getConnectedServers(): string[] {
-    return this.clients
-      .filter((c) => c.isConnected())
-      .map((c) => c.getServerName());
+    return this.clients.filter((c) => c.isConnected()).map((c) => c.getServerName());
   }
 }
 
