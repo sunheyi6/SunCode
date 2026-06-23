@@ -97,6 +97,46 @@ const containerClass = computed(() => ({
 .markdown-content :deep(h2) { font-size: 1.2em; }
 .markdown-content :deep(h3) { font-size: 1.1em; }
 
+/* ---- tables ---- */
+.markdown-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 12px 0;
+  font-size: 13px;
+}
+
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-content :deep(th) {
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.markdown-content :deep(tr:nth-child(even) td) {
+  background: color-mix(in srgb, var(--color-surface) 40%, transparent);
+}
+
+.markdown-content :deep(tr:hover td) {
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+}
+
+/* ---- horizontal rule ---- */
+.markdown-content :deep(hr) {
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  margin: 16px 0;
+}
+
 .cursor-blink {
   color: var(--color-accent);
   animation: blink 1s step-end infinite;
