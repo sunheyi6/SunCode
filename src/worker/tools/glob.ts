@@ -27,6 +27,11 @@ export function createGlobTool(workingDir: string) {
       const absPath = isAbsolute(basePath) ? basePath : resolve(workingDir, basePath);
       const normalized = normalize(absPath);
 
+      // Security: prevent globbing outside working directory
+      if (!normalized.startsWith(resolve(workingDir))) {
+        return this.failure(`Cannot search outside working directory: ${normalized}`);
+      }
+
       try {
         const files = await findFiles(normalized, pattern);
         const relativeFiles = files.map((f) => relative(normalized, f));
@@ -38,9 +43,7 @@ export function createGlobTool(workingDir: string) {
         // List first 100 results
         const display = relativeFiles.slice(0, 100);
         const suffix =
-          relativeFiles.length > 100
-            ? `\n... and ${relativeFiles.length - 100} more files`
-            : '';
+          relativeFiles.length > 100 ? `\n... and ${relativeFiles.length - 100} more files` : '';
 
         return this.success(
           `Found ${relativeFiles.length} files matching "${pattern}":\n${display.map((f) => `  ${f}`).join('\n')}${suffix}`,
@@ -56,11 +59,7 @@ export function createGlobTool(workingDir: string) {
  * Simple glob-based file finder.
  * Supports ** for recursive matching, * for single-level wildcards.
  */
-async function findFiles(
-  rootDir: string,
-  pattern: string,
-  maxResults = 500,
-): Promise<string[]> {
+async function findFiles(rootDir: string, pattern: string, maxResults = 500): Promise<string[]> {
   const results: Array<{ path: string; mtime: number }> = [];
   const ignoreDirs = new Set([
     'node_modules',

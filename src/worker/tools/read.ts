@@ -28,6 +28,11 @@ export function createReadTool(workingDir: string) {
       const absPath = isAbsolute(filePath) ? filePath : resolve(workingDir, filePath);
       const normalized = normalize(absPath);
 
+      // Security: prevent reading outside working directory
+      if (!normalized.startsWith(resolve(workingDir))) {
+        return this.failure(`Cannot read outside working directory: ${normalized}`);
+      }
+
       try {
         const info = await stat(normalized);
 

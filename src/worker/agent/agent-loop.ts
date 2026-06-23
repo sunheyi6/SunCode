@@ -3,6 +3,16 @@ import type { AppSettings, Message, StreamEvent, ToolCallContent, ToolResult } f
 import type { Tool } from '../tools/types';
 import { buildSystemPrompt } from './system-prompt';
 
+/** Context passed to prepareNextTurn so implementors can trim or adjust. */
+export interface PrepareNextTurnContext {
+  assistantText: string;
+  thinkingText: string;
+  toolResults: ToolResult[];
+  contextMessages: Message[];
+  turnCount: number;
+  maxTurns: number;
+}
+
 export interface AgentLoopInput {
   model: unknown; // pi-ai Model type
   messages: Message[];
@@ -10,11 +20,21 @@ export interface AgentLoopInput {
   settings: AppSettings;
   workingDir: string;
   skillsContent: string;
+  /** Content from .agents.md / AGENTS.md (Codex-style workspace instructions). */
+  agentsMdContent?: string;
   abortSignal: AbortSignal;
   onStream: (event: StreamEvent) => void;
-  onToolStart: (toolCallId: string, toolName: string) => void;
+  onToolStart: (toolCall: ToolCallContent) => void;
   onToolEnd: (result: ToolResult) => void;
   initialTurnCount: number;
+  /** Optional hook called after each intermediate turn. Can trim context or return
+   *  new settings for the next turn (e.g. switch model, adjust thinking). */
+  prepareNextTurn?: (ctx: PrepareNextTurnContext) => PrepareNextTurnResult | undefined;
+}
+
+export interface PrepareNextTurnResult {
+  /** Replacement messages for the next turn (e.g. after compaction). */
+  contextMessages?: Message[];
 }
 
 export interface AgentLoopResult {
@@ -47,11 +67,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     settings,
     workingDir,
     skillsContent,
+    agentsMdContent,
     abortSignal,
     onStream,
     onToolStart,
     onToolEnd,
     initialTurnCount,
+    prepareNextTurn,
   } = input;
 
   if (!model) {
@@ -85,6 +107,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     tools: toolDefs,
     skillsContent,
     maxTurns: settings.maxTurns,
+    agentsMdContent,
   });
 
   // Prepend system message
@@ -104,6 +127,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     turnCount++;
     console.log(`[AgentLoop] Turn ${turnCount}/${settings.maxTurns}`);
+    onStream({ type: 'turn_start', turnCount, maxTurns: settings.maxTurns || MAX_TURNS });
 
     try {
       // Import pi-ai dynamically
@@ -157,15 +181,38 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const toolCalls: ToolCallContent[] = [];
       let thinkingText = '';
 
+      // If the model stopped because it wants to use tools, any text it
+      // produced in this turn is intermediate narration — treat it as
+      // thinking so the final UI shows it inside the collapsible section.
+      const isToolUseTurn =
+        assistantMsg.stopReason === 'toolUse' ||
+        assistantMsg.stopReason === 'tool_use' ||
+        assistantMsg.stopReason === 'toolCall' ||
+        assistantMsg.stopReason === 'tool_call';
+
       if (typeof assistantMsg.content === 'string') {
         assistantText = assistantMsg.content;
+        // Stream as thinking when this turn is just an intermediate step
+        if (isToolUseTurn) {
+          if (!thinkingText) onStream({ type: 'thinking_start' });
+          thinkingText += assistantText;
+          onStream({ type: 'thinking_delta', text: assistantText });
+        } else {
+          onStream({ type: 'text_delta', text: assistantText });
+        }
       } else if (Array.isArray(assistantMsg.content)) {
         for (const block of assistantMsg.content as Array<Record<string, unknown>>) {
           if (block.type === 'text' || block.type === 'output_text') {
             const text = (block.text as string) || '';
             assistantText += text;
-            // Simulate streaming
-            onStream({ type: 'text_delta', text });
+            // Simulate streaming — intermediate narration → thinking
+            if (isToolUseTurn) {
+              if (!thinkingText) onStream({ type: 'thinking_start' });
+              thinkingText += text;
+              onStream({ type: 'thinking_delta', text });
+            } else {
+              onStream({ type: 'text_delta', text });
+            }
           } else if (block.type === 'thinking') {
             const thinking = (block.thinking as string) || (block.text as string) || '';
             if (thinking) {
@@ -201,10 +248,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         );
       }
 
-      onStream({ type: 'text_end' });
-
-      // No tool calls → done
+      // No tool calls → final turn. Send text_end so the frontend finalises.
       if (toolCalls.length === 0) {
+        onStream({ type: 'text_end' });
+        onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
+
         const contentBlocks: Array<{ type: string; text: string }> = [];
         if (thinkingText) {
           contentBlocks.push({ type: 'thinking', text: thinkingText });
@@ -232,7 +280,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           throw err2;
         }
 
-        onToolStart(tc.id, tc.name);
+        onToolStart(tc);
 
         const tool = tools.find((t) => t.name === tc.name);
         if (!tool) {
@@ -265,6 +313,37 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           continue;
         }
 
+        // Validate required parameters — skip the tool if any are missing.
+        {
+          const def = tool.getDefinition();
+          const required = (def.parameters as { required?: string[] }).required ?? [];
+          const props = (def.parameters as { properties?: Record<string, { type: string }> }).properties ?? {};
+          let missing: string | null = null;
+          for (const key of required) {
+            if (params[key] === undefined || params[key] === null) {
+              missing = key;
+              break;
+            }
+            // Coerce numbers passed as strings (common LLM mistake)
+            if (props[key]?.type === 'integer' && typeof params[key] === 'string') {
+              const n = Number(params[key]);
+              if (Number.isFinite(n)) params[key] = n;
+            }
+          }
+          if (missing) {
+            const err2: ToolResult = {
+              toolCallId: tc.id,
+              name: tc.name,
+              success: false,
+              error: `缺少必需参数: ${missing}`,
+              output: '',
+            };
+            toolResults.push(err2);
+            onToolEnd(err2);
+            continue;
+          }
+        }
+
         try {
           console.log(`[AgentLoop] Executing tool: ${tc.name}`);
           const result = await tool.execute(params);
@@ -285,17 +364,23 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
       }
 
-      // Add assistant + tool results to context
+      // Add assistant + tool results to context.
+      // Intermediate narration text (when tools follow) should be stored as
+      // thinking blocks so it ends up in the collapsible section, not the
+      // final answer body.
       const assistantBlocks: Array<Record<string, unknown>> = [];
+      const textBlockType = isToolUseTurn ? 'thinking' : 'text';
       if (assistantText) {
-        assistantBlocks.push({ type: 'text', text: assistantText });
+        assistantBlocks.push({ type: textBlockType, text: assistantText });
+      }
+      // Always construct content as an array so downstream consumers
+      // (e.g. pi-ai's transformMessages → .flatMap) don't break on a string.
+      if (assistantBlocks.length === 0) {
+        assistantBlocks.push({ type: textBlockType, text: assistantText || '处理中...' });
       }
       const assistantMsg2: Message = {
         role: 'assistant',
-        content:
-          assistantBlocks.length > 0
-            ? (assistantBlocks as Message['content'])
-            : assistantText || '处理中...',
+        content: assistantBlocks as Message['content'],
         toolCalls,
       };
       contextMessages.push(assistantMsg2);
@@ -306,6 +391,26 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           content: tr.success ? tr.output : `错误: ${tr.error}`,
           toolCallId: tr.toolCallId,
         });
+      }
+
+      // Emit turn_end for intermediate (tool-use) turns
+      onStream({ type: 'turn_end', turnCount, hasToolCalls: true });
+
+      // Allow hook to trim context or adjust state before the next turn
+      if (prepareNextTurn) {
+        const result = prepareNextTurn({
+          assistantText,
+          thinkingText,
+          toolResults,
+          contextMessages,
+          turnCount,
+          maxTurns: settings.maxTurns || MAX_TURNS,
+        });
+        if (result?.contextMessages) {
+          // Replace the mutable context array contents
+          contextMessages.length = 0;
+          contextMessages.push(...result.contextMessages);
+        }
       }
 
       // Continue loop

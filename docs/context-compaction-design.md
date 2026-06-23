@@ -154,34 +154,51 @@ function estimateTokens(text: string): number {
 
 ---
 
-## 6. 实现流程
+## 6. 实现流程 (v2026-06 已实现)
+
+压缩通过 `prepareNextTurn` 钩子集成到 Agent Loop 中：
 
 ```
-Agent Loop 每一轮结束后:
+Agent Loop 每轮结束后 (turn_end 发送后):
 
     │
     ▼
-estimateTokens(allMessages)
+prepareNextTurn(ctx) 被调用 (如果 autoCompact 开启)
     │
     ▼
-tokens > contextWindow × 0.7 ?
+ctx.contextMessages.length > compactThreshold × 100 ?
     │
-    ├── 否 → 继续
+    ├── 否 → return undefined → 继续
     │
-    └── 是 → compactMessages(messages, contextWindow)
+    └── 是 → 执行压缩:
+        1. 找到 System Message（保留）
+        2. 从非 System 消息中保留最近 50% (compactThreshold/2)
+        3. 拼接: [system] + [recent half]
+        4. 返回 { contextMessages: compacted }
                 │
                 ▼
-        1. 分离 System Messages (保留)
-        2. 找出非 System 消息中的 Turns
-        3. 如果 turns ≤ keepRecentTurns → 跳过压缩
-        4. 旧 turns → summarizeTurns()
-        5. 生成压缩后的 messages:
-           [system...] + [摘要] + [recent turns...]
-                │
-                ▼
-        替换 agent.messages
-        日志: "Compacted 8 messages → 1 summary"
+        agent-loop.ts 用 compacted 替换 contextMessages
+        日志: "[Agent] Context compacted: 42 → 21 messages"
 ```
+
+**当前实现** (`src/worker/agent/agent.ts`):
+```typescript
+prepareNextTurn: this.settings.autoCompact
+  ? (ctx) => {
+      if (ctx.contextMessages.length <= compactThresholdMsgs) return;
+      const systemMsg = ctx.contextMessages.find(m => m.role === 'system');
+      const rest = ctx.contextMessages.filter(m => m.role !== 'system');
+      const trimmed = rest.slice(-Math.floor(compactThresholdMsgs / 2));
+      return { contextMessages: systemMsg ? [systemMsg, ...trimmed] : trimmed };
+    }
+  : undefined
+```
+
+**设计选择**：
+- V1 使用消息数阈值而非精确 token 计数——简单、快速、对大多数场景足够
+- `compactThreshold = 0.8` (默认)，即 ~80 条消息时触发，保留最近 ~40 条
+- 不做 LLM 摘要——保留原始消息，只是截断旧的
+- 通过 `prepareNextTurn` 钩子实现，符合 pi 项目的架构约定
 
 ---
 

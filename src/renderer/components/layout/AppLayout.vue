@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import ChatPanel from '../chat/ChatPanel.vue';
 import ConversationSidebar from './ConversationSidebar.vue';
+import GitPanel from './GitPanel.vue';
 import StatusBar from './StatusBar.vue';
 import SettingsPanel from '../settings/SettingsPanel.vue';
 
@@ -50,6 +51,7 @@ function startResize(e: MouseEvent): void {
 
       <!-- Main: Chat Panel -->
       <main class="main-content">
+        <GitPanel />
         <ChatPanel />
       </main>
     </div>
@@ -143,5 +145,6 @@ function startResize(e: MouseEvent): void {
   flex-direction: column;
   overflow: hidden;
   background: var(--color-bg);
+  position: relative;
 }
 </style>

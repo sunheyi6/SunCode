@@ -8,6 +8,8 @@ release/
 
 # Local SunCode configuration and API keys
 .suncode/
+.superpowers/
+.playwright-mcp/
 
 # Environment files
 .env

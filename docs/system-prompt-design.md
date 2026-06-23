@@ -16,21 +16,23 @@
 
 ```
 ┌─────────────────────────────────────┐
-│ 1. 角色定义 (Role)                   │  ← 你是谁
+│ 1. 角色定义 (Identity)               │  ← 你是谁
 ├─────────────────────────────────────┤
 │ 2. 能力说明 (Capabilities)           │  ← 你能做什么
 ├─────────────────────────────────────┤
 │ 3. 行为准则 (Guidelines)             │  ← 你应该怎么做
 ├─────────────────────────────────────┤
-│ 4. 环境信息 (Environment)            │  ← 你在哪里工作
+│ 4. 工具调度纪律 (Tool Discipline)     │  ← ★ 最关键的反循环规则
 ├─────────────────────────────────────┤
-│ 5. 工具列表 (Tools)                  │  ← 你有哪些工具
+│ 5. 环境信息 (Environment)            │  ← 你在哪里工作
 ├─────────────────────────────────────┤
-│ 6. 工具使用指南 (Tool Guidelines)     │  ← 怎么用工具
+│ 6. <project_context> (如有)          │  ← .agents.md 项目约束 (XML)
 ├─────────────────────────────────────┤
-│ 7. Skills 注入 (Skills)              │  ← 领域知识
+│ 7. 工具摘要 (Tools - 一行式)          │  ← ★ 省 token 的工具摘要
 ├─────────────────────────────────────┤
-│ 8. 最终指令 (Final Instruction)       │  ← 开始工作吧
+│ 8. <available_skills> (如有)         │  ← Skills 领域知识 (XML)
+├─────────────────────────────────────┤
+│ 9. 开始指令 (Begin)                  │  ← 开始工作吧
 └─────────────────────────────────────┘
 ```
 
@@ -59,7 +61,7 @@ Your purpose is to help users write, understand, debug, and refactor code.
 - 分析代码库结构
 - 提供解释和建议
 
-### 3.3 行为准则（最核心）
+### 3.3 行为准则
 
 这是直接影响模型行为质量的部分，每条准则都解决一类常见问题：
 
@@ -76,6 +78,29 @@ Your purpose is to help users write, understand, debug, and refactor code.
 | 9 | Ask for clarification, don't guess | 防止错误操作 |
 | 10 | Use parallel tool calls | 提升效率 |
 
+### 3.4 工具调度纪律 (Tool Usage Discipline) ★ 新增
+
+这是 2026-06 针对 DeepSeek 等模型反复调用工具的循环问题新增的关键章节，
+参考 Codex / pi 项目的反循环设计。分三个子节：
+
+**When to STOP using tools** — 明确"什么时候该停手"
+- 1-3 次工具调用后必须评估是否已够回答
+- 浏览类请求（"查看项目结构"）最多 2 次工具调用后就汇总
+- Bug 修复：读相关文件 → 找根因 → 修 → 停
+- 如果发现自己要重复执行同一个命令，立即停止
+
+**Anti-looping rules** — 防止无限工具循环
+- 同一命令不准执行两次
+- 信息类请求不准超过 2-3 轮
+- 找到答案后不准继续探索无关文件
+- 不确定时直接回应"我找到了这些，需要深入吗？"
+
+**Response format for informational requests** — 结构化回答格式
+- 浏览类请求必须输出：高层概述 + 组织好的信息 + 可选的深入提示
+- 明确告知：每次额外的工具调用都在消耗用户时间
+
+### 3.5 工具摘要 (一行式) ★ 重新设计 |
+
 ### 3.4 环境信息
 
 ```
@@ -88,31 +113,31 @@ Your purpose is to help users write, understand, debug, and refactor code.
 
 动态注入运行时环境变量，让模型感知其所处的环境。`Maximum turns` 限制让模型知道它有有限的操作次数，促使其高效工作。
 
-### 3.5 工具列表
+### 3.5 工具摘要 (一行式) ★ 重新设计
 
-对每个工具生成结构化的描述和 JSON Schema：
+**旧设计**：每个工具展开完整 JSON Schema（~200 字符/工具，6 工具 ≈ 1200+ 字符），
+占用大量系统提示 token。
+
+**新设计**：参考 pi 项目的 `toolSnippets` 方案，每个工具用一行摘要描述：
 
 ```
-### read
-Reads a file from the local filesystem.
-Parameters:
-```json
-{
-  "type": "object",
-  "properties": {
-    "file_path": { "type": "string", "description": "..." },
-    "offset": { "type": "integer", "description": "..." },
-    "limit": { "type": "integer", "description": "..." }
-  },
-  "required": ["file_path"]
-}
+- **read**: Read file contents with line numbers. `file_path` (required), `offset`, `limit`.
+- **write**: Create or overwrite a file. `file_path` and `content` required.
+- **edit**: Exact string replacement. `file_path`, `old_string`, `new_string` required.
+- **bash**: Execute a shell command. `command` (required), `description`, `timeout`.
+- **grep**: Regex search via ripgrep. `pattern` (required), `path`, `glob`, `type`.
+- **glob**: Find files by glob pattern. `pattern` required (e.g. "**/*.ts").
 ```
-```
+
+完整 JSON Schema 仍然通过 `tool.getDefinition()` 提供给 function-calling
+provider 的 API 层使用，但不再占用系统提示 token。
+
+**Token 节省**：旧格式 ~1200 chars → 新格式 ~450 chars，节省 ~60%。
 
 **关键设计**：
-- `description` 字段决定模型何时选择该工具——要写得像"使用场景说明"
-- `required` 字段让模型知道哪些参数必须提供
-- 参数 `description` 要包含默认值、范围、格式要求
+- 每行包含：`name` + 一句话功能 + 必需参数列表
+- 参数用反引号标注，一目了然
+- 按照 pi 项目的实践，LLM 不需要完整 Schema 也能正确选工具——provider 的 function calling 机制会处理参数详情
 
 ### 3.6 工具使用指南
 
@@ -128,43 +153,79 @@ Parameters:
 7. After completing all necessary changes, respond with a summary of what was done.
 ```
 
-### 3.7 Skills 注入
+### 3.7 结构化上下文注入
 
-Skills 是 Markdown 文件，通过 frontmatter 声明元数据：
+Skills 和 Workspace 指令采用结构化 XML 标签组织，遵循 pi / Codex 的设计约定：
 
-```yaml
----
-description: Code review best practices
-trigger: [review, pr, check]
-priority: 10
----
+**`<project_context>`** — 来自 `.agents.md` 的项目级约束：
+```xml
+<project_context>
+<!-- .agents.md 的内容 -->
+- 代码风格要求
+- 部署规则
+- 安全约束
+</project_context>
 ```
 
-加载逻辑：
-1. 搜索 `.suncode/skills/` (项目级) 和 `~/.suncode/skills/` (用户级)
-2. 解析 YAML frontmatter 获取优先级、触发条件
-3. 按优先级排序，注入到系统提示词 `## Skills` 段
-4. 未来可基于 `trigger` 关键词做按需加载
+**`<available_skills>`** — 来自 Skill 文件的领域知识：
+```xml
+<available_skills>
+<!-- Skills 内容 -->
+- 特定框架的编码规范
+- 项目工具链的使用说明
+</available_skills>
+```
+
+XML 标签让模型能清晰区分"通用指令"和"项目特定规则"。
+参考 [agentskills.io](https://agentskills.io) 约定和 pi 项目的 `<project_instructions>` 实践。
+
+### 3.8 `.agents.md` 加载
+
+遵循 Codex 约定，加载两级 `.agents.md`：
+1. 项目级：`<workspace>/.agents.md`（fallback `AGENTS.md`）
+2. 用户级：`~/.agents.md`
+
+两者合并后注入 `<project_context>` 标签。该内容通过
+`AgentLoopInput.agentsMdContent` 传入 `buildSystemPrompt()`。
 
 ---
 
 ## 4. 提示词生成流程
 
 ```
-createAgentSession()
+Agent.runLoop()
+    │
+    ├─ loadAgentsMd(workingDir)        // .agents.md / AGENTS.md
+    ├─ skillsLoader.loadAll()          // Skills 内容
     │
     ├─ buildSystemPrompt({
     │     workingDir,      // 进程 cwd
-    │     tools,           // ToolRegistry.getAll()
+    │     tools,           // ToolRegistry.getDefinitions()
     │     skillsContent,   // SkillsLoader.loadAll()
     │     maxTurns,        // 用户设置
+    │     agentsMdContent, // .agents.md 内容 (v2026-06 新增)
     │     customPrompt,    // 可选的自定义提示词
     │  })
     │
-    ├─ 组合各部分为最终字符串
+    ├─ getToolSnippet()    // 一行工具摘要（替代完整 JSON Schema）
     │
-    └─ 放入 Context.system → 发送给 LLM
+    ├─ 结构化注入:
+    │   ├─ <project_context>agentsMdContent</project_context>
+    │   └─ <available_skills>skillsContent</available_skills>
+    │
+    └─ 放入 piContext.systemPrompt → 发送给 LLM
 ```
+
+### 提示词大小对比
+
+| 部分 | 旧设计 (chars) | 新设计 (chars) | 节省 |
+|------|---------------|---------------|------|
+| 工具 Schema | ~1200 | ~450 | -62% |
+| 反循环规则 | 0 | ~600 | 新增 |
+| 结构化 XML 标签 | 0 | ~50 | 新增 |
+| **总计** | ~3400 | ~2800 | -18% |
+
+虽然加了反循环规则，因工具摘要大幅缩减，总提示词反而减少了 ~18%。
 
 ---
 

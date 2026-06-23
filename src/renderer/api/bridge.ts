@@ -2,7 +2,18 @@
  * Type-safe wrapper around the window.suncode API.
  * Provides a clean interface for Vue components to interact with the agent.
  */
-import type { StreamEvent, AgentStatus, Message, ToolResult, FileNode, AppSettings, SessionMeta } from '@shared/types';
+import type {
+  BackgroundProcess,
+  GitInfo,
+  StreamEvent,
+  AgentStatus,
+  Message,
+  ToolCallContent,
+  ToolResult,
+  FileNode,
+  AppSettings,
+  SessionMeta,
+} from '@shared/types';
 
 const api = (): Window['suncode'] => window.suncode;
 
@@ -36,7 +47,7 @@ export const bridge = {
     return api().onDone(callback);
   },
 
-  onToolStart(callback: (toolCallId: string, toolName: string) => void): () => void {
+  onToolStart(callback: (toolCall: ToolCallContent) => void): () => void {
     return api().onToolStart(callback);
   },
 
@@ -62,8 +73,8 @@ export const bridge = {
     return api().getSessions();
   },
 
-  async createSession(name: string): Promise<SessionMeta> {
-    return api().createSession(name);
+  async createSession(name: string, workingDirectory?: string): Promise<SessionMeta> {
+    return api().createSession(name, workingDirectory);
   },
 
   async loadSession(id: string): Promise<Message[]> {
@@ -92,11 +103,17 @@ export const bridge = {
     return api().getProviders();
   },
 
-  async getModels(provider: string): Promise<Array<{
-    id: string; name: string; provider: string;
-    contextWindow: number; maxTokens: number;
-    supportsReasoning: boolean; supportsImages: boolean;
-  }>> {
+  async getModels(provider: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      provider: string;
+      contextWindow: number;
+      maxTokens: number;
+      supportsReasoning: boolean;
+      supportsImages: boolean;
+    }>
+  > {
     return api().getModels(provider);
   },
 
@@ -117,5 +134,31 @@ export const bridge = {
   // ===== App =====
   async getWorkingDir(): Promise<string> {
     return api().getWorkingDir();
+  },
+
+  // ===== Git =====
+  async getGitInfo(workingDir: string): Promise<GitInfo> {
+    return api().getGitInfo(workingDir);
+  },
+
+  async getStagedDiff(workingDir: string): Promise<string> {
+    return api().getStagedDiff(workingDir);
+  },
+
+  async gitCommit(workingDir: string, message: string): Promise<{ success: boolean; output?: string; error?: string }> {
+    return api().gitCommit(workingDir, message);
+  },
+
+  async generateCommitMessage(workingDir: string): Promise<{ message: string }> {
+    return api().generateCommitMessage(workingDir);
+  },
+
+  // ===== Background Processes =====
+  onBgProcessStarted(callback: (proc: BackgroundProcess) => void): () => void {
+    return api().onBgProcessStarted(callback);
+  },
+
+  onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void {
+    return api().onBgProcessCompleted(callback);
   },
 };

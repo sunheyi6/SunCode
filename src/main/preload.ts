@@ -1,10 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,
+  BackgroundProcess,
   FileNode,
+  GitInfo,
   StreamEvent,
   AgentStatus,
   Message,
+  ToolCallContent,
   ToolResult,
   SessionMeta,
 } from '@shared/types';
@@ -50,8 +53,7 @@ const suncodeAPI = {
 
   /** Listen for agent errors */
   onError(callback: (message: string) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, message: string): void =>
-      callback(message);
+    const handler = (_event: Electron.IpcRendererEvent, message: string): void => callback(message);
     ipcRenderer.on('agent:error', handler);
     return () => ipcRenderer.removeListener('agent:error', handler);
   },
@@ -65,12 +67,9 @@ const suncodeAPI = {
   },
 
   /** Listen for tool execution start */
-  onToolStart(callback: (toolCallId: string, toolName: string) => void): () => void {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      toolCallId: string,
-      toolName: string,
-    ): void => callback(toolCallId, toolName);
+  onToolStart(callback: (toolCall: ToolCallContent) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, toolCall: ToolCallContent): void =>
+      callback(toolCall);
     ipcRenderer.on('agent:tool-start', handler);
     return () => ipcRenderer.removeListener('agent:tool-start', handler);
   },
@@ -102,8 +101,7 @@ const suncodeAPI = {
 
   /** Watch a file for changes */
   watchFile(filePath: string, callback: (content: string) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, content: string): void =>
-      callback(content);
+    const handler = (_event: Electron.IpcRendererEvent, content: string): void => callback(content);
     ipcRenderer.on(`fs:fileChanged:${filePath}`, handler);
     ipcRenderer.send('fs:watchFile', filePath);
     return () => {
@@ -120,8 +118,8 @@ const suncodeAPI = {
   },
 
   /** Create a new session */
-  async createSession(name: string): Promise<SessionMeta> {
-    return ipcRenderer.invoke('session:create', name);
+  async createSession(name: string, workingDirectory?: string): Promise<SessionMeta> {
+    return ipcRenderer.invoke('session:create', name, workingDirectory);
   },
 
   /** Load session messages */
@@ -167,11 +165,17 @@ const suncodeAPI = {
   },
 
   /** Get all models for a specific provider */
-  async getModels(provider: string): Promise<Array<{
-    id: string; name: string; provider: string;
-    contextWindow: number; maxTokens: number;
-    supportsReasoning: boolean; supportsImages: boolean;
-  }>> {
+  async getModels(provider: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      provider: string;
+      contextWindow: number;
+      maxTokens: number;
+      supportsReasoning: boolean;
+      supportsImages: boolean;
+    }>
+  > {
     return ipcRenderer.invoke('models:getModels', provider);
   },
 
@@ -197,6 +201,44 @@ const suncodeAPI = {
   /** Get current working directory */
   async getWorkingDir(): Promise<string> {
     return ipcRenderer.invoke('app:getWorkingDir');
+  },
+
+  /** Get git info for a directory */
+  async getGitInfo(workingDir: string): Promise<GitInfo> {
+    return ipcRenderer.invoke('git:getInfo', workingDir);
+  },
+
+  /** Get staged diff for commit message generation */
+  async getStagedDiff(workingDir: string): Promise<string> {
+    return ipcRenderer.invoke('git:getStagedDiff', workingDir);
+  },
+
+  /** Execute git commit */
+  async gitCommit(workingDir: string, message: string): Promise<{ success: boolean; output?: string; error?: string }> {
+    return ipcRenderer.invoke('git:commit', workingDir, message);
+  },
+
+  /** Generate commit message via AI */
+  async generateCommitMessage(workingDir: string): Promise<{ message: string }> {
+    return ipcRenderer.invoke('git:generateCommitMessage', workingDir);
+  },
+
+  // ===== Background Processes =====
+
+  /** Listen for background process started events */
+  onBgProcessStarted(callback: (process: BackgroundProcess) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, proc: BackgroundProcess): void =>
+      callback(proc);
+    ipcRenderer.on('agent:bg-process-started', handler);
+    return () => ipcRenderer.removeListener('agent:bg-process-started', handler);
+  },
+
+  /** Listen for background process completed events */
+  onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, pid: number, exitCode: number): void =>
+      callback(pid, exitCode);
+    ipcRenderer.on('agent:bg-process-completed', handler);
+    return () => ipcRenderer.removeListener('agent:bg-process-completed', handler);
   },
 };
 

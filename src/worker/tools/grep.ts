@@ -39,6 +39,11 @@ export function createGrepTool(workingDir: string) {
       const absPath = isAbsolute(searchPath) ? searchPath : resolve(workingDir, searchPath);
       const normalized = normalize(absPath);
 
+      // Security: prevent searching outside working directory
+      if (!normalized.startsWith(resolve(workingDir))) {
+        return this.failure(`Cannot search outside working directory: ${normalized}`);
+      }
+
       // Build ripgrep arguments
       const args: string[] = ['--no-heading', '--line-number', '--color', 'never'];
 

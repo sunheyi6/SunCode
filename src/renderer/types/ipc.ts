@@ -2,9 +2,12 @@
  * Type declarations for the window.suncode API.
  */
 import type {
+  BackgroundProcess,
+  GitInfo,
   StreamEvent,
   AgentStatus,
   Message,
+  ToolCallContent,
   ToolResult,
   FileNode,
   AppSettings,
@@ -22,7 +25,7 @@ declare global {
       onStatusChange(callback: (status: AgentStatus) => void): () => void;
       onError(callback: (message: string) => void): () => void;
       onDone(callback: (message: Message) => void): () => void;
-      onToolStart(callback: (toolCallId: string, toolName: string) => void): () => void;
+      onToolStart(callback: (toolCall: ToolCallContent) => void): () => void;
       onToolEnd(callback: (result: ToolResult) => void): () => void;
 
       // File system
@@ -33,7 +36,7 @@ declare global {
 
       // Session
       getSessions(): Promise<SessionMeta[]>;
-      createSession(name: string): Promise<SessionMeta>;
+      createSession(name: string, workingDirectory?: string): Promise<SessionMeta>;
       loadSession(id: string): Promise<Message[]>;
       saveMessage(message: Message): Promise<void>;
       exportSession(id: string): Promise<string>;
@@ -45,11 +48,17 @@ declare global {
 
       // Model Discovery
       getProviders(): Promise<string[]>;
-      getModels(provider: string): Promise<Array<{
-        id: string; name: string; provider: string;
-        contextWindow: number; maxTokens: number;
-        supportsReasoning: boolean; supportsImages: boolean;
-      }>>;
+      getModels(provider: string): Promise<
+        Array<{
+          id: string;
+          name: string;
+          provider: string;
+          contextWindow: number;
+          maxTokens: number;
+          supportsReasoning: boolean;
+          supportsImages: boolean;
+        }>
+      >;
       getRecommendedModels(): Promise<Array<{ provider: string; model: string; label: string }>>;
 
       // API Keys
@@ -60,6 +69,16 @@ declare global {
 
       // App
       getWorkingDir(): Promise<string>;
+
+      // Git
+      getGitInfo(workingDir: string): Promise<GitInfo>;
+      getStagedDiff(workingDir: string): Promise<string>;
+      gitCommit(workingDir: string, message: string): Promise<{ success: boolean; output?: string; error?: string }>;
+      generateCommitMessage(workingDir: string): Promise<{ message: string }>;
+
+      // Background Processes
+      onBgProcessStarted(callback: (proc: BackgroundProcess) => void): () => void;
+      onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void;
     };
   }
 }

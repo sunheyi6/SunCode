@@ -19,13 +19,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessions.value = await bridge.getSessions();
   }
 
-  async function createSession(): Promise<void> {
+  async function createSession(workingDirectory?: string): Promise<void> {
     const now = new Date();
     const name = `新对话 ${now.toLocaleTimeString('zh-CN', {
       hour: '2-digit',
       minute: '2-digit',
     })}`;
-    const session = await bridge.createSession(name);
+    const session = await bridge.createSession(name, workingDirectory);
     sessions.value.unshift(session);
     activeSessionId.value = session.id;
     useChatStore().clearMessages();

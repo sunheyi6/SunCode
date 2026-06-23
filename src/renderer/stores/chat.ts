@@ -1,4 +1,4 @@
-import type { Message, StreamEvent, ToolCallContent } from '@shared/types';
+import type { Message, StreamEvent, ToolCallContent, ToolResult } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';
@@ -11,6 +11,10 @@ export interface ChatMessage {
   toolCalls?: ToolCallContent[];
   timestamp: number;
   isStreaming: boolean;
+  /** Current turn number (updated by turn_start events). */
+  turnCount?: number;
+  /** Max turns for this session. */
+  maxTurns?: number;
 }
 
 let msgCounter = 0;
@@ -58,6 +62,13 @@ export const useChatStore = defineStore('chat', () => {
     if (!msg) return;
 
     switch (event.type) {
+      case 'turn_start':
+        msg.turnCount = event.turnCount ?? 0;
+        msg.maxTurns = event.maxTurns ?? 0;
+        break;
+      case 'turn_end':
+        // Intermediate turn with tool calls — keep streaming
+        break;
       case 'text_delta':
         currentText += event.text || '';
         msg.content = currentText;
@@ -100,15 +111,30 @@ export const useChatStore = defineStore('chat', () => {
         // Tool call completed
         break;
       case 'done':
-        if (!msg.content && event.message) {
+        if (event.message) {
           const finalContent = event.message.content;
           if (typeof finalContent === 'string') {
-            msg.content = finalContent;
+            if (!msg.content) msg.content = finalContent;
           } else {
-            msg.content = finalContent
+            // Extract all text blocks for the final answer body.
+            // If the model only returned thinking blocks, fall back to
+            // those so the final answer always shows outside the thinking
+            // section.
+            const textBlocks = finalContent
               .filter((block) => block.type === 'text')
               .map((block) => ('text' in block ? block.text : ''))
               .join('');
+            if (textBlocks) {
+              // Append to any content already streamed via text_delta
+              msg.content = msg.content ? msg.content + textBlocks : textBlocks;
+            } else if (!msg.content) {
+              // No text blocks — use thinking blocks as the visible answer
+              msg.content = finalContent
+                .filter((block) => block.type === 'thinking')
+                .map((block) => ('text' in block ? block.text : ''))
+                .join('');
+              if (!msg.content) msg.content = '已完成。';
+            }
           }
         }
         msg.isStreaming = false;
@@ -125,6 +151,31 @@ export const useChatStore = defineStore('chat', () => {
         currentText = '';
         currentThinking = '';
         break;
+    }
+  }
+
+  /** Wire up tool execution start from worker — sets the tool call to running. */
+  function startToolExecution(toolCall: ToolCallContent): void {
+    const msg = currentAssistantMsg;
+    if (!msg) return;
+    if (!msg.toolCalls) msg.toolCalls = [];
+    const existing = msg.toolCalls.find((t) => t.id === toolCall.id);
+    if (existing) {
+      existing.status = 'running';
+      existing.arguments = existing.arguments || toolCall.arguments;
+    } else {
+      msg.toolCalls.push({ ...toolCall, status: 'running' });
+    }
+  }
+
+  /** Wire up tool execution result from worker — attaches output/error to the tool call. */
+  function endToolExecution(result: ToolResult): void {
+    const msg = currentAssistantMsg;
+    if (!msg?.toolCalls) return;
+    const tc = msg.toolCalls.find((t) => t.id === result.toolCallId);
+    if (tc) {
+      tc.status = result.success ? 'done' : 'error';
+      tc.result = result;
     }
   }
 
@@ -182,6 +233,8 @@ export const useChatStore = defineStore('chat', () => {
     addUserMessage,
     startAssistantMessage,
     handleStreamEvent,
+    startToolExecution,
+    endToolExecution,
     finishCurrentResponse,
     clearMessages,
     loadMessages,

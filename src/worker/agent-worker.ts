@@ -97,17 +97,26 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
 
     case 'setWorkingDir': {
       console.log('[Worker] Working dir set:', msg.path);
-      agent = new Agent(
-        msg.path,
-        settings,
-        (event) => post({ type: 'stream', event }),
-        (status) => post({ type: 'status', status }),
-        (toolCallId, toolName) => post({ type: 'toolStart', toolCallId, toolName }),
-        (toolResult) => post({ type: 'toolEnd', toolResult }),
-        (message) => post({ type: 'done', message }),
-        (errorMsg) => post({ type: 'error', message: errorMsg }),
-      );
-      console.log('[Worker] Agent created');
+      if (agent) {
+        // Update existing agent without recreating it
+        agent.setWorkingDir(msg.path);
+        console.log('[Worker] Working dir updated');
+      } else {
+        // First-time initialization
+        agent = new Agent(
+          msg.path,
+          settings,
+          (event) => post({ type: 'stream', event }),
+          (status) => post({ type: 'status', status }),
+          (toolCall) => post({ type: 'toolStart', toolCall }),
+          (toolResult) => post({ type: 'toolEnd', toolResult }),
+          (message) => post({ type: 'done', message }),
+          (errorMsg) => post({ type: 'error', message: errorMsg }),
+          (proc) => post({ type: 'bgProcessStarted', process: proc }),
+          (pid, exitCode) => post({ type: 'bgProcessCompleted', pid, exitCode }),
+        );
+        console.log('[Worker] Agent created');
+      }
       break;
     }
 

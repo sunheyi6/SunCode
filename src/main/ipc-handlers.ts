@@ -1,10 +1,10 @@
-import { ipcMain, dialog, app } from 'electron';
-import { readFile, readdir, stat, watch, writeFile, mkdir } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
-import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdir, readdir, readFile, stat, watch, writeFile } from 'node:fs/promises';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import { DEFAULT_SETTINGS } from '@shared/constants';
 import type {
   AppSettings,
   FileNode,
@@ -13,8 +13,9 @@ import type {
   WorkerInMessage,
   WorkerOutMessage,
 } from '@shared/types';
-import { DEFAULT_SETTINGS } from '@shared/constants';
+import { app, dialog, ipcMain } from 'electron';
 import type { WindowManager } from './window-manager';
+import { getGitInfo } from './git-info';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -60,8 +61,8 @@ for (const [provider, key] of Object.entries(currentSettings.envApiKeys)) {
     console.log(`[Main] ENV ${envKey} set from config`);
   }
 }
-let sessions: Map<string, SessionMeta> = new Map();
-let sessionMessages: Map<string, Message[]> = new Map();
+const sessions: Map<string, SessionMeta> = new Map();
+const sessionMessages: Map<string, Message[]> = new Map();
 let currentSessionId: string | null = null;
 
 // ===== Agent Worker Management =====
@@ -92,10 +93,16 @@ function getAgentWorker(): Worker {
           mainWindow.webContents.send('agent:done', msg.message);
           break;
         case 'toolStart':
-          mainWindow.webContents.send('agent:tool-start', msg.toolCallId, msg.toolName);
+          mainWindow.webContents.send('agent:tool-start', msg.toolCall);
           break;
         case 'toolEnd':
           mainWindow.webContents.send('agent:tool-end', msg.toolResult);
+          break;
+        case 'bgProcessStarted':
+          mainWindow.webContents.send('agent:bg-process-started', msg.process);
+          break;
+        case 'bgProcessCompleted':
+          mainWindow.webContents.send('agent:bg-process-completed', msg.pid, msg.exitCode);
           break;
       }
     });
@@ -278,7 +285,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
     return Array.from(sessions.values());
   });
 
-  ipcMain.handle('session:create', async (_event, name: string) => {
+  ipcMain.handle('session:create', async (_event, name: string, workingDirectory?: string) => {
     const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const meta: SessionMeta = {
       id,
@@ -286,7 +293,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       created: new Date().toISOString(),
       updated: new Date().toISOString(),
       messageCount: 0,
-      workingDirectory: process.cwd(),
+      workingDirectory: workingDirectory || process.cwd(),
     };
     sessions.set(id, meta);
     sessionMessages.set(id, []);
@@ -298,13 +305,18 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.handle('session:load', async (_event, id: string) => {
     currentSessionId = id;
     const messages = sessionMessages.get(id) || [];
+    const meta = sessions.get(id);
     sendToWorker({ type: 'setMessages', messages });
+    if (meta) {
+      sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
+    }
     return messages;
   });
 
   ipcMain.handle('session:saveMessage', async (_event, message: Message) => {
     if (!currentSessionId) return;
     const msgs = sessionMessages.get(currentSessionId) || [];
+    const isFirstMessage = msgs.length === 0;
     msgs.push(message);
     sessionMessages.set(currentSessionId, msgs);
 
@@ -312,6 +324,14 @@ export function registerIpcHandlers(wm: WindowManager): void {
     if (meta) {
       meta.updated = new Date().toISOString();
       meta.messageCount = msgs.length;
+
+      // Auto-title: use the first user message as the conversation title
+      if (isFirstMessage && message.role === 'user') {
+        const title = extractTitle(message);
+        if (title) {
+          meta.name = title;
+        }
+      }
     }
   });
 
@@ -331,7 +351,10 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // Settings
   ipcMain.handle('settings:get', async () => {
-    console.log('[Main] settings:get called, envApiKeys:', Object.keys(currentSettings.envApiKeys || {}));
+    console.log(
+      '[Main] settings:get called, envApiKeys:',
+      Object.keys(currentSettings.envApiKeys || {}),
+    );
     return currentSettings;
   });
 
@@ -373,6 +396,95 @@ export function registerIpcHandlers(wm: WindowManager): void {
     return process.cwd();
   });
 
+  // ===== Git Info =====
+  ipcMain.handle('git:getInfo', async (_event, workingDir: string) => {
+    return getGitInfo(workingDir);
+  });
+
+  ipcMain.handle('git:getStagedDiff', async (_event, workingDir: string) => {
+    try {
+      return execFileSync('git', ['diff', '--staged'], {
+        cwd: workingDir,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        timeout: 15000,
+      });
+    } catch {
+      return '';
+    }
+  });
+
+  ipcMain.handle('git:commit', async (_event, workingDir: string, message: string) => {
+    try {
+      // Check if there are staged changes
+      const staged = execFileSync('git', ['diff', '--staged', '--name-only'], {
+        cwd: workingDir,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        timeout: 10000,
+      }).trim();
+
+      if (!staged) {
+        return { success: false, error: '没有暂存的更改。请先用 git add 暂存文件。' };
+      }
+
+      const output = execFileSync('git', ['commit', '-m', message], {
+        cwd: workingDir,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        timeout: 30000,
+      });
+      return { success: true, output: output.trim() };
+    } catch (error) {
+      const err = error as { stderr?: string; message?: string };
+      return { success: false, error: err.stderr || err.message || 'Commit failed' };
+    }
+  });
+
+  ipcMain.handle(
+    'git:generateCommitMessage',
+    async (_event, workingDir: string) => {
+      try {
+        const diff = execFileSync('git', ['diff', '--staged'], {
+          cwd: workingDir,
+          encoding: 'utf-8',
+          maxBuffer: 1024 * 1024,
+          timeout: 15000,
+        });
+        if (!diff.trim()) return { message: 'chore: update' };
+
+        const pi = await import('@earendil-works/pi-ai');
+        const model = pi.getModel(currentSettings.activeProvider, currentSettings.activeModel);
+        const result = await pi.completeSimple(model, {
+          system:
+            'You are a commit message generator. Write a concise Conventional Commit message (e.g. "feat(scope): summary") based on the git diff. Use types: feat, fix, refactor, chore, docs, style, test. Keep it under 72 characters. Return ONLY the message, no quotes, no explanation.',
+          messages: [
+            {
+              role: 'user',
+              content: `Generate a Conventional Commit message for this diff:\n\n${diff.slice(0, 4000)}`,
+            },
+          ],
+          tools: [],
+        });
+
+        if (Array.isArray(result.content) && result.content.length > 0) {
+          const textBlock = result.content.find(
+            (b: { type: string; text?: string }) => b.type === 'text',
+          );
+          if (textBlock && 'text' in textBlock && textBlock.text) {
+            return { message: textBlock.text.trim() };
+          }
+        }
+        if (typeof result.content === 'string' && result.content.trim()) {
+          return { message: result.content.trim() };
+        }
+        return { message: 'chore: update' };
+      } catch {
+        return { message: 'chore: update' };
+      }
+    },
+  );
+
   // ===== Model Discovery =====
   ipcMain.handle('models:getProviders', async () => {
     try {
@@ -411,8 +523,16 @@ export function registerIpcHandlers(wm: WindowManager): void {
       { provider: 'google', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
       { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
       { provider: 'xai', model: 'grok-code-fast-1', label: 'Grok Code Fast' },
-      { provider: 'openrouter', model: 'openai/gpt-5.1-codex', label: 'GPT-5.1 Codex (OpenRouter)' },
-      { provider: 'openrouter', model: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (OpenRouter)' },
+      {
+        provider: 'openrouter',
+        model: 'openai/gpt-5.1-codex',
+        label: 'GPT-5.1 Codex (OpenRouter)',
+      },
+      {
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4-5',
+        label: 'Claude Sonnet 4.5 (OpenRouter)',
+      },
     ];
   });
 
@@ -434,10 +554,30 @@ export function registerIpcHandlers(wm: WindowManager): void {
     const keys: Record<string, string> = {};
     for (const [provider] of Object.entries(currentSettings.envApiKeys)) {
       const envKey = getProviderEnvKey(provider);
-      keys[provider] = envKey ? (process.env[envKey] || '') : '';
+      keys[provider] = envKey ? process.env[envKey] || '' : '';
     }
     return keys;
   });
+}
+
+function extractTitle(message: Message): string | null {
+  let text = '';
+
+  if (typeof message.content === 'string') {
+    text = message.content;
+  } else {
+    text = message.content
+      .filter((block) => block.type === 'text')
+      .map((block) => ('text' in block ? block.text : ''))
+      .join(' ');
+  }
+
+  // Take the first line, trim, and truncate
+  const firstLine = text.split('\n')[0].trim();
+  if (!firstLine) return null;
+
+  const maxLen = 30;
+  return firstLine.length > maxLen ? `${firstLine.slice(0, maxLen)}...` : firstLine;
 }
 
 function getProviderEnvKey(provider: string): string | undefined {
@@ -466,12 +606,14 @@ function generateSessionHtml(messages: Message[]): string {
       const content =
         typeof msg.content === 'string'
           ? escapeHtml(msg.content)
-          : msg.content.map((block) => {
-              if (block.type === 'text') return escapeHtml(block.text);
-              if (block.type === 'thinking')
-                return `<details><summary>Thinking</summary>${escapeHtml(block.text)}</details>`;
-              return '';
-            }).join('');
+          : msg.content
+              .map((block) => {
+                if (block.type === 'text') return escapeHtml(block.text);
+                if (block.type === 'thinking')
+                  return `<details><summary>Thinking</summary>${escapeHtml(block.text)}</details>`;
+                return '';
+              })
+              .join('');
       return `<div class="message ${msg.role}"><strong>${msg.role}</strong><div>${content}</div></div>`;
     })
     .join('\n');

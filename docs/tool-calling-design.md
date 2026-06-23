@@ -247,23 +247,96 @@ mcp__filesystem__read_file     → 文件系统 MCP 服务器
                     └───────────────┘
 ```
 
-### 事件生命周期
+### 回合事件 (v2026-06 新增)
+
+参考 pi 项目的 `AgentEvent` 模型，引入 `turn_start` / `turn_end` 事件：
 
 ```
-toolcall_start → toolcall_delta → toolcall_end
-                                      │
-                                  ToolCard (running)
-                                      │
-                                  tool.execute()
-                                      │
-                                  ToolCard (done/error)
-                                      │
-                                  追加 ToolResult 到上下文
+turn_start { turnCount, maxTurns }
+    │
+    ├─ thinking_start / thinking_delta / thinking_end
+    ├─ text_delta (仅最终轮) / thinking_delta (中间轮)
+    ├─ toolcall_start / toolcall_delta / toolcall_end
+    │
+    ├─ tool_execution_start (通过 worker message)
+    │   └─ tool.execute()
+    │   └─ tool_execution_end (通过 worker message)
+    │
+    └─ turn_end { turnCount, hasToolCalls }
+```
+
+**设计要点**：
+- `turn_start` 在每轮开始时发送，携带当前轮次和最大轮次
+- `turn_end` 携带 `hasToolCalls: true/false` 区分中间轮和最终轮
+- 前端据此展示思考摘要：`🧠 第2轮 bash ls...`
+- `text_end` 仅在最终轮（无工具调用）时发送
+- 中间轮的叙述文本通过 `thinking_delta` 进入思考区，而非正文
+
+### 工具参数验证 (v2026-06 新增)
+
+在 Agent Loop 的工具执行阶段增加了运行时参数验证：
+
+```
+JSON.parse(tc.arguments)
+    ↓
+验证必需参数存在（根据 Tool Schema 的 required 字段）
+    ↓ (缺少参数 → 返回错误 ToolResult，不执行)
+类型强制转换（如字符串 "42" → 整数 42，修正常见的 LLM 错误）
+    ↓
+tool.execute(validatedParams)
+```
+
+```typescript
+// 伪代码
+for (const key of required) {
+  if (params[key] === undefined || params[key] === null) {
+    return { success: false, error: `缺少必需参数: ${key}` };
+  }
+  // 数字字符串→整数强制转换
+  if (props[key]?.type === 'integer' && typeof params[key] === 'string') {
+    params[key] = Number(params[key]);
+  }
+}
+```
+
+**为什么不用 TypeBox？** SunCode 使用自定义的轻量 schema helper (`p()`/`obj()`) 
+来定义工具参数，而非 TypeBox。API 层的 function calling JSON Schema 由 pi-ai 生成，
+这里的验证是额外的防御层。
+
+---
+
+## 7. 前端工具卡片
+
+每个工具调用在前端渲染为专用的操作卡片，嵌套在思考区（`<details>` 折叠块）内：
+
+| 工具 | 卡片组件 | 展示内容 |
+|------|---------|---------|
+| `edit` / `write` | `FileOperationCard` | 文件路径、状态（编辑中/已编辑/失败）、+N/-N 行变更 |
+| `bash` | `CommandOperationCard` | 命令、工作目录、退出码、stdout/stderr |
+| `read` / `glob` / `grep` | `FileInspectCard` | 操作类型标签、路径/模式、输出预览（≤300 字符）|
+| 其他/generic | inline generic | 工具名 + 状态 |
+
+所有卡片内容来源于 `ToolCallContent.result`（通过 `startToolExecution` / `endToolExecution` 在 chat store 中注入）。
+
+### 前端数据流
+
+```
+Worker: toolStart → main process → agent:tool-start
+    ↓
+useAgent.ts: chatStore.startToolExecution(toolCall)
+    ↓ (创建或更新 ChatMessage.toolCalls[] 中的条目，status='running')
+
+Worker: toolEnd → main process → agent:tool-end
+    ↓
+useAgent.ts: chatStore.endToolExecution(result)
+    ↓ (注入 result.output / result.details)
+    ↓
+ToolOperationList → FileOperationCard / CommandOperationCard / FileInspectCard
 ```
 
 ---
 
-## 7. 设计经验
+## 8. 设计经验
 
 ### ✅ 有效实践
 

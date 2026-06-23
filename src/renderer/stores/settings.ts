@@ -12,6 +12,7 @@ export const useSettingsStore = defineStore('settings', () => {
     autoCompact: true,
     compactThreshold: 0.7,
     theme: 'system',
+    permissionMode: 'full_access',
     mcpServers: [],
     skills: [],
     envApiKeys: {},

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import type { AppSettings } from '@shared/types';
 import { useSettingsStore } from '../../stores/settings';
 import ModelSelector from './ModelSelector.vue';
 
@@ -21,12 +22,28 @@ function updateMaxTurns(e: Event): void {
   if (val > 0 && val <= 200) settingsStore.update({ maxTurns: val });
 }
 
+function updatePermissionMode(mode: AppSettings['permissionMode']): void {
+  settingsStore.update({ permissionMode: mode });
+}
+
 const thinkingLevels = [
   { value: 'minimal', label: '最小', desc: '最快，不思考' },
   { value: 'low', label: '低', desc: '简短思考' },
   { value: 'medium', label: '中等', desc: '平衡（默认）' },
   { value: 'high', label: '高', desc: '深入思考' },
   { value: 'xhigh', label: '最大', desc: '最大程度思考' },
+];
+
+const permissionModes = [
+  { value: 'plan' as const, label: '计划模式', icon: '📋', desc: '仅规划，不修改文件' },
+  { value: 'full_access' as const, label: '完全访问', icon: '🔓', desc: '无限制，可自由读写' },
+  { value: 'auto_edit' as const, label: '自动编辑', icon: '✏️', desc: '自动编辑文件无需确认' },
+  {
+    value: 'confirm_changes' as const,
+    label: '变更前确认',
+    icon: '✅',
+    desc: '修改前需要用户确认',
+  },
 ];
 </script>
 
@@ -111,6 +128,28 @@ const thinkingLevels = [
               <p class="option-desc" style="margin-top:6px;">
                 默认跟随系统主题，并在系统主题变化时自动切换。
               </p>
+            </div>
+
+            <div class="option-group">
+              <h4>权限模式</h4>
+              <p class="option-desc">
+                控制 Agent 对文件的访问和修改权限。
+              </p>
+              <div class="permission-options">
+                <button
+                  v-for="p in permissionModes"
+                  :key="p.value"
+                  class="perm-btn"
+                  :class="{ active: settingsStore.settings.permissionMode === p.value }"
+                  @click="updatePermissionMode(p.value)"
+                >
+                  <span class="perm-icon">{{ p.icon }}</span>
+                  <div class="perm-info">
+                    <span class="perm-label">{{ p.label }}</span>
+                    <span class="perm-desc">{{ p.desc }}</span>
+                  </div>
+                </button>
+              </div>
             </div>
 
             <div class="option-group">
@@ -303,5 +342,58 @@ const thinkingLevels = [
 .toggle-label input[type="checkbox"] {
   accent-color: var(--color-accent);
   width: 16px; height: 16px;
+}
+
+.permission-options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.permission-options .perm-btn {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: all 0.12s;
+  text-align: left;
+}
+
+.permission-options .perm-btn:hover {
+  background: var(--color-surface-hover);
+}
+
+.permission-options .perm-btn.active {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+}
+
+.perm-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.perm-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.perm-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.perm-desc {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 1px;
 }
 </style>

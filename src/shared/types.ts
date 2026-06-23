@@ -15,6 +15,8 @@ export interface ToolCallContent {
   id: string;
   name: string;
   arguments: string;
+  status?: ToolExecutionStatus;
+  result?: ToolResult;
 }
 
 /** Thinking/reasoning content block */
@@ -61,6 +63,30 @@ export interface ToolDefinition {
   parameters: ToolParameterSchema;
 }
 
+export type FileEditStatus = 'editing' | 'edited' | 'failed';
+
+export interface FileEditDetails {
+  type: 'file_edit';
+  filePath: string;
+  status: FileEditStatus;
+  addedLines?: number;
+  removedLines?: number;
+  error?: string;
+}
+
+export interface CommandDetails {
+  type: 'command';
+  command: string;
+  cwd: string;
+  exitCode: number | null;
+  signal?: string;
+  stdout: string;
+  stderr: string;
+}
+
+export type ToolResultDetails = FileEditDetails | CommandDetails;
+export type ToolExecutionStatus = 'running' | 'done' | 'error';
+
 /** Result of a tool execution */
 export interface ToolResult {
   toolCallId: string;
@@ -68,6 +94,19 @@ export interface ToolResult {
   success: boolean;
   output: string;
   error?: string;
+  details?: ToolResultDetails;
+  /** PID when run in background */
+  pid?: number;
+}
+
+/** Info about a background process started by Bash tool */
+export interface BackgroundProcess {
+  pid: number;
+  command: string;
+  startTime: number;
+  status: 'running' | 'completed' | 'error';
+  exitCode?: number;
+  endTime?: number;
 }
 
 /** Tool implementation interface */
@@ -135,6 +174,8 @@ export interface AppSettings {
   autoCompact: boolean;
   compactThreshold: number; // 0-1 fraction of context window
   theme: 'system' | 'light' | 'dark';
+  /** Agent permission mode */
+  permissionMode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes';
   mcpServers: McpServerConfig[];
   skills: string[]; // paths to skill directories
   envApiKeys: Record<string, string>;
@@ -166,8 +207,10 @@ export type WorkerOutMessage =
   | { type: 'status'; status: AgentStatus }
   | { type: 'error'; message: string }
   | { type: 'done'; message: Message }
-  | { type: 'toolStart'; toolCallId: string; toolName: string }
-  | { type: 'toolEnd'; toolResult: ToolResult };
+  | { type: 'toolStart'; toolCall: ToolCallContent }
+  | { type: 'toolEnd'; toolResult: ToolResult }
+  | { type: 'bgProcessStarted'; process: BackgroundProcess }
+  | { type: 'bgProcessCompleted'; pid: number; exitCode: number };
 
 /** Streaming event types from the LLM */
 export type StreamEventType =
@@ -180,6 +223,8 @@ export type StreamEventType =
   | 'toolcall_start'
   | 'toolcall_delta'
   | 'toolcall_end'
+  | 'turn_start'
+  | 'turn_end'
   | 'start'
   | 'done'
   | 'error';
@@ -191,6 +236,11 @@ export interface StreamEvent {
   toolCallId?: string;
   toolName?: string;
   delta?: string;
+  /** For turn_start: current turn number / max turns */
+  turnCount?: number;
+  maxTurns?: number;
+  /** For turn_end: whether this turn had tool calls (intermediate) */
+  hasToolCalls?: boolean;
   error?: string;
   message?: Message; // final message on 'done'
 }
@@ -203,9 +253,21 @@ export interface AgentEventCallbacks {
   onStatusChange: (status: AgentStatus) => void;
   onError: (message: string) => void;
   onDone: (message: Message) => void;
-  onToolStart: (toolCallId: string, toolName: string) => void;
+  onToolStart: (toolCall: ToolCallContent) => void;
   onToolEnd: (result: ToolResult) => void;
 }
 
 /** Settings update callback */
 export type SettingsListener = (settings: AppSettings) => void;
+
+// ===== Git Types =====
+
+export interface GitInfo {
+  isRepo: boolean;
+  branch?: string;
+  remoteUrl?: string;
+  addedLines: number;
+  deletedLines: number;
+  changedFiles: number;
+  stagedFiles: number;
+}

@@ -7,6 +7,23 @@ import { WindowManager } from './window-manager';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// ── Single-instance lock ────────────────────────────────────────────
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  // Another instance is already running — quit immediately
+  app.quit();
+} else {
+  // Focus the existing window when a second instance is launched
+  app.on('second-instance', () => {
+    const mainWindow = windowManager?.getMainWindow();
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 let windowManager: WindowManager;
 
 function createMainWindow(): BrowserWindow {
