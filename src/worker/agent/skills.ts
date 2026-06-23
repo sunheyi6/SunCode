@@ -87,6 +87,29 @@ export function createSkillsLoader(
   };
 }
 
+async function loadSingleSkillFile(
+  filePath: string,
+  source: string,
+  fallbackName: string,
+): Promise<Skill | null> {
+  try {
+    const content = await readFile(filePath, 'utf-8');
+    const metadata = parseFrontmatter(content);
+    const body = stripFrontmatter(content);
+    return {
+      name: metadata.name || fallbackName,
+      path: filePath,
+      content: body,
+      metadata: {
+        ...metadata,
+        description: metadata.description || `Skill from ${source}`,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function loadSkillsFromDir(dir: string, source: string): Promise<Skill[]> {
   const skills: Skill[] = [];
 
@@ -95,24 +118,29 @@ async function loadSkillsFromDir(dir: string, source: string): Promise<Skill[]> 
 
     for (const entry of entries) {
       if (entry.isFile() && extname(entry.name).toLowerCase() === '.md') {
+        // Flat .md file in the skills dir
         const filePath = join(dir, entry.name);
+        const skill = await loadSingleSkillFile(filePath, source, entry.name.replace('.md', ''));
+        if (skill) skills.push(skill);
+      } else if (entry.isDirectory()) {
+        // Subdirectory — look for SKILL.md inside (agentskills.io convention)
+        const skillFile = join(dir, entry.name, 'SKILL.md');
         try {
-          const content = await readFile(filePath, 'utf-8');
+          const content = await readFile(skillFile, 'utf-8');
           const metadata = parseFrontmatter(content);
           const body = stripFrontmatter(content);
-
+          const name = metadata.name || entry.name;
           skills.push({
-            name: entry.name.replace('.md', ''),
-            path: filePath,
+            name,
+            path: skillFile,
             content: body,
             metadata: {
               ...metadata,
-              // Tag the source
-              description: metadata.description || `Skill from ${source}`,
+              description: metadata.description || `Skill: ${name} (from ${source})`,
             },
           });
         } catch {
-          // Skip unreadable files
+          // No SKILL.md in this subdirectory — skip
         }
       }
     }
@@ -161,20 +189,28 @@ function stripFrontmatter(content: string): string {
   return content.replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
 }
 
+/** Generate a brief skill index for the system prompt.
+ *  Only includes name + description + file path so the model knows
+ *  which skills exist.  The full SKILL.md content is NOT injected —
+ *  the model must use the read tool to load it on demand.
+ *  Follows the agentskills.io / pi convention. */
 function formatSkillsForPrompt(skills: Skill[]): string {
   if (skills.length === 0) return '';
 
-  const parts: string[] = [];
+  const lines: string[] = [
+    'The following skills are available. When a task matches a skill description,',
+    'use the **read** tool to load the skill file at the listed path BEFORE starting work.',
+    'Do not guess the skill content — always read it first.',
+    '',
+  ];
 
   for (const skill of skills) {
-    parts.push(`### ${skill.name}`);
-    if (skill.metadata?.description) {
-      parts.push(`*${skill.metadata.description}*`);
-    }
-    parts.push('');
-    parts.push(skill.content);
-    parts.push('');
+    lines.push(`- **${skill.name}**: ${skill.metadata?.description || 'No description'}`);
+    lines.push(`  Path: \`${skill.path}\``);
   }
 
-  return parts.join('\n');
+  lines.push('');
+  lines.push('Read the full skill file when the task matches its description.');
+
+  return lines.join('\n');
 }
