@@ -198,7 +198,10 @@ const suncodeAPI = {
     return ipcRenderer.invoke('dialog:confirm', title, message);
   },
 
-  /** Get current working directory */
+  /** Update the native title bar overlay text (shows folder name in title bar) */
+  setTitleBarOverlayText(text: string): void {
+    ipcRenderer.send('window:setTitleBarOverlayText', text);
+  },
   async getWorkingDir(): Promise<string> {
     return ipcRenderer.invoke('app:getWorkingDir');
   },

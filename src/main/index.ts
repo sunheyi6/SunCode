@@ -43,8 +43,24 @@ function createMainWindow(): BrowserWindow {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
     autoHideMenuBar: true,
     show: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
+      symbolColor: nativeTheme.shouldUseDarkColors ? '#cdd6f4' : '#4c4f69',
+      height: 38,
+    },
   });
   win.setMenuBarVisibility(false);
+
+  // Handle theme changes to update title bar overlay color
+  nativeTheme.on('updated', () => {
+    if (!win.isDestroyed()) {
+      win.setTitleBarOverlay({
+        color: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
+        symbolColor: nativeTheme.shouldUseDarkColors ? '#cdd6f4' : '#4c4f69',
+      });
+    }
+  });
 
   win.on('ready-to-show', () => {
     win.show();

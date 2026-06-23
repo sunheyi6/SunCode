@@ -391,9 +391,14 @@ export function registerIpcHandlers(wm: WindowManager): void {
     return result.response === 1;
   });
 
-  // Working directory
-  ipcMain.handle('app:getWorkingDir', async () => {
-    return process.cwd();
+  // Window title bar overlay text
+  ipcMain.on('window:setTitleBarOverlayText', (_event, text: string) => {
+    const mainWindow = windowManager.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // On Windows 11 with titleBarOverlay, this sets the text in the title bar area
+      // On other platforms, it updates the window title
+      mainWindow.setTitle(text ? `SunCode — ${text}` : 'SunCode');
+    }
   });
 
   // ===== Git Info =====
