@@ -158,6 +158,16 @@ function onDocumentClick(e: MouseEvent): void {
 
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 let gitTimer: ReturnType<typeof setInterval> | undefined;
+let cleanupToolEnd: (() => void) | undefined;
+let throttledRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Throttled refresh — call after tool execution or file writes. */
+function scheduleRefresh(): void {
+  if (throttledRefreshTimer) clearTimeout(throttledRefreshTimer);
+  throttledRefreshTimer = setTimeout(() => {
+    void refreshGit();
+  }, 500);
+}
 
 onMounted(() => {
   void refreshGit();
@@ -165,15 +175,22 @@ onMounted(() => {
   clockTimer = setInterval(() => {
     now.value = Date.now();
   }, 1000);
+
+  // Refresh git stats in real-time after each tool finishes
+  cleanupToolEnd = bridge.onToolEnd((_result) => {
+    scheduleRefresh();
+  });
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick);
   if (clockTimer) clearInterval(clockTimer);
   if (gitTimer) clearInterval(gitTimer);
+  if (throttledRefreshTimer) clearTimeout(throttledRefreshTimer);
+  if (cleanupToolEnd) cleanupToolEnd();
 });
 
-// Periodically refresh git info while the panel is expanded
+// Periodically refresh git info while the panel is expanded (fallback)
 watch(collapsed, (isCollapsed) => {
   if (gitTimer) {
     clearInterval(gitTimer);
