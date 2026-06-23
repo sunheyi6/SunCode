@@ -98,6 +98,8 @@ export const useChatStore = defineStore('chat', () => {
           id: event.toolCallId || '',
           name: event.toolName || '',
           arguments: '',
+          // Record where in the thinking stream this tool appeared
+          thinkingOffset: currentThinking.length,
         });
         break;
       case 'toolcall_delta': {

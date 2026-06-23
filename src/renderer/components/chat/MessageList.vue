@@ -27,7 +27,16 @@ function isNearBottom(): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
 }
 
-// Scroll to bottom when a new message is added (user or assistant start)
+/** Composite key that triggers a scroll when any live content changes. */
+function lastMessageContentKey(): string {
+  const last = chatStore.messages[chatStore.messages.length - 1];
+  if (!last) return '';
+  const tcLen = last.toolCalls?.length ?? 0;
+  const tcRunning = last.toolCalls?.filter((t) => t.status === 'running').length ?? 0;
+  return `${last.thinking?.length ?? 0}|${last.content.length}|${tcLen}|${tcRunning}`;
+}
+
+// Scroll to bottom when a new message is added
 watch(
   () => chatStore.messages.length,
   () => {
@@ -35,27 +44,21 @@ watch(
   },
 );
 
-// Scroll to bottom continuously during streaming, as content grows
+// During streaming, scroll continuously as thinking / content / tool calls grow
 watch(
+  () => lastMessageContentKey(),
   () => {
-    const lastMsg = chatStore.messages[chatStore.messages.length - 1];
-    return lastMsg?.content;
-  },
-  () => {
-    // During streaming, always scroll to follow the output.
-    // When idle, only scroll if user is already near the bottom (let them read history).
     if (chatStore.isStreaming || isNearBottom()) {
       scrollToBottom();
     }
   },
 );
 
-// When streaming finishes, do a final scroll to ensure the complete response is visible
+// When streaming finishes, ensure the complete response is visible
 watch(
   () => chatStore.isStreaming,
   (streaming) => {
     if (!streaming) {
-      // Small delay to let the final DOM update settle, then ensure we're at the bottom
       setTimeout(() => scrollToBottom(), 50);
     }
   },

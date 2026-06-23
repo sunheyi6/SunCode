@@ -17,6 +17,8 @@ export interface ToolCallContent {
   arguments: string;
   status?: ToolExecutionStatus;
   result?: ToolResult;
+  /** Offset into the thinking text stream where this tool call appeared (for interleaved rendering). */
+  thinkingOffset?: number;
 }
 
 /** Thinking/reasoning content block */

@@ -60,6 +60,45 @@ const fullTextForCopy = computed(() => {
   return parts.join('\n\n');
 });
 
+/** Interleaved timeline of thinking text and tool calls in arrival order. */
+const thinkingTimeline = computed(() => {
+  const thinking = props.message.thinking || '';
+  const calls = props.message.toolCalls ?? [];
+  type Entry = { type: 'thinking'; text: string } | { type: 'tool'; calls: [typeof calls[number]] };
+
+  if (calls.length === 0) {
+    return thinking ? [{ type: 'thinking' as const, text: thinking }] : [];
+  }
+
+  // Sort by thinkingOffset so chunks appear in the order the model produced them
+  const sorted = [...calls].sort(
+    (a, b) => (a.thinkingOffset ?? 0) - (b.thinkingOffset ?? 0),
+  );
+
+  const timeline: Entry[] = [];
+  let prevEnd = 0;
+
+  for (const tc of sorted) {
+    const start = tc.thinkingOffset ?? 0;
+    // Thinking text before this tool call
+    if (start > prevEnd) {
+      timeline.push({ type: 'thinking', text: thinking.slice(prevEnd, start) });
+    } else if (start < prevEnd) {
+      // Tool call appeared "before" previous thinking ended (overlapping offsets).
+      // Just emit the tool at this position.
+    }
+    timeline.push({ type: 'tool', calls: [tc] });
+    prevEnd = start;
+  }
+
+  // Remaining thinking text after the last tool call
+  if (prevEnd < thinking.length) {
+    timeline.push({ type: 'thinking', text: thinking.slice(prevEnd) });
+  }
+
+  return timeline;
+});
+
 /** Rich summary line for the thinking section.
  *  - Streaming: shows live progress (current tool, completion count).
  *  - Collapsed: shows a compact list of tools that ran. */
@@ -122,19 +161,22 @@ async function copyContent() {
 <template>
   <div class="assistant-message">
     <div class="message-body">
-      <!-- 思考过程（含工具调用）— 流式时自动展开，完成后自动折叠 -->
+      <!-- 思考过程（含工具调用）— 流式时自动展开，完成后自动折叠。
+           思考文本与工具卡片按时间顺序交错排列，而非先全部思考再全部工具。 -->
       <details v-if="hasThinking" class="thinking-section" :open="thinkingOpen" @toggle="onThinkingToggle">
         <summary class="thinking-summary">{{ thinkingSummary }}</summary>
         <div class="thinking-content">
-          <StreamingText
-            :text="message.thinking || '等待模型返回思考内容…'"
-            :is-streaming="message.isStreaming"
-          />
-          <!-- 工具调用在思考过程内 -->
-          <ToolOperationList
-            v-if="hasToolCalls && message.toolCalls"
-            :calls="message.toolCalls"
-          />
+          <template v-for="(entry, i) in thinkingTimeline" :key="i">
+            <StreamingText
+              v-if="entry.type === 'thinking'"
+              :text="entry.text"
+              :is-streaming="message.isStreaming"
+            />
+            <ToolOperationList
+              v-else-if="entry.type === 'tool'"
+              :calls="entry.calls"
+            />
+          </template>
         </div>
       </details>
 
