@@ -164,4 +164,9 @@ export const bridge = {
   onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void {
     return api().onBgProcessCompleted(callback);
   },
+
+  // ===== Window =====
+  setTitleBarOverlayText(text: string): void {
+    api().setTitleBarOverlayText(text);
+  },
 };
