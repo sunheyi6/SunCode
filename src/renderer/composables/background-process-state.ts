@@ -22,12 +22,9 @@ export function completeProcess(
   process.endTime = endTime;
 }
 
-export function latestProcess(
-  processes: BackgroundProcess[],
-): BackgroundProcess | undefined {
+export function latestProcess(processes: BackgroundProcess[]): BackgroundProcess | undefined {
   return processes.reduce<BackgroundProcess | undefined>(
-    (latest, process) =>
-      !latest || process.startTime > latest.startTime ? process : latest,
+    (latest, process) => (!latest || process.startTime > latest.startTime ? process : latest),
     undefined,
   );
 }

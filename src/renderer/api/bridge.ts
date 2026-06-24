@@ -145,7 +145,10 @@ export const bridge = {
     return api().getStagedDiff(workingDir);
   },
 
-  async gitCommit(workingDir: string, message: string): Promise<{ success: boolean; output?: string; error?: string }> {
+  async gitCommit(
+    workingDir: string,
+    message: string,
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
     return api().gitCommit(workingDir, message);
   },
 

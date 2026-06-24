@@ -1,11 +1,7 @@
 // @ts-expect-error Bun provides this module at test runtime; the repo has no Bun type package.
 import { describe, expect, test } from 'bun:test';
 import type { ToolCallContent } from '@shared/types';
-import {
-  commandSummary,
-  fileOperationView,
-  parseToolArguments,
-} from './tool-presentation';
+import { commandSummary, fileOperationView, parseToolArguments } from './tool-presentation';
 
 describe('tool presentation', () => {
   test('parses complete arguments and tolerates partial JSON', () => {

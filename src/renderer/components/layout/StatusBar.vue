@@ -8,22 +8,33 @@ const modelsStore = useModelsStore();
 
 const statusColor = computed(() => {
   switch (agentStore.status.state) {
-    case 'thinking': return 'var(--color-yellow)';
-    case 'executing': return 'var(--color-teal)';
-    case 'done': return 'var(--color-green)';
-    case 'error': return 'var(--color-red)';
-    default: return 'var(--color-text-muted)';
+    case 'thinking':
+      return 'var(--color-yellow)';
+    case 'executing':
+      return 'var(--color-teal)';
+    case 'done':
+      return 'var(--color-green)';
+    case 'error':
+      return 'var(--color-red)';
+    default:
+      return 'var(--color-text-muted)';
   }
 });
 
 const statusText = computed(() => {
   switch (agentStore.status.state) {
-    case 'idle': return '就绪';
-    case 'thinking': return '思考中...';
-    case 'executing': return '执行工具...';
-    case 'done': return '完成';
-    case 'error': return '错误';
-    default: return '';
+    case 'idle':
+      return '就绪';
+    case 'thinking':
+      return '思考中...';
+    case 'executing':
+      return '执行工具...';
+    case 'done':
+      return '完成';
+    case 'error':
+      return '错误';
+    default:
+      return '';
   }
 });
 

@@ -19,7 +19,9 @@ async function copyContent(text: string) {
   try {
     await navigator.clipboard.writeText(text);
     copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
+    setTimeout(() => {
+      copied.value = false;
+    }, 1500);
   } catch {
     const textarea = document.createElement('textarea');
     textarea.value = text;
@@ -30,7 +32,9 @@ async function copyContent(text: string) {
     document.execCommand('copy');
     document.body.removeChild(textarea);
     copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
+    setTimeout(() => {
+      copied.value = false;
+    }, 1500);
   }
 }
 </script>

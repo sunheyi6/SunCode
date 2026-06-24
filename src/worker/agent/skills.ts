@@ -19,10 +19,7 @@ export interface Skill {
   };
 }
 
-export function createSkillsLoader(
-  workingDir: string,
-  additionalPaths: string[] = [],
-) {
+export function createSkillsLoader(workingDir: string, additionalPaths: string[] = []) {
   return {
     /**
      * Load all skills from configured paths.
@@ -169,7 +166,10 @@ function parseFrontmatter(
     for (const line of yamlText.split('\n')) {
       const trimmed = line.trim();
       if (trimmed.startsWith('description:')) {
-        result.description = trimmed.slice('description:'.length).trim().replace(/^["']|["']$/g, '');
+        result.description = trimmed
+          .slice('description:'.length)
+          .trim()
+          .replace(/^["']|["']$/g, '');
       } else if (trimmed.startsWith('priority:')) {
         result.priority = Number.parseInt(trimmed.slice('priority:'.length).trim(), 10);
       } else if (trimmed.startsWith('trigger:')) {

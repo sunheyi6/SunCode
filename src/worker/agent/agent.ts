@@ -6,6 +6,7 @@ import type {
   AppSettings,
   BackgroundProcess,
   Message,
+  RunEvent,
   StreamEvent,
   ToolCallContent,
   ToolResult,
@@ -35,6 +36,7 @@ export class Agent {
   private onError: (message: string) => void;
   private onBackgroundStart: (proc: BackgroundProcess) => void;
   private onBackgroundComplete: (pid: number, exitCode: number) => void;
+  private onRunEvent: (event: RunEvent) => void;
 
   constructor(
     workingDir: string,
@@ -47,6 +49,7 @@ export class Agent {
     onError: (message: string) => void,
     onBackgroundStart: (proc: BackgroundProcess) => void,
     onBackgroundComplete: (pid: number, exitCode: number) => void,
+    onRunEvent: (event: RunEvent) => void,
   ) {
     this.workingDir = workingDir;
     this.settings = settings;
@@ -58,6 +61,7 @@ export class Agent {
     this.onError = onError;
     this.onBackgroundStart = onBackgroundStart;
     this.onBackgroundComplete = onBackgroundComplete;
+    this.onRunEvent = onRunEvent;
 
     void this.initialize();
   }
@@ -140,13 +144,22 @@ export class Agent {
     // Emit status
     this.emitStatus('thinking');
 
+    const runId = crypto.randomUUID();
+    this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString() });
+
     try {
-      await this.runLoop();
+      await this.runLoop(runId);
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        // User aborted
+        this.onRunEvent({ type: 'run_aborted', runId, timestamp: new Date().toISOString() });
         this.emitStatus('idle');
       } else {
+        this.onRunEvent({
+          type: 'run_failed',
+          runId,
+          error: (error as Error).message,
+          timestamp: new Date().toISOString(),
+        });
         this.onError((error as Error).message);
         this.emitStatus('error');
       }
@@ -162,13 +175,23 @@ export class Agent {
     this.abortController = new AbortController();
     this.emitStatus('thinking');
 
+    const runId = crypto.randomUUID();
+    this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString() });
+
     try {
-      await this.runLoop();
+      await this.runLoop(runId);
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
+        this.onRunEvent({
+          type: 'run_failed',
+          runId,
+          error: (error as Error).message,
+          timestamp: new Date().toISOString(),
+        });
         this.onError((error as Error).message);
         this.emitStatus('error');
       } else {
+        this.onRunEvent({ type: 'run_aborted', runId, timestamp: new Date().toISOString() });
         this.emitStatus('idle');
       }
     } finally {
@@ -183,7 +206,7 @@ export class Agent {
     this.emitStatus('idle');
   }
 
-  private async runLoop(): Promise<void> {
+  private async runLoop(runId: string): Promise<void> {
     const modelRegistry = createModelRegistry();
     const model = await modelRegistry.getModel(
       this.settings.activeProvider,
@@ -203,9 +226,7 @@ export class Agent {
 
     // Compact when enabled and context exceeds the threshold (expressed as
     // a fraction of max context window — roughly 1 message ≈ 1k tokens).
-    const compactThresholdMsgs = Math.floor(
-      (this.settings.compactThreshold || 0.8) * 100,
-    );
+    const compactThresholdMsgs = Math.floor((this.settings.compactThreshold || 0.8) * 100);
 
     const result = await runAgentLoop({
       model,
@@ -216,6 +237,7 @@ export class Agent {
       skillsContent,
       agentsMdContent,
       abortSignal: this.abortController!.signal,
+      runId,
       onStream: (event) => {
         this.onStream(event);
       },
@@ -226,6 +248,9 @@ export class Agent {
       onToolEnd: (result) => {
         this.onToolEnd(result);
       },
+      onRunEvent: (event) => {
+        this.onRunEvent(event);
+      },
       initialTurnCount: this.turnCount,
       prepareNextTurn: this.settings.autoCompact
         ? (ctx) => {
@@ -234,9 +259,7 @@ export class Agent {
             const systemMsg = ctx.contextMessages.find((m) => m.role === 'system');
             const rest = ctx.contextMessages.filter((m) => m.role !== 'system');
             const trimmed = rest.slice(-keepCount);
-            const compacted: Message[] = systemMsg
-              ? [systemMsg, ...trimmed]
-              : trimmed;
+            const compacted: Message[] = systemMsg ? [systemMsg, ...trimmed] : trimmed;
             if (compacted.length < ctx.contextMessages.length) {
               console.log(
                 `[Agent] Context compacted: ${ctx.contextMessages.length} → ${compacted.length} messages`,
@@ -253,6 +276,14 @@ export class Agent {
       output: this.totalTokens.output + result.tokenUsage.output,
       total: this.totalTokens.total + result.tokenUsage.total,
     };
+
+    // Emit run completed
+    this.onRunEvent({
+      type: 'run_completed',
+      runId,
+      turnCount: result.turnCount,
+      timestamp: new Date().toISOString(),
+    });
 
     // Add assistant message to history
     this.messages.push(result.finalMessage);

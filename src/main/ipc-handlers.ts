@@ -16,6 +16,15 @@ import type {
 import { app, dialog, ipcMain } from 'electron';
 import type { WindowManager } from './window-manager';
 import { getGitInfo } from './git-info';
+import {
+  initSessionStore,
+  loadAllSessions,
+  loadSession,
+  saveSession,
+  deleteSession,
+} from './session-store';
+import { appendEvent, startRun, endRun } from './run-store';
+import { recoverInterruptedSessions } from './recovery';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -73,7 +82,7 @@ function getAgentWorker(): Worker {
     console.log('[Main] Creating worker at:', workerPath);
     agentWorker = new Worker(workerPath);
 
-    agentWorker.on('message', (msg: WorkerOutMessage) => {
+    agentWorker.on('message', async (msg: WorkerOutMessage) => {
       console.log('[Main] Worker message:', msg.type);
       const mainWindow = windowManager?.getMainWindow();
       if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -104,6 +113,18 @@ function getAgentWorker(): Worker {
         case 'bgProcessCompleted':
           mainWindow.webContents.send('agent:bg-process-completed', msg.pid, msg.exitCode);
           break;
+        case 'runEvent': {
+          const evt = msg.event;
+          const sid = currentSessionId;
+          if (!sid) break;
+          // On run_started, create the run directory
+          if (evt.type === 'run_started') {
+            await startRun(sid, evt.runId);
+          }
+          // Append the event to the JSONL
+          await appendEvent(sid, evt.runId, evt);
+          break;
+        }
       }
     });
 
@@ -205,6 +226,12 @@ let windowManager: WindowManager;
 export function registerIpcHandlers(wm: WindowManager): void {
   windowManager = wm;
 
+  // Ensure session storage directory exists
+  initSessionStore();
+
+  // Recover any sessions that were interrupted by a previous crash/close
+  void recoverInterruptedSessions();
+
   // Agent
   ipcMain.on('agent:prompt', (_event, text: string) => {
     console.log('[Main] agent:prompt received:', text.slice(0, 80));
@@ -282,6 +309,15 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // Session management
   ipcMain.handle('session:list', async () => {
+    // Prefer disk as source of truth; fall back to memory cache
+    const diskSessions = await loadAllSessions();
+    if (diskSessions.length > 0) {
+      // Sync memory cache with disk
+      for (const meta of diskSessions) {
+        sessions.set(meta.id, meta);
+      }
+      return diskSessions;
+    }
     return Array.from(sessions.values());
   });
 
@@ -295,8 +331,10 @@ export function registerIpcHandlers(wm: WindowManager): void {
       messageCount: 0,
       workingDirectory: workingDirectory || process.cwd(),
     };
+    // Persist to memory and disk
     sessions.set(id, meta);
     sessionMessages.set(id, []);
+    await saveSession(meta, []);
     currentSessionId = id;
     sendToWorker({ type: 'setMessages', messages: [] });
     return meta;
@@ -304,8 +342,23 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.handle('session:load', async (_event, id: string) => {
     currentSessionId = id;
-    const messages = sessionMessages.get(id) || [];
-    const meta = sessions.get(id);
+
+    // Try memory cache first, then disk
+    let messages = sessionMessages.get(id);
+    let meta = sessions.get(id);
+
+    if (!messages || messages.length === 0) {
+      const disk = await loadSession(id);
+      if (disk) {
+        messages = disk.messages;
+        meta = disk.meta;
+        // Restore to memory cache
+        sessions.set(id, meta);
+        sessionMessages.set(id, messages);
+      }
+    }
+
+    messages = messages || [];
     sendToWorker({ type: 'setMessages', messages });
     if (meta) {
       sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
@@ -332,6 +385,9 @@ export function registerIpcHandlers(wm: WindowManager): void {
           meta.name = title;
         }
       }
+
+      // Persist to disk
+      await saveSession(meta, msgs);
     }
   });
 
@@ -446,49 +502,46 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
-  ipcMain.handle(
-    'git:generateCommitMessage',
-    async (_event, workingDir: string) => {
-      try {
-        const diff = execFileSync('git', ['diff', '--staged'], {
-          cwd: workingDir,
-          encoding: 'utf-8',
-          maxBuffer: 1024 * 1024,
-          timeout: 15000,
-        });
-        if (!diff.trim()) return { message: 'chore: update' };
+  ipcMain.handle('git:generateCommitMessage', async (_event, workingDir: string) => {
+    try {
+      const diff = execFileSync('git', ['diff', '--staged'], {
+        cwd: workingDir,
+        encoding: 'utf-8',
+        maxBuffer: 1024 * 1024,
+        timeout: 15000,
+      });
+      if (!diff.trim()) return { message: 'chore: update' };
 
-        const pi = await import('@earendil-works/pi-ai');
-        const model = pi.getModel(currentSettings.activeProvider, currentSettings.activeModel);
-        const result = await pi.completeSimple(model, {
-          system:
-            'You are a commit message generator. Write a concise Conventional Commit message (e.g. "feat(scope): summary") based on the git diff. Use types: feat, fix, refactor, chore, docs, style, test. Keep it under 72 characters. Return ONLY the message, no quotes, no explanation.',
-          messages: [
-            {
-              role: 'user',
-              content: `Generate a Conventional Commit message for this diff:\n\n${diff.slice(0, 4000)}`,
-            },
-          ],
-          tools: [],
-        });
+      const pi = await import('@earendil-works/pi-ai');
+      const model = pi.getModel(currentSettings.activeProvider, currentSettings.activeModel);
+      const result = await pi.completeSimple(model, {
+        system:
+          'You are a commit message generator. Write a concise Conventional Commit message (e.g. "feat(scope): summary") based on the git diff. Use types: feat, fix, refactor, chore, docs, style, test. Keep it under 72 characters. Return ONLY the message, no quotes, no explanation.',
+        messages: [
+          {
+            role: 'user',
+            content: `Generate a Conventional Commit message for this diff:\n\n${diff.slice(0, 4000)}`,
+          },
+        ],
+        tools: [],
+      });
 
-        if (Array.isArray(result.content) && result.content.length > 0) {
-          const textBlock = result.content.find(
-            (b: { type: string; text?: string }) => b.type === 'text',
-          );
-          if (textBlock && 'text' in textBlock && textBlock.text) {
-            return { message: textBlock.text.trim() };
-          }
+      if (Array.isArray(result.content) && result.content.length > 0) {
+        const textBlock = result.content.find(
+          (b: { type: string; text?: string }) => b.type === 'text',
+        );
+        if (textBlock && 'text' in textBlock && textBlock.text) {
+          return { message: textBlock.text.trim() };
         }
-        if (typeof result.content === 'string' && result.content.trim()) {
-          return { message: result.content.trim() };
-        }
-        return { message: 'chore: update' };
-      } catch {
-        return { message: 'chore: update' };
       }
-    },
-  );
+      if (typeof result.content === 'string' && result.content.trim()) {
+        return { message: result.content.trim() };
+      }
+      return { message: 'chore: update' };
+    } catch {
+      return { message: 'chore: update' };
+    }
+  });
 
   // ===== Model Discovery =====
   ipcMain.handle('models:getProviders', async () => {

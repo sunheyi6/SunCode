@@ -62,7 +62,10 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   );
   parts.push('5. Search for code patterns with grep before making broad changes.');
   parts.push('6. If a tool returns an error, analyze the error and adjust your approach.');
-  parts.push('7. After completing all necessary changes, respond with a summary of what was done.');
+  parts.push(
+    '7. After completing all necessary changes, call task_complete with a summary of what was done.',
+  );
+  parts.push('8. Only call task_complete as the final action — never together with other tools.');
 
   // Skills section — wrapped in available_skills XML per agentskills.io convention
   if (skillsContent) {
@@ -93,6 +96,8 @@ function getToolSnippet(tool: ToolDefinition): string {
     bash: 'Execute a shell command. `command` (required), `description` (short summary), `timeout` ms (max 300000), `run_in_background` (bool).',
     grep: 'Regex search via ripgrep. `pattern` (required), `path`, `glob` filter, `type` filter, `multiline` (bool), `ignoreCase` (bool). Supports -A/-B/-C context.',
     glob: 'Find files by glob pattern. `pattern` required (e.g. "**/*.ts"). `path` (search dir). Results sorted by mtime.',
+    task_complete:
+      'Signal task completion. `summary` (required) — describe what was accomplished. Use this as the final action instead of just outputting text.',
   };
   return snippets[tool.name] ?? tool.description.slice(0, 120);
 }

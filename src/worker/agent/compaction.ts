@@ -22,9 +22,7 @@ export function estimateTokens(textOrMessages: string | Message[]): number {
         } else if (block.type === 'thinking') {
           total += Math.ceil(block.text.length / CHARS_PER_TOKEN);
         } else if (block.type === 'tool_call') {
-          total += Math.ceil(
-            (block.name.length + block.arguments.length) / CHARS_PER_TOKEN,
-          );
+          total += Math.ceil((block.name.length + block.arguments.length) / CHARS_PER_TOKEN);
         }
       }
     }
@@ -98,11 +96,7 @@ export function compactMessages(
     content: `[Previous conversation summary]\n${summaryText}`,
   };
 
-  const compactedMessages: Message[] = [
-    ...systemMessages,
-    summaryMessage,
-    ...recentTurns.flat(),
-  ];
+  const compactedMessages: Message[] = [...systemMessages, summaryMessage, ...recentTurns.flat()];
 
   return {
     compactedMessages,
@@ -124,8 +118,7 @@ function summarizeTurns(turns: Message[][]): string {
 
     if (userMsg) {
       const userText = extractText(userMsg);
-      const shortText =
-        userText.length > 100 ? `${userText.slice(0, 100)}...` : userText;
+      const shortText = userText.length > 100 ? `${userText.slice(0, 100)}...` : userText;
       summaryParts.push(`User asked: "${shortText}"`);
     }
 
@@ -138,8 +131,7 @@ function summarizeTurns(turns: Message[][]): string {
           `  Assistant: Used ${toolCalls} tool(s). ${text.length > 80 ? `${text.slice(0, 80)}...` : text}`,
         );
       } else if (text) {
-        const short =
-          text.length > 150 ? `${text.slice(0, 150)}...` : text;
+        const short = text.length > 150 ? `${text.slice(0, 150)}...` : text;
         summaryParts.push(`  Assistant: ${short}`);
       }
     }

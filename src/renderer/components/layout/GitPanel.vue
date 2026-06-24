@@ -4,10 +4,7 @@ import type { GitInfo } from '@shared/types';
 import { useSessionsStore } from '../../stores/sessions';
 import { bridge } from '../../api/bridge';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
-import {
-  formatElapsedTime,
-  latestProcess,
-} from '../../composables/background-process-state';
+import { formatElapsedTime, latestProcess } from '../../composables/background-process-state';
 
 const sessionsStore = useSessionsStore();
 

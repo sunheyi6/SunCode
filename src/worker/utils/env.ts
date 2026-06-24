@@ -97,10 +97,7 @@ export function saveSettings(
  * Resolve API key for a provider.
  * Checks environment variables first, then stored settings.
  */
-export function resolveApiKey(
-  provider: string,
-  settings: AppSettings,
-): string | undefined {
+export function resolveApiKey(provider: string, settings: AppSettings): string | undefined {
   // Check settings storage
   if (settings.envApiKeys[provider]) {
     return settings.envApiKeys[provider];

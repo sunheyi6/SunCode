@@ -21,9 +21,7 @@ interface McpToolDef {
 export async function createSDKMcpClient(config: McpServerConfig): Promise<McpClient> {
   // Dynamic import to handle missing SDK gracefully
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-  const { StdioClientTransport } = await import(
-    '@modelcontextprotocol/sdk/client/stdio.js'
-  );
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
 
   const transport = new StdioClientTransport({
     command: config.command,
@@ -31,10 +29,7 @@ export async function createSDKMcpClient(config: McpServerConfig): Promise<McpCl
     env: config.env as Record<string, string> | undefined,
   });
 
-  const client = new Client(
-    { name: 'suncode', version: '0.1.0' },
-    { capabilities: { tools: {} } },
-  );
+  const client = new Client({ name: 'suncode', version: '0.1.0' }, { capabilities: { tools: {} } });
 
   let connected = false;
 
@@ -53,8 +48,8 @@ export async function createSDKMcpClient(config: McpServerConfig): Promise<McpCl
           description: mcpTool.description || `MCP tool: ${mcpTool.name} from ${config.name}`,
           parameters: {
             type: 'object',
-            properties: mcpTool.inputSchema?.properties as Record<string, unknown> || {},
-            required: mcpTool.inputSchema?.required as string[] || [],
+            properties: (mcpTool.inputSchema?.properties as Record<string, unknown>) || {},
+            required: (mcpTool.inputSchema?.required as string[]) || [],
           },
           async execute(params: Record<string, unknown>) {
             try {
@@ -90,9 +85,7 @@ export async function createSDKMcpClient(config: McpServerConfig): Promise<McpCl
           },
         }));
 
-        console.log(
-          `MCP server "${config.name}": connected, ${tools.length} tools discovered`,
-        );
+        console.log(`MCP server "${config.name}": connected, ${tools.length} tools discovered`);
         return tools;
       } catch (error) {
         console.warn(

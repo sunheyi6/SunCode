@@ -114,6 +114,7 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
           (errorMsg) => post({ type: 'error', message: errorMsg }),
           (proc) => post({ type: 'bgProcessStarted', process: proc }),
           (pid, exitCode) => post({ type: 'bgProcessCompleted', pid, exitCode }),
+          (event) => post({ type: 'runEvent', event }),
         );
         console.log('[Worker] Agent created');
       }
