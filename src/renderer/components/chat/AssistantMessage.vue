@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 import ToolOperationList from '../tools/ToolOperationList.vue';
 import StreamingText from './StreamingText.vue';
@@ -10,35 +10,7 @@ const props = defineProps<{
 
 const hasContent = computed(() => props.message.content.length > 0);
 const hasThinking = computed(() => props.message.isStreaming || Boolean(props.message.thinking));
-const hasToolCalls = computed(() => Boolean(props.message.toolCalls?.length));
 const copied = ref(false);
-
-// Auto-expand during streaming, auto-collapse when done.
-// The user can still toggle manually.  We sync via @toggle so user
-// clicks on <summary> are reflected in the ref.
-const thinkingOpen = ref(props.message.isStreaming);
-let userToggled = false;
-
-function onThinkingToggle(e: Event) {
-  const el = e.target as HTMLDetailsElement;
-  thinkingOpen.value = el.open;
-  userToggled = true;
-}
-
-watch(
-  () => props.message.isStreaming,
-  (streaming) => {
-    if (streaming) {
-      // Auto-open when a new round of streaming starts
-      thinkingOpen.value = true;
-      userToggled = false;
-    } else if (!streaming && !userToggled) {
-      // Auto-collapse when done, but only if the user hasn't
-      // manually toggled during this turn
-      thinkingOpen.value = false;
-    }
-  },
-);
 
 const timeLabel = computed(() => {
   const d = new Date(props.message.timestamp);
@@ -168,16 +140,36 @@ async function copyContent() {
 <template>
   <div class="assistant-message">
     <div class="message-body">
-      <!-- 思考过程（含工具调用）— 流式时自动展开，完成后自动折叠。
-           思考文本与工具卡片按时间顺序交错排列，而非先全部思考再全部工具。 -->
-      <details v-if="hasThinking" class="thinking-section" :open="thinkingOpen" @toggle="onThinkingToggle">
+      <!-- 流式进行中：思考过程内联展示，无折叠，如正文一样可见 -->
+      <div v-if="hasThinking && message.isStreaming" class="thinking-live">
+        <div class="thinking-live-header">
+          <span class="thinking-live-dot" />
+          <span>{{ thinkingSummary }}</span>
+        </div>
+        <div class="thinking-live-body">
+          <template v-for="(entry, i) in thinkingTimeline" :key="i">
+            <StreamingText
+              v-if="entry.type === 'thinking'"
+              :text="entry.text"
+              :is-streaming="true"
+            />
+            <ToolOperationList
+              v-else-if="entry.type === 'tool'"
+              :calls="entry.calls"
+            />
+          </template>
+        </div>
+      </div>
+
+      <!-- 完成后：思考过程折叠 -->
+      <details v-else-if="hasThinking" class="thinking-section" :open="false">
         <summary class="thinking-summary">{{ thinkingSummary }}</summary>
         <div class="thinking-content">
           <template v-for="(entry, i) in thinkingTimeline" :key="i">
             <StreamingText
               v-if="entry.type === 'thinking'"
               :text="entry.text"
-              :is-streaming="message.isStreaming"
+              :is-streaming="false"
             />
             <ToolOperationList
               v-else-if="entry.type === 'tool'"
@@ -228,6 +220,43 @@ async function copyContent() {
   max-width: 90%;
 }
 
+/* ── 流式进行中：思考内联展示，如正文可见 ── */
+.thinking-live {
+  margin-bottom: var(--spacing-md);
+  border-left: 3px solid var(--color-accent, #6c8cff);
+  padding-left: 12px;
+}
+
+.thinking-live-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.thinking-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent, #6c8cff);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.thinking-live-body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+
+/* ── 完成后：折叠 ── */
 .thinking-section {
   margin-bottom: var(--spacing-sm);
   border: 1px solid var(--border-color);
