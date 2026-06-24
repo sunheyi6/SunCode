@@ -3,13 +3,22 @@ import { ref } from 'vue';
 import type { AppSettings } from '@shared/types';
 import { useSettingsStore } from '../../stores/settings';
 import ModelSelector from './ModelSelector.vue';
+import TokenUsage from './TokenUsage.vue';
 
 const emit = defineEmits<{
   close: [];
 }>();
 
 const settingsStore = useSettingsStore();
-const activeSection = ref<'model' | 'options'>('model');
+
+type Section = 'model' | 'options' | 'usage';
+const activeSection = ref<Section>('model');
+
+const navItems: { key: Section; label: string; icon: string }[] = [
+  { key: 'model', label: '模型配置', icon: '🧠' },
+  { key: 'options', label: '选项', icon: '⚡' },
+  { key: 'usage', label: '用量统计', icon: '📊' },
+];
 
 function updateThinkingLevel(level: string): void {
   settingsStore.update({
@@ -38,12 +47,7 @@ const permissionModes = [
   { value: 'plan' as const, label: '计划模式', icon: '📋', desc: '仅规划，不修改文件' },
   { value: 'full_access' as const, label: '完全访问', icon: '🔓', desc: '无限制，可自由读写' },
   { value: 'auto_edit' as const, label: '自动编辑', icon: '✏️', desc: '自动编辑文件无需确认' },
-  {
-    value: 'confirm_changes' as const,
-    label: '变更前确认',
-    icon: '✅',
-    desc: '修改前需要用户确认',
-  },
+  { value: 'confirm_changes' as const, label: '变更前确认', icon: '✅', desc: '修改前需要用户确认' },
 ];
 </script>
 
@@ -57,114 +61,133 @@ const permissionModes = [
           <button class="close-btn" @click="emit('close')">✕</button>
         </div>
 
-        <!-- 标签页 -->
-        <div class="section-tabs">
-          <button class="section-tab" :class="{ active: activeSection === 'model' }" @click="activeSection = 'model'">
-            🧠 模型配置
-          </button>
-          <button class="section-tab" :class="{ active: activeSection === 'options' }" @click="activeSection = 'options'">
-            ⚡ 选项
-          </button>
-        </div>
+        <!-- 主体：左侧导航 + 右侧内容 -->
+        <div class="modal-body">
+          <!-- 左侧导航 -->
+          <nav class="settings-nav">
+            <button
+              v-for="item in navItems"
+              :key="item.key"
+              class="nav-item"
+              :class="{ active: activeSection === item.key }"
+              @click="activeSection = item.key"
+            >
+              <span class="nav-icon">{{ item.icon }}</span>
+              <span class="nav-label">{{ item.label }}</span>
+            </button>
+          </nav>
 
-        <div class="modal-content">
-          <!-- 模型选择 -->
-          <section v-if="activeSection === 'model'">
-            <ModelSelector />
-          </section>
+          <!-- 右侧内容 -->
+          <div class="settings-content">
+            <!-- 模型选择 -->
+            <section v-if="activeSection === 'model'">
+              <div class="section-title">🧠 模型配置</div>
+              <p class="section-desc">选择 AI 提供商和模型</p>
+              <ModelSelector />
+            </section>
 
-          <!-- 选项 -->
-          <section v-if="activeSection === 'options'">
-            <div class="option-group">
-              <h4>思考深度（Reasoning Level）</h4>
-              <p class="option-desc">
-                控制模型回答前的"思考"程度。级别越高结果质量越好，但速度更慢、费用更高。
-              </p>
-              <div class="thinking-options">
-                <button
-                  v-for="level in thinkingLevels"
-                  :key="level.value"
-                  class="thinking-btn"
-                  :class="{ active: settingsStore.settings.thinkingLevel === level.value }"
-                  @click="updateThinkingLevel(level.value)"
-                >
-                  <span class="thinking-label">{{ level.label }}</span>
-                  <span class="thinking-desc">{{ level.desc }}</span>
-                </button>
+            <!-- 选项 -->
+            <section v-if="activeSection === 'options'">
+              <div class="section-title">⚡ 选项</div>
+
+              <div class="option-group">
+                <h4>思考深度（Reasoning Level）</h4>
+                <p class="option-desc">
+                  控制模型回答前的"思考"程度。级别越高结果质量越好，但速度更慢、费用更高。
+                </p>
+                <div class="thinking-options">
+                  <button
+                    v-for="level in thinkingLevels"
+                    :key="level.value"
+                    class="thinking-btn"
+                    :class="{ active: settingsStore.settings.thinkingLevel === level.value }"
+                    @click="updateThinkingLevel(level.value)"
+                  >
+                    <span class="thinking-label">{{ level.label }}</span>
+                    <span class="thinking-desc">{{ level.desc }}</span>
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <div class="option-group">
-              <h4>每轮最大工具调用次数</h4>
-              <p class="option-desc">
-                每次请求最多执行多少轮工具调用。值越大可以完成更复杂的任务，但费用也更高。
-              </p>
-              <div class="turns-control">
-                <input
-                  type="range" class="turns-slider" min="1" max="200"
-                  :value="settingsStore.settings.maxTurns"
-                  @input="(e) => updateMaxTurns(e as unknown as Event)"
-                />
-                <span class="turns-value">{{ settingsStore.settings.maxTurns }}</span>
+              <div class="option-group">
+                <h4>每轮最大工具调用次数</h4>
+                <p class="option-desc">
+                  每次请求最多执行多少轮工具调用。值越大可以完成更复杂的任务，但费用也更高。
+                </p>
+                <div class="turns-control">
+                  <input
+                    type="range" class="turns-slider" min="1" max="200"
+                    :value="settingsStore.settings.maxTurns"
+                    @input="(e) => updateMaxTurns(e as unknown as Event)"
+                  />
+                  <span class="turns-value">{{ settingsStore.settings.maxTurns }}</span>
+                </div>
               </div>
-            </div>
 
-            <div class="option-group">
-              <h4>主题</h4>
-              <div class="theme-options">
-                <button class="theme-btn" :class="{ active: settingsStore.settings.theme === 'system' }" @click="settingsStore.setTheme('system')">
-                  <span class="theme-icon">💻</span>
-                  <span>跟随系统</span>
-                </button>
-                <button class="theme-btn" :class="{ active: settingsStore.settings.theme === 'dark' }" @click="settingsStore.setTheme('dark')">
-                  <span class="theme-icon">🌙</span>
-                  <span>暗色</span>
-                </button>
-                <button class="theme-btn" :class="{ active: settingsStore.settings.theme === 'light' }" @click="settingsStore.setTheme('light')">
-                  <span class="theme-icon">☀️</span>
-                  <span>亮色</span>
-                </button>
+              <div class="option-group">
+                <h4>主题</h4>
+                <div class="theme-options">
+                  <button class="theme-btn" :class="{ active: settingsStore.settings.theme === 'system' }" @click="settingsStore.setTheme('system')">
+                    <span class="theme-icon">💻</span>
+                    <span>跟随系统</span>
+                  </button>
+                  <button class="theme-btn" :class="{ active: settingsStore.settings.theme === 'dark' }" @click="settingsStore.setTheme('dark')">
+                    <span class="theme-icon">🌙</span>
+                    <span>暗色</span>
+                  </button>
+                  <button class="theme-btn" :class="{ active: settingsStore.settings.theme === 'light' }" @click="settingsStore.setTheme('light')">
+                    <span class="theme-icon">☀️</span>
+                    <span>亮色</span>
+                  </button>
+                </div>
+                <p class="option-desc" style="margin-top:6px;">
+                  默认跟随系统主题，并在系统主题变化时自动切换。
+                </p>
               </div>
-              <p class="option-desc" style="margin-top:6px;">
-                默认跟随系统主题，并在系统主题变化时自动切换。
-              </p>
-            </div>
 
-            <div class="option-group">
-              <h4>权限模式</h4>
-              <p class="option-desc">
-                控制 Agent 对文件的访问和修改权限。
-              </p>
-              <div class="permission-options">
-                <button
-                  v-for="p in permissionModes"
-                  :key="p.value"
-                  class="perm-btn"
-                  :class="{ active: settingsStore.settings.permissionMode === p.value }"
-                  @click="updatePermissionMode(p.value)"
-                >
-                  <span class="perm-icon">{{ p.icon }}</span>
-                  <div class="perm-info">
-                    <span class="perm-label">{{ p.label }}</span>
-                    <span class="perm-desc">{{ p.desc }}</span>
-                  </div>
-                </button>
+              <div class="option-group">
+                <h4>权限模式</h4>
+                <p class="option-desc">
+                  控制 Agent 对文件的访问和修改权限。
+                </p>
+                <div class="permission-options">
+                  <button
+                    v-for="p in permissionModes"
+                    :key="p.value"
+                    class="perm-btn"
+                    :class="{ active: settingsStore.settings.permissionMode === p.value }"
+                    @click="updatePermissionMode(p.value)"
+                  >
+                    <span class="perm-icon">{{ p.icon }}</span>
+                    <div class="perm-info">
+                      <span class="perm-label">{{ p.label }}</span>
+                      <span class="perm-desc">{{ p.desc }}</span>
+                    </div>
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <div class="option-group">
-              <h4>自动上下文压缩</h4>
-              <p class="option-desc">
-                当对话接近模型上下文限制时，自动总结较早的对话轮次，保持响应快速且节省费用。
-              </p>
-              <label class="toggle-label">
-                <input type="checkbox" :checked="settingsStore.settings.autoCompact"
-                  @change="settingsStore.update({ autoCompact: ($event.target as HTMLInputElement).checked })"
-                />
-                <span>启用自动压缩</span>
-              </label>
-            </div>
-          </section>
+              <div class="option-group">
+                <h4>自动上下文压缩</h4>
+                <p class="option-desc">
+                  当对话接近模型上下文限制时，自动总结较早的对话轮次，保持响应快速且节省费用。
+                </p>
+                <label class="toggle-label">
+                  <input type="checkbox" :checked="settingsStore.settings.autoCompact"
+                    @change="settingsStore.update({ autoCompact: ($event.target as HTMLInputElement).checked })"
+                  />
+                  <span>启用自动压缩</span>
+                </label>
+              </div>
+            </section>
+
+            <!-- 用量统计 -->
+            <section v-if="activeSection === 'usage'">
+              <div class="section-title">📊 用量统计</div>
+              <p class="section-desc">按时间和模型维度查看 Token 使用情况</p>
+              <TokenUsage />
+            </section>
+          </div>
         </div>
       </div>
     </div>
@@ -205,6 +228,7 @@ const permissionModes = [
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* Header */
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -234,38 +258,82 @@ const permissionModes = [
   color: var(--color-text);
 }
 
-.section-tabs {
+/* Body: left nav + right content */
+.modal-body {
   display: flex;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--border-color);
-  gap: 0;
-  flex-shrink: 0;
-}
-.section-tab {
-  padding: 10px 16px;
-  font-size: 13px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all 0.15s;
-}
-.section-tab:hover {
-  color: var(--color-text);
-  background: var(--color-surface);
-}
-.section-tab.active {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
+  flex: 1;
+  min-height: 0;
 }
 
-.modal-content {
+/* Left nav */
+.settings-nav {
+  width: 160px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 8px;
+  gap: 2px;
+  border-right: 1px solid var(--border-color);
+  background: var(--color-surface);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s;
+}
+
+.nav-item:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.nav-item.active {
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.nav-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.nav-label {
+  white-space: nowrap;
+}
+
+/* Right content */
+.settings-content {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
+  min-width: 0;
 }
 
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.section-desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-bottom: 16px;
+}
+
+/* Options */
 .option-group {
   margin-bottom: 20px;
 }

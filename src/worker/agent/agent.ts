@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   AgentStatus,
   AppSettings,
@@ -8,6 +9,9 @@ import type {
   Message,
   RunEvent,
   StreamEvent,
+  SubagentDefinition,
+  SubagentExecution,
+  SubagentResult,
   ToolCallContent,
   ToolResult,
 } from '@shared/types';
@@ -16,13 +20,16 @@ import { createMcpManager } from '../mcp/manager';
 import { createModelRegistry } from '../models/registry';
 import { createToolRegistry } from '../tools/registry';
 import type { Tool } from '../tools/types';
+import { createSubagentTool } from '../tools/subagent';
 import { runAgentLoop } from './agent-loop';
 import { createSkillsLoader } from './skills';
+import { SubagentDispatcher } from './subagent';
 
 export class Agent {
   private workingDir: string;
   private settings: AppSettings;
   private tools: Tool[] = [];
+  private dispatcher: SubagentDispatcher | null = null;
   private messages: Message[] = [];
   private abortController: AbortController | null = null;
   private isRunning = false;
@@ -38,6 +45,7 @@ export class Agent {
   private onBackgroundStart: (proc: BackgroundProcess) => void;
   private onBackgroundComplete: (pid: number, exitCode: number) => void;
   private onRunEvent: (event: RunEvent) => void;
+  private onSubagentEvent: (type: string, data: unknown) => void;
 
   constructor(
     workingDir: string,
@@ -51,6 +59,7 @@ export class Agent {
     onBackgroundStart: (proc: BackgroundProcess) => void,
     onBackgroundComplete: (pid: number, exitCode: number) => void,
     onRunEvent: (event: RunEvent) => void,
+    onSubagentEvent: (type: string, data: unknown) => void,
   ) {
     this.workingDir = workingDir;
     this.settings = settings;
@@ -63,17 +72,44 @@ export class Agent {
     this.onBackgroundStart = onBackgroundStart;
     this.onBackgroundComplete = onBackgroundComplete;
     this.onRunEvent = onRunEvent;
+    this.onSubagentEvent = onSubagentEvent;
 
     void this.initialize();
   }
 
   private async initialize(): Promise<void> {
     try {
-      // Load built-in tools (with background process callbacks)
+      // Load sub-agent definitions
+      const definitions = await loadAgentDefinitions(this.workingDir);
+
+      // Create dispatcher with actual callbacks so sub-agent progress streams to UI
+      this.dispatcher = new SubagentDispatcher(definitions, {
+        settings: this.settings,
+        workingDir: this.workingDir,
+        parentMessages: this.messages,
+        parentSessionId: 'main',
+        abortSignal: new AbortController().signal,
+        depth: 0,
+        ancestorStack: [],
+        callbacks: {
+          onStream: (event) => this.onStream(event),
+          onToolStart: (tc) => this.onToolStart(tc),
+          onToolEnd: (result) => this.onToolEnd(result),
+          onRunEvent: (event) => this.onRunEvent(event),
+          onSubagentStart: (exec) => this.onSubagentEvent('subagentStart', exec),
+          onSubagentEnd: (id, result) => this.onSubagentEvent('subagentEnd', { id, result }),
+          onSubagentProgress: (execId, agent, delta) => this.onSubagentEvent('subagentProgress', { executionId: execId, agent, delta }),
+        },
+      });
+
+      // Load built-in tools
       const registry = createToolRegistry(this.workingDir, {
         onBackgroundStart: (proc) => this.onBackgroundStart(proc),
         onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
       });
+      // Register subagent tool separately (after dispatcher is created)
+      // to avoid circular import between tools/registry.ts and agent/subagent.ts
+      registry.register(createSubagentTool(this.dispatcher));
       this.tools = registry.getAll();
 
       // Load MCP tools
@@ -86,7 +122,7 @@ export class Agent {
       const skillsContent = await skillsLoader.loadAll();
 
       console.log(
-        `Agent initialized: ${this.tools.length} tools, ${skillsContent.length} skills chars`,
+        `Agent initialized: ${this.tools.length} tools (incl. subagent), ${definitions.size} sub-agents, ${skillsContent.length} skills chars`,
       );
     } catch (error) {
       console.error('Agent initialization error:', error);
@@ -95,6 +131,9 @@ export class Agent {
 
   updateSettings(settings: AppSettings): void {
     this.settings = settings;
+    if (this.dispatcher) {
+      this.dispatcher.updateOptions({ settings });
+    }
   }
 
   /**
@@ -102,15 +141,41 @@ export class Agent {
    * Rebuilds built-in tools to enforce the new sandbox boundary.
    * MCP tools and message history are preserved.
    */
-  setWorkingDir(path: string): void {
+  async setWorkingDir(path: string): Promise<void> {
     if (this.workingDir === path) return;
     this.workingDir = path;
 
-    // Rebuild built-in tools with the new working directory
+    // Reload sub-agent definitions for the new working directory
+    const definitions = await loadAgentDefinitions(path);
+    if (this.dispatcher) {
+      this.dispatcher = new SubagentDispatcher(definitions, {
+        settings: this.settings,
+        workingDir: path,
+        parentMessages: this.messages,
+        parentSessionId: 'main',
+        abortSignal: new AbortController().signal,
+        depth: 0,
+        ancestorStack: [],
+        callbacks: {
+          onStream: (event) => this.onStream(event),
+          onToolStart: (tc) => this.onToolStart(tc),
+          onToolEnd: (result) => this.onToolEnd(result),
+          onRunEvent: (event) => this.onRunEvent(event),
+          onSubagentStart: () => {},
+          onSubagentEnd: () => {},
+          onSubagentProgress: () => {},
+        },
+      });
+    }
+
+    // Rebuild built-in tools
     const registry = createToolRegistry(path, {
       onBackgroundStart: (proc) => this.onBackgroundStart(proc),
       onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
     });
+    if (this.dispatcher) {
+      registry.register(createSubagentTool(this.dispatcher));
+    }
     const newBuiltInTools = registry.getAll();
 
     // Replace built-in tools while keeping MCP tools
@@ -146,7 +211,8 @@ export class Agent {
     this.emitStatus('thinking');
 
     const runId = crypto.randomUUID();
-    this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString() });
+    const modelName = `${this.settings.activeProvider}/${this.settings.activeModel}`;
+    this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString(), modelName });
 
     try {
       await this.runLoop(runId);
@@ -177,7 +243,8 @@ export class Agent {
     this.emitStatus('thinking');
 
     const runId = crypto.randomUUID();
-    this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString() });
+    const modelName = `${this.settings.activeProvider}/${this.settings.activeModel}`;
+    this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString(), modelName });
 
     try {
       await this.runLoop(runId);
@@ -288,6 +355,7 @@ export class Agent {
       runId,
       turnCount: result.turnCount,
       timestamp: new Date().toISOString(),
+      tokenUsage: result.tokenUsage,
     });
 
     // Add assistant message to history
@@ -403,4 +471,124 @@ async function loadAgentsMd(workingDir: string): Promise<string> {
   }
 
   return parts.join('\n\n');
+}
+
+/**
+ * Load sub-agent definitions from Markdown files with YAML frontmatter.
+ * Scans:
+ *   1. Project-level: .suncode/agents/*.md
+ *   2. User-level: ~/.suncode/agents/*.md
+ * Project-level definitions win on name conflicts.
+ */
+async function loadAgentDefinitions(workingDir: string): Promise<Map<string, SubagentDefinition>> {
+  const definitions = new Map<string, SubagentDefinition>();
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
+
+  // Scan user-level first (project overrides)
+  const userAgentsDir = join(homeDir, '.suncode', 'agents');
+  await scanAgentDir(userAgentsDir, definitions);
+
+  // Scan project-level (takes precedence)
+  const projectAgentsDir = join(workingDir, '.suncode', 'agents');
+  await scanAgentDir(projectAgentsDir, definitions);
+
+  // If no definitions found, create defaults
+  if (definitions.size === 0) {
+    const defaults = getDefaultDefinitions();
+    for (const def of defaults) {
+      definitions.set(def.name, def);
+    }
+  }
+
+  return definitions;
+}
+
+async function scanAgentDir(
+  dir: string,
+  target: Map<string, SubagentDefinition>,
+): Promise<void> {
+  try {
+    const entries = await readdir(dir);
+    for (const entry of entries) {
+      if (!entry.endsWith('.md')) continue;
+      try {
+        const content = await readFile(join(dir, entry), 'utf-8');
+        const def = parseAgentMarkdown(content);
+        if (def) {
+          // Project level overrides user level
+          target.set(def.name, def);
+        }
+      } catch {
+        // Skip unreadable definitions
+      }
+    }
+  } catch {
+    // Directory may not exist — that's fine
+  }
+}
+
+function parseAgentMarkdown(content: string): SubagentDefinition | null {
+  // Parse YAML frontmatter between --- markers
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!frontmatterMatch) return null;
+
+  const yamlBlock = frontmatterMatch[1]!;
+  const markdownBody = frontmatterMatch[2]!.trim();
+
+  // Simple YAML parser for the subset we need
+  const parsed = parseSimpleYaml(yamlBlock);
+  if (!parsed.name || !parsed.description) return null;
+
+  return {
+    name: parsed.name,
+    description: parsed.description,
+    systemPrompt: markdownBody || parsed.description,
+    tools: parsed.tools
+      ? parsed.tools.split(',').map((s: string) => s.trim()).filter(Boolean)
+      : ['read', 'bash', 'edit', 'write'],
+    model: parsed.model,
+    thinking: parsed.thinking,
+    maxTurns: parsed.maxTurns ? Number.parseInt(parsed.maxTurns, 10) : undefined,
+  };
+}
+
+function parseSimpleYaml(yaml: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of yaml.split('\n')) {
+    const match = line.match(/^(\w[\w-]*):\s*(.*?)\s*$/);
+    if (match) {
+      result[match[1]!] = match[2]!;
+    }
+  }
+  return result;
+}
+
+/** Built-in fallback definitions when no .md files are found. */
+function getDefaultDefinitions(): SubagentDefinition[] {
+  return [
+    {
+      name: 'explore',
+      description: '代码库探索专家，用于查找文件、符号和测试。只读，不修改任何文件。',
+      systemPrompt:
+        '你是代码库探索专家。使用 read、grep、glob 工具查找相关文件、符号和测试。返回简洁发现，包含文件路径和行号引用。不要修改任何文件。',
+      tools: ['read', 'grep', 'glob'],
+      // No maxTurns limit — explore should be thorough
+    },
+    {
+      name: 'review',
+      description: '代码审查专家，审查变更的正确性、回归风险、测试覆盖率和可维护性。只读，不修改文件。',
+      systemPrompt:
+        '你是务实的代码审查员。关注实质性缺陷、边界条件、安全漏洞和可维护性问题。引用文件和行号，区分已确认问题和改进建议。报告应简洁，按严重程度排序。不要修改任何文件。',
+      tools: ['read', 'grep', 'glob', 'bash'],
+      maxTurns: 12,
+    },
+    {
+      name: 'implement',
+      description: '代码实现专家，编写、修改文件实现指定功能。可读写文件，执行构建和测试命令。',
+      systemPrompt:
+        '你是代码实现专家。根据任务描述编写或修改代码实现功能。遵循项目现有的代码风格、模式和约定。完成后运行相关测试确保改动正确。提交前自查代码质量。',
+      tools: ['read', 'write', 'edit', 'bash', 'grep', 'glob'],
+      maxTurns: 20,
+    },
+  ];
 }

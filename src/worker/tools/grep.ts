@@ -70,11 +70,35 @@ export function createGrepTool(workingDir: string) {
       args.push('--', pattern, '.');
 
       return new Promise((resolveResult) => {
-        const child = spawn('rg', args, {
-          cwd: normalized,
-          env: process.env,
-          timeout: 30000,
-          stdio: ['pipe', 'pipe', 'pipe'],
+        let child;
+        try {
+          child = spawn('rg', args, {
+            cwd: normalized,
+            env: process.env,
+            timeout: 30000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+        } catch (_err) {
+          resolveResult(
+            this.failure(
+              'ripgrep (rg) is not installed. Install it from https://github.com/BurntSushi/ripgrep/releases\n' +
+              'Or use glob + read to explore files, or bash with findstr/PowerShell Select-String instead.',
+            ),
+          );
+          return;
+        }
+
+        child.on('error', (err) => {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+            resolveResult(
+              this.failure(
+                'ripgrep (rg) is not installed. Install it from https://github.com/BurntSushi/ripgrep/releases\n' +
+                'Alternatively, use glob to find files and read to inspect them.',
+              ),
+            );
+          } else {
+            resolveResult(this.failure(`Grep error: ${err.message}`));
+          }
         });
 
         let stdout = '';

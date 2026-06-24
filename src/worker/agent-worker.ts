@@ -99,7 +99,7 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
       console.log('[Worker] Working dir set:', msg.path);
       if (agent) {
         // Update existing agent without recreating it
-        agent.setWorkingDir(msg.path);
+        await agent.setWorkingDir(msg.path);
         console.log('[Worker] Working dir updated');
       } else {
         // First-time initialization
@@ -115,6 +115,7 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
           (proc) => post({ type: 'bgProcessStarted', process: proc }),
           (pid, exitCode) => post({ type: 'bgProcessCompleted', pid, exitCode }),
           (event) => post({ type: 'runEvent', event }),
+          (type, data) => post({ type: type as WorkerOutMessage['type'], ...(data as Record<string, unknown>) } as WorkerOutMessage),
         );
         console.log('[Worker] Agent created');
       }

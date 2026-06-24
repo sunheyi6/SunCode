@@ -1,15 +1,19 @@
+import { watch as fsWatch } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, watch, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { DEFAULT_SETTINGS } from '@shared/constants';
 import type {
   AppSettings,
+  DayStats,
   FileNode,
   Message,
+  ModelStats,
   SessionMeta,
+  TokenUsageSummary,
   WorkerInMessage,
   WorkerOutMessage,
 } from '@shared/types';
@@ -22,8 +26,9 @@ import {
   loadSession,
   saveSession,
   deleteSession,
+  deleteSessions,
 } from './session-store';
-import { appendEvent, startRun, endRun } from './run-store';
+import { appendEvent, startRun, endRun, listRuns, getEvents } from './run-store';
 import { recoverInterruptedSessions } from './recovery';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -117,14 +122,21 @@ function getAgentWorker(): Worker {
           const evt = msg.event;
           const sid = currentSessionId;
           if (!sid) break;
-          // On run_started, create the run directory
           if (evt.type === 'run_started') {
             await startRun(sid, evt.runId);
           }
-          // Append the event to the JSONL
           await appendEvent(sid, evt.runId, evt);
           break;
         }
+        case 'subagentStart':
+          mainWindow.webContents.send('agent:subagent-start', msg.execution);
+          break;
+        case 'subagentEnd':
+          mainWindow.webContents.send('agent:subagent-end', msg.id, msg.result);
+          break;
+        case 'subagentProgress':
+          mainWindow.webContents.send('agent:subagent-progress', msg.executionId, msg.agent, msg.delta);
+          break;
       }
     });
 
@@ -234,16 +246,28 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // Agent
   ipcMain.on('agent:prompt', (_event, text: string) => {
-    console.log('[Main] agent:prompt received:', text.slice(0, 80));
-    sendToWorker({ type: 'prompt', text });
+    try {
+      console.log('[Main] agent:prompt received:', text.slice(0, 80));
+      sendToWorker({ type: 'prompt', text });
+    } catch (err) {
+      console.error('[Main] agent:prompt failed:', (err as Error).message);
+    }
   });
 
   ipcMain.on('agent:abort', () => {
-    sendToWorker({ type: 'abort' });
+    try {
+      sendToWorker({ type: 'abort' });
+    } catch (err) {
+      console.error('[Main] agent:abort failed:', (err as Error).message);
+    }
   });
 
   ipcMain.on('agent:continue', () => {
-    sendToWorker({ type: 'continue' });
+    try {
+      sendToWorker({ type: 'continue' });
+    } catch (err) {
+      console.error('[Main] agent:continue failed:', (err as Error).message);
+    }
   });
 
   // File tree
@@ -256,8 +280,8 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.handle(
     'fs:readFile',
     async (_event, filePath: string, offset?: number, limit?: number) => {
+      const absPath = join(process.cwd(), filePath);
       try {
-        const absPath = join(process.cwd(), filePath);
         const content = await readFile(absPath, 'utf-8');
         if (offset !== undefined || limit !== undefined) {
           const lines = content.split('\n');
@@ -267,7 +291,8 @@ export function registerIpcHandlers(wm: WindowManager): void {
         }
         return content;
       } catch (error) {
-        throw new Error(`Failed to read file: ${(error as Error).message}`);
+        const msg = (error as Error).message.replace(absPath, filePath);
+        throw new Error(`Failed to read file: ${msg}`);
       }
     },
   );
@@ -285,7 +310,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
     const absPath = join(process.cwd(), filePath);
     if (watchers.has(absPath)) return;
 
-    const watcher = watch(absPath, async () => {
+    const watcher = fsWatch(absPath, async () => {
       try {
         const content = await readFile(absPath, 'utf-8');
         const mainWindow = windowManager.getMainWindow();
@@ -295,7 +320,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       }
     });
 
-    watchers.set(absPath, () => watcher.then((w) => w.close()));
+    watchers.set(absPath, () => watcher.close());
   });
 
   ipcMain.on('fs:unwatchFile', (_event, filePath: string) => {
@@ -309,130 +334,179 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // Session management
   ipcMain.handle('session:list', async () => {
-    // Prefer disk as source of truth; fall back to memory cache
-    const diskSessions = await loadAllSessions();
-    if (diskSessions.length > 0) {
-      // Sync memory cache with disk
-      for (const meta of diskSessions) {
-        sessions.set(meta.id, meta);
+    try {
+      const diskSessions = await loadAllSessions();
+      if (diskSessions.length > 0) {
+        for (const meta of diskSessions) {
+          sessions.set(meta.id, meta);
+        }
+        return diskSessions;
       }
-      return diskSessions;
+      return Array.from(sessions.values());
+    } catch (err) {
+      console.error('[Main] session:list failed:', (err as Error).message);
+      return Array.from(sessions.values());
     }
-    return Array.from(sessions.values());
   });
 
   ipcMain.handle('session:create', async (_event, name: string, workingDirectory?: string) => {
-    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const meta: SessionMeta = {
-      id,
-      name,
-      created: new Date().toISOString(),
-      updated: new Date().toISOString(),
-      messageCount: 0,
-      workingDirectory: workingDirectory || process.cwd(),
-    };
-    // Persist to memory and disk
-    sessions.set(id, meta);
-    sessionMessages.set(id, []);
-    await saveSession(meta, []);
-    currentSessionId = id;
-    sendToWorker({ type: 'setMessages', messages: [] });
-    return meta;
+    try {
+      const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const meta: SessionMeta = {
+        id,
+        name,
+        created: new Date().toISOString(),
+        updated: new Date().toISOString(),
+        messageCount: 0,
+        workingDirectory: workingDirectory || process.cwd(),
+      };
+      sessions.set(id, meta);
+      sessionMessages.set(id, []);
+      await saveSession(meta, []);
+      currentSessionId = id;
+      sendToWorker({ type: 'setMessages', messages: [] });
+      return meta;
+    } catch (err) {
+      console.error('[Main] session:create failed:', (err as Error).message);
+      throw err;
+    }
   });
 
   ipcMain.handle('session:load', async (_event, id: string) => {
-    currentSessionId = id;
+    try {
+      currentSessionId = id;
+      let messages = sessionMessages.get(id);
+      let meta = sessions.get(id);
 
-    // Try memory cache first, then disk
-    let messages = sessionMessages.get(id);
-    let meta = sessions.get(id);
-
-    if (!messages || messages.length === 0) {
-      const disk = await loadSession(id);
-      if (disk) {
-        messages = disk.messages;
-        meta = disk.meta;
-        // Restore to memory cache
-        sessions.set(id, meta);
-        sessionMessages.set(id, messages);
-      }
-    }
-
-    messages = messages || [];
-    sendToWorker({ type: 'setMessages', messages });
-    if (meta) {
-      sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
-    }
-    return messages;
-  });
-
-  ipcMain.handle('session:saveMessage', async (_event, message: Message) => {
-    if (!currentSessionId) return;
-    const msgs = sessionMessages.get(currentSessionId) || [];
-    const isFirstMessage = msgs.length === 0;
-    msgs.push(message);
-    sessionMessages.set(currentSessionId, msgs);
-
-    const meta = sessions.get(currentSessionId);
-    if (meta) {
-      meta.updated = new Date().toISOString();
-      meta.messageCount = msgs.length;
-
-      // Auto-title: use the first user message as the conversation title
-      if (isFirstMessage && message.role === 'user') {
-        const title = extractTitle(message);
-        if (title) {
-          meta.name = title;
+      if (!messages || messages.length === 0) {
+        const disk = await loadSession(id);
+        if (disk) {
+          messages = disk.messages;
+          meta = disk.meta;
+          sessions.set(id, meta);
+          sessionMessages.set(id, messages);
         }
       }
 
-      // Persist to disk
-      await saveSession(meta, msgs);
+      messages = messages || [];
+      sendToWorker({ type: 'setMessages', messages });
+      if (meta) {
+        sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
+      }
+      return messages;
+    } catch (err) {
+      console.error('[Main] session:load failed:', (err as Error).message);
+      return [];
+    }
+  });
+
+  ipcMain.handle('session:saveMessage', async (_event, message: Message) => {
+    try {
+      if (!currentSessionId) {
+        console.log('[Main] saveMessage: SKIP (no currentSessionId)');
+        return;
+      }
+      const msgs = sessionMessages.get(currentSessionId) || [];
+      const isFirstMessage = msgs.length === 0;
+      msgs.push(message);
+      sessionMessages.set(currentSessionId, msgs);
+
+      const meta = sessions.get(currentSessionId);
+      if (meta) {
+        meta.updated = new Date().toISOString();
+        meta.messageCount = msgs.length;
+        if (isFirstMessage && message.role === 'user') {
+          const title = extractTitle(message);
+          if (title) meta.name = title;
+        }
+        await saveSession(meta, msgs);
+      }
+    } catch (err) {
+      console.error('[Main] session:saveMessage failed:', (err as Error).message);
+    }
+  });
+
+  ipcMain.handle('session:delete', async (_event, id: string) => {
+    try {
+      sessions.delete(id);
+      sessionMessages.delete(id);
+      await deleteSession(id);
+      const remaining = Array.from(sessions.values());
+      const wasActive = currentSessionId === id;
+      if (wasActive) currentSessionId = null;
+      return { remaining, wasActive };
+    } catch (err) {
+      console.error('[Main] session:delete failed:', (err as Error).message);
+      return { remaining: Array.from(sessions.values()), wasActive: false };
+    }
+  });
+
+  ipcMain.handle('session:deleteMany', async (_event, ids: string[]) => {
+    try {
+      for (const id of ids) {
+        sessions.delete(id);
+        sessionMessages.delete(id);
+      }
+      await deleteSessions(ids);
+      const remaining = Array.from(sessions.values());
+      const wasActive = Boolean(currentSessionId && ids.includes(currentSessionId));
+      if (wasActive) currentSessionId = null;
+      return { remaining, wasActive };
+    } catch (err) {
+      console.error('[Main] session:deleteMany failed:', (err as Error).message);
+      return { remaining: Array.from(sessions.values()), wasActive: false };
     }
   });
 
   ipcMain.handle('session:export', async (_event, id: string) => {
-    const msgs = sessionMessages.get(id) || [];
-    const html = generateSessionHtml(msgs);
-    const result = await dialog.showSaveDialog({
-      filters: [{ name: 'HTML', extensions: ['html'] }],
-    });
-    if (!result.canceled && result.filePath) {
-      const { writeFile } = await import('node:fs/promises');
-      await writeFile(result.filePath, html, 'utf-8');
-      return result.filePath;
+    try {
+      const msgs = sessionMessages.get(id) || [];
+      const html = generateSessionHtml(msgs);
+      const result = await dialog.showSaveDialog({
+        filters: [{ name: 'HTML', extensions: ['html'] }],
+      });
+      if (!result.canceled && result.filePath) {
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(result.filePath, html, 'utf-8');
+        return result.filePath;
+      }
+      return '';
+    } catch (err) {
+      console.error('[Main] session:export failed:', (err as Error).message);
+      return '';
     }
-    return '';
   });
 
   // Settings
   ipcMain.handle('settings:get', async () => {
-    console.log(
-      '[Main] settings:get called, envApiKeys:',
-      Object.keys(currentSettings.envApiKeys || {}),
-    );
-    return currentSettings;
+    try {
+      return currentSettings;
+    } catch (err) {
+      console.error('[Main] settings:get failed:', (err as Error).message);
+      return { ...DEFAULT_SETTINGS };
+    }
   });
 
   ipcMain.handle('settings:update', async (_event, partial: Partial<AppSettings>) => {
-    currentSettings = { ...currentSettings, ...partial };
+    try {
+      currentSettings = { ...currentSettings, ...partial };
 
-    // ===== 关键：同步 API Key 到环境变量 =====
-    if (partial.envApiKeys) {
-      for (const [provider, key] of Object.entries(partial.envApiKeys)) {
-        const envKey = getProviderEnvKey(provider);
-        if (envKey && key) {
-          process.env[envKey] = key;
+      if (partial.envApiKeys) {
+        for (const [provider, key] of Object.entries(partial.envApiKeys)) {
+          const envKey = getProviderEnvKey(provider);
+          if (envKey && key) process.env[envKey] = key;
         }
       }
-    }
 
-    sendToWorker({ type: 'config', settings: currentSettings });
-    const mainWindow = windowManager.getMainWindow();
-    mainWindow?.webContents.send('settings:changed', currentSettings);
-    // ===== 持久化到磁盘 =====
-    saveSettings(currentSettings);
-    return currentSettings;
+      sendToWorker({ type: 'config', settings: currentSettings });
+      const mainWindow = windowManager.getMainWindow();
+      mainWindow?.webContents.send('settings:changed', currentSettings);
+      await saveSettings(currentSettings);
+      return currentSettings;
+    } catch (err) {
+      console.error('[Main] settings:update failed:', (err as Error).message);
+      return currentSettings;
+    }
   });
 
   // Confirm dialog
@@ -445,6 +519,11 @@ export function registerIpcHandlers(wm: WindowManager): void {
       message,
     });
     return result.response === 1;
+  });
+
+  // App
+  ipcMain.handle('app:getWorkingDir', async () => {
+    return process.cwd();
   });
 
   // Window title bar overlay text
@@ -513,8 +592,12 @@ export function registerIpcHandlers(wm: WindowManager): void {
       if (!diff.trim()) return { message: 'chore: update' };
 
       const pi = await import('@earendil-works/pi-ai');
-      const model = pi.getModel(currentSettings.activeProvider, currentSettings.activeModel);
-      const result = await pi.completeSimple(model, {
+      // pi-ai uses template literal types for providers — cast to any for dynamic usage
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const model = pi.getModel(currentSettings.activeProvider as any, currentSettings.activeModel);
+      // pi-ai's TS types for completeSimple params differ from its runtime API — safe to cast
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await pi.completeSimple(model as any, {
         system:
           'You are a commit message generator. Write a concise Conventional Commit message (e.g. "feat(scope): summary") based on the git diff. Use types: feat, fix, refactor, chore, docs, style, test. Keep it under 72 characters. Return ONLY the message, no quotes, no explanation.',
         messages: [
@@ -524,18 +607,20 @@ export function registerIpcHandlers(wm: WindowManager): void {
           },
         ],
         tools: [],
-      });
+      } as any);
 
-      if (Array.isArray(result.content) && result.content.length > 0) {
-        const textBlock = result.content.find(
-          (b: { type: string; text?: string }) => b.type === 'text',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const content = (result as any).content;
+      if (Array.isArray(content) && content.length > 0) {
+        const textBlock = (content as Array<{ type: string; text?: string }>).find(
+          (b) => b.type === 'text',
         );
-        if (textBlock && 'text' in textBlock && textBlock.text) {
+        if (textBlock?.text) {
           return { message: textBlock.text.trim() };
         }
       }
-      if (typeof result.content === 'string' && result.content.trim()) {
-        return { message: result.content.trim() };
+      if (typeof content === 'string' && content.trim()) {
+        return { message: content.trim() };
       }
       return { message: 'chore: update' };
     } catch {
@@ -557,16 +642,21 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.handle('models:getModels', async (_event, provider: string) => {
     try {
       const { getModels } = await import('@earendil-works/pi-ai');
-      const models = getModels(provider);
-      return models.map((m: Record<string, unknown>) => ({
-        id: m.id as string,
-        name: m.name as string,
-        provider: (m.provider as string) || provider,
-        contextWindow: (m.contextWindow as number) || 128000,
-        maxTokens: (m.maxTokens as number) || 4096,
-        supportsReasoning: Boolean(m.reasoning),
-        supportsImages: Array.isArray(m.input) && (m.input as string[]).includes('image'),
-      }));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const models = getModels(provider as any);
+      return models.map((m) => {
+        const d = m as unknown as Record<string, unknown>;
+        return {
+          id: d.id as string,
+          name: d.name as string,
+          provider: (d.provider as string) || provider,
+          contextWindow: (d.contextWindow as number) || 128000,
+          maxTokens: (d.maxTokens as number) || 4096,
+          supportsReasoning: Boolean(d.reasoning),
+          supportsImages:
+            Array.isArray(d.input) && (d.input as string[]).includes('image'),
+        };
+      });
     } catch {
       return [];
     }
@@ -596,25 +686,99 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // ===== API Keys =====
   ipcMain.handle('settings:setApiKey', async (_event, provider: string, key: string) => {
-    // Store in process env for the agent worker
-    const envKey = getProviderEnvKey(provider);
-    if (envKey) {
-      process.env[envKey] = key;
+    try {
+      const envKey = getProviderEnvKey(provider);
+      if (envKey) process.env[envKey] = key;
+      currentSettings.envApiKeys[provider] = key;
+      sendToWorker({ type: 'config', settings: currentSettings });
+      await saveSettings(currentSettings);
+      return true;
+    } catch (err) {
+      console.error('[Main] settings:setApiKey failed:', (err as Error).message);
+      return false;
     }
-    // Also store in settings
-    currentSettings.envApiKeys[provider] = key;
-    sendToWorker({ type: 'config', settings: currentSettings });
-    saveSettings(currentSettings);
-    return true;
   });
 
   ipcMain.handle('settings:getApiKeys', async () => {
-    const keys: Record<string, string> = {};
-    for (const [provider] of Object.entries(currentSettings.envApiKeys)) {
-      const envKey = getProviderEnvKey(provider);
-      keys[provider] = envKey ? process.env[envKey] || '' : '';
+    try {
+      const keys: Record<string, string> = {};
+      for (const [provider] of Object.entries(currentSettings.envApiKeys)) {
+        const envKey = getProviderEnvKey(provider);
+        keys[provider] = envKey ? process.env[envKey] || '' : '';
+      }
+      return keys;
+    } catch (err) {
+      console.error('[Main] settings:getApiKeys failed:', (err as Error).message);
+      return {};
     }
-    return keys;
+  });
+
+  // ===== Token Usage Stats =====
+  ipcMain.handle('stats:getTokenUsage', async (): Promise<TokenUsageSummary> => {
+    try {
+    const dailyMap = new Map<string, { input: number; output: number; total: number; runs: number }>();
+    const modelMap = new Map<string, { input: number; output: number; total: number; runs: number }>();
+
+    const diskSessions = await loadAllSessions();
+    for (const session of diskSessions) {
+      const runIds = await listRuns(session.id);
+      let sessionModel = 'unknown';
+
+      for (const runId of runIds) {
+        const events = await getEvents(session.id, runId);
+
+        // Extract model from run_started
+        const started = events.find((e) => e.type === 'run_started');
+        if (started && started.type === 'run_started' && started.modelName) {
+          sessionModel = started.modelName;
+        }
+
+        // Extract token usage from run_completed
+        const completed = events.find((e) => e.type === 'run_completed');
+        if (completed && completed.type === 'run_completed' && completed.tokenUsage) {
+          const { input, output, total } = completed.tokenUsage;
+          const date = completed.timestamp.split('T')[0]!;
+
+          // Aggregate daily
+          const day = dailyMap.get(date) || { input: 0, output: 0, total: 0, runs: 0 };
+          day.input += input;
+          day.output += output;
+          day.total += total;
+          day.runs += 1;
+          dailyMap.set(date, day);
+
+          // Aggregate by model
+          const model = modelMap.get(sessionModel) || { input: 0, output: 0, total: 0, runs: 0 };
+          model.input += input;
+          model.output += output;
+          model.total += total;
+          model.runs += 1;
+          modelMap.set(sessionModel, model);
+        }
+      }
+    }
+
+    // Sort and build result
+    const daily: DayStats[] = [...dailyMap.entries()]
+      .map(([date, d]) => ({ date, ...d }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const byModel: ModelStats[] = [...modelMap.entries()]
+      .map(([modelName, m]) => ({ modelName, ...m }))
+      .sort((a, b) => b.total - a.total);
+
+    const totals = {
+      input: byModel.reduce((s, m) => s + m.input, 0),
+      output: byModel.reduce((s, m) => s + m.output, 0),
+      total: byModel.reduce((s, m) => s + m.total, 0),
+      runs: byModel.reduce((s, m) => s + m.runs, 0),
+    };
+
+    return { daily, byModel, totals };
+    } catch (err) {
+      console.error('[Main] stats:getTokenUsage failed:', (err as Error).message);
+      return { daily: [], byModel: [], totals: { input: 0, output: 0, total: 0, runs: 0 } };
+    }
   });
 }
 

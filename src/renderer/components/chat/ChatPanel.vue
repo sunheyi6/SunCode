@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
 import { useAgent } from '../../composables/useAgent';
 import { useChatStore } from '../../stores/chat';
 import ChatHeader from './ChatHeader.vue';
@@ -7,7 +7,7 @@ import MessageList from './MessageList.vue';
 import ChatInput from './ChatInput.vue';
 import PendingPromptQueue from './PendingPromptQueue.vue';
 
-const { send, interruptAndSend, isStreaming } = useAgent();
+const { send, abort, interruptAndSend, isStreaming } = useAgent();
 const chatStore = useChatStore();
 
 const hasMessages = computed(() => chatStore.messages.length > 0);
@@ -15,6 +15,24 @@ const hasMessages = computed(() => chatStore.messages.length > 0);
 function handleSend(text: string): void {
   send(text);
 }
+
+function handleStop(): void {
+  abort();
+}
+
+// ESC to abort
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && isStreaming.value) {
+    abort();
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown);
+});
+onUnmounted(() => {
+  document.removeEventListener('keydown', onKeydown);
+});
 </script>
 
 <template>
@@ -27,7 +45,7 @@ function handleSend(text: string): void {
       <MessageList />
       <PendingPromptQueue @send-now="interruptAndSend" />
       <div class="input-area">
-        <ChatInput @send="handleSend" :is-streaming="isStreaming" />
+        <ChatInput @send="handleSend" @stop="handleStop" :is-streaming="isStreaming" />
       </div>
     </template>
 
@@ -50,7 +68,7 @@ function handleSend(text: string): void {
         </div>
         <div class="welcome-input-area">
           <PendingPromptQueue @send-now="interruptAndSend" />
-          <ChatInput @send="handleSend" :is-streaming="isStreaming" />
+          <ChatInput @send="handleSend" @stop="handleStop" :is-streaming="isStreaming" />
         </div>
       </div>
     </template>

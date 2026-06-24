@@ -12,6 +12,7 @@ import type {
   FileNode,
   AppSettings,
   SessionMeta,
+  TokenUsageSummary,
 } from '@shared/types';
 
 declare global {
@@ -40,6 +41,8 @@ declare global {
       loadSession(id: string): Promise<Message[]>;
       saveMessage(message: Message): Promise<void>;
       exportSession(id: string): Promise<string>;
+      deleteSession(id: string): Promise<{ remaining: SessionMeta[]; wasActive: boolean }>;
+      deleteSessions(ids: string[]): Promise<{ remaining: SessionMeta[]; wasActive: boolean }>;
 
       // Settings
       getSettings(): Promise<AppSettings>;
@@ -69,6 +72,7 @@ declare global {
 
       // App
       getWorkingDir(): Promise<string>;
+      getTokenUsage(): Promise<TokenUsageSummary>;
 
       // Git
       getGitInfo(workingDir: string): Promise<GitInfo>;
@@ -85,6 +89,8 @@ declare global {
 
       // Window
       setTitleBarOverlayText(text: string): void;
+      // Subagent
+      onSubagentProgress(callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void): () => void;
     };
   }
 }

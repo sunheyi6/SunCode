@@ -1,5 +1,5 @@
 import { readdir, stat } from 'node:fs/promises';
-import { resolve, isAbsolute, normalize, relative, join, extname, sep } from 'node:path';
+import { resolve, isAbsolute, normalize, relative, join, sep } from 'node:path';
 import { BaseTool, p, obj } from './types';
 
 export function createGlobTool(workingDir: string) {
@@ -25,16 +25,19 @@ export function createGlobTool(workingDir: string) {
       if (!pattern) return this.failure('pattern is required');
 
       const absPath = isAbsolute(basePath) ? basePath : resolve(workingDir, basePath);
-      const normalized = normalize(absPath);
+
+      // Extract directory prefix from pattern (e.g. "src/main/**" → base + "src/main", pattern → "**")
+      const { searchDir, effectivePattern } = extractDirFromPattern(absPath, pattern);
 
       // Security: prevent globbing outside working directory
-      if (!normalized.startsWith(resolve(workingDir))) {
-        return this.failure(`Cannot search outside working directory: ${normalized}`);
+      const workRoot = resolve(workingDir);
+      if (!searchDir.startsWith(workRoot)) {
+        return this.failure(`Cannot search outside working directory: ${searchDir}`);
       }
 
       try {
-        const files = await findFiles(normalized, pattern);
-        const relativeFiles = files.map((f) => relative(normalized, f));
+        const files = await findFiles(searchDir, effectivePattern);
+        const relativeFiles = files.map((f) => relative(searchDir, f));
 
         if (relativeFiles.length === 0) {
           return this.success(`No files matching pattern: ${pattern}`);
@@ -190,4 +193,36 @@ function globToRegex(pattern: string): RegExp {
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Extract a non-wildcard directory prefix from the glob pattern.
+ * E.g. "src/main/**\/*.ts" → searchDir = "/abs/path/src/main", effectivePattern = "**\/*.ts"
+ * This ensures the walk starts from the right directory and relative paths match correctly.
+ */
+function extractDirFromPattern(
+  basePath: string,
+  pattern: string,
+): { searchDir: string; effectivePattern: string } {
+  let searchDir = basePath;
+  let effectivePattern = pattern;
+
+  // Normalize separators
+  const normalizedPattern = pattern.replace(/\\/g, '/');
+  const parts = normalizedPattern.split('/');
+
+  // Walk until we hit a wildcard-containing segment
+  let prefixEnd = 0;
+  for (const part of parts) {
+    if (part.includes('*') || part.includes('?') || part.includes('{')) break;
+    prefixEnd++;
+  }
+
+  if (prefixEnd > 0) {
+    const prefixPath = parts.slice(0, prefixEnd).join('/');
+    searchDir = join(basePath, prefixPath);
+    effectivePattern = parts.slice(prefixEnd).join('/') || '**';
+  }
+
+  return { searchDir, effectivePattern };
 }

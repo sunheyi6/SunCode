@@ -13,6 +13,7 @@ import type {
   FileNode,
   AppSettings,
   SessionMeta,
+  TokenUsageSummary,
 } from '@shared/types';
 
 const api = (): Window['suncode'] => window.suncode;
@@ -85,6 +86,14 @@ export const bridge = {
     return api().saveMessage(message);
   },
 
+  async deleteSession(id: string): Promise<{ remaining: SessionMeta[]; wasActive: boolean }> {
+    return api().deleteSession(id);
+  },
+
+  async deleteSessions(ids: string[]): Promise<{ remaining: SessionMeta[]; wasActive: boolean }> {
+    return api().deleteSessions(ids);
+  },
+
   // ===== Settings =====
   async getSettings(): Promise<AppSettings> {
     return api().getSettings();
@@ -136,6 +145,10 @@ export const bridge = {
     return api().getWorkingDir();
   },
 
+  async getTokenUsage(): Promise<TokenUsageSummary> {
+    return api().getTokenUsage();
+  },
+
   // ===== Git =====
   async getGitInfo(workingDir: string): Promise<GitInfo> {
     return api().getGitInfo(workingDir);
@@ -163,6 +176,13 @@ export const bridge = {
 
   onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void {
     return api().onBgProcessCompleted(callback);
+  },
+
+  // ===== Subagent =====
+  onSubagentProgress(
+    callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void,
+  ): () => void {
+    return api().onSubagentProgress(callback);
   },
 
   // ===== Window =====

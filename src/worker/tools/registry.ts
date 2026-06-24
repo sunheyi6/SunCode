@@ -69,7 +69,9 @@ export class ToolRegistry {
 }
 
 /**
- * Create a ToolRegistry pre-populated with the 6 built-in tools.
+ * Create a ToolRegistry pre-populated with built-in tools.
+ * The subagent tool is NOT registered here — it's added by Agent after
+ * creating the dispatcher, to avoid circular imports.
  */
 export function createToolRegistry(
   workingDir: string,

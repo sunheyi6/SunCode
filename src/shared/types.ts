@@ -74,6 +74,10 @@ export interface FileEditDetails {
   addedLines?: number;
   removedLines?: number;
   error?: string;
+  /** Pre-edit content for diff display (truncated to relevant section). */
+  oldContent?: string;
+  /** Post-edit content for diff display (truncated to relevant section). */
+  newContent?: string;
 }
 
 export interface CommandDetails {
@@ -99,6 +103,8 @@ export interface ToolResult {
   details?: ToolResultDetails;
   /** PID when run in background */
   pid?: number;
+  /** Sub-agent results (only for the subagent tool) */
+  subagentResults?: SubagentResult[];
 }
 
 /** Info about a background process started by Bash tool */
@@ -214,7 +220,10 @@ export type WorkerOutMessage =
   | { type: 'bgProcessStarted'; process: BackgroundProcess }
   | { type: 'bgProcessCompleted'; pid: number; exitCode: number }
   | { type: 'runStarted'; runId: string }
-  | { type: 'runEvent'; event: RunEvent };
+  | { type: 'runEvent'; event: RunEvent }
+  | { type: 'subagentStart'; execution: SubagentExecution }
+  | { type: 'subagentEnd'; id: string; result: SubagentResult }
+  | { type: 'subagentProgress'; executionId: string; agent: string; delta: SubagentProgressDelta };
 
 /** Streaming event types from the LLM */
 export type StreamEventType =
@@ -258,7 +267,7 @@ export type RunId = string;
 
 /** Events recorded in the per-run JSONL event log. */
 export type RunEvent =
-  | { type: 'run_started'; runId: RunId; timestamp: string }
+  | { type: 'run_started'; runId: RunId; timestamp: string; modelName?: string }
   | { type: 'turn_started'; runId: RunId; turnNumber: number; timestamp: string }
   | { type: 'stream_event'; runId: RunId; event: StreamEvent; timestamp: string }
   | { type: 'tool_started'; runId: RunId; toolCallId: string; toolName: string; timestamp: string }
@@ -277,7 +286,7 @@ export type RunEvent =
       hasToolCalls: boolean;
       timestamp: string;
     }
-  | { type: 'run_completed'; runId: RunId; turnCount: number; timestamp: string }
+  | { type: 'run_completed'; runId: RunId; turnCount: number; timestamp: string; tokenUsage?: { input: number; output: number; total: number } }
   | { type: 'run_failed'; runId: RunId; error: string; timestamp: string }
   | { type: 'run_aborted'; runId: RunId; timestamp: string }
   | { type: 'run_recovered'; runId: RunId; reason: string; timestamp: string };
@@ -296,6 +305,91 @@ export interface AgentEventCallbacks {
 
 /** Settings update callback */
 export type SettingsListener = (settings: AppSettings) => void;
+
+// ===== Stats Types =====
+
+export interface TokenUsageSummary {
+  /** Daily aggregated token usage */
+  daily: DayStats[];
+  /** Per-model aggregated token usage */
+  byModel: ModelStats[];
+  /** Grand totals */
+  totals: { input: number; output: number; total: number; runs: number };
+}
+
+export interface DayStats {
+  date: string; // YYYY-MM-DD
+  input: number;
+  output: number;
+  total: number;
+  runs: number;
+}
+
+export interface ModelStats {
+  modelName: string;
+  input: number;
+  output: number;
+  total: number;
+  runs: number;
+}
+
+// ===== Subagent Types =====
+
+/** Definition of a sub-agent loaded from .suncode/agents/*.md */
+export interface SubagentDefinition {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  tools: string[]; // allowed tool names (whitelist)
+  model?: string;
+  thinking?: string;
+  maxTurns?: number;
+}
+
+/** A single sub-agent delegation call */
+export interface SubagentCall {
+  agent: string;
+  prompt: string;
+  session?: string; // persistent session handle
+  initialContext?: 'empty' | 'parent';
+  model?: string;
+}
+
+/** Result from a sub-agent execution */
+export interface SubagentResult {
+  agent: string;
+  session?: string;
+  success: boolean;
+  output: string;
+  toolCalls: number;
+  tokenUsage: { input: number; output: number; total: number };
+  error?: string;
+  /** Sub-agent's internal thinking stream (for display in SubagentCard). */
+  thinking?: string;
+  /** Sub-agent's internal tool calls with results (for display in SubagentCard). */
+  internalCalls?: ToolCallContent[];
+}
+
+/** Runtime state of a sub-agent execution */
+export type SubagentState = 'pending' | 'running' | 'done' | 'error';
+
+/** Runtime info about an active sub-agent (for UI) */
+export interface SubagentExecution {
+  id: string;
+  agent: string;
+  state: SubagentState;
+  startTime: number;
+  prompt: string;
+  result?: SubagentResult;
+}
+
+/** Incremental progress update from a running sub-agent */
+export interface SubagentProgressDelta {
+  type: 'thinking' | 'tool_start' | 'tool_end';
+  text?: string;
+  toolCall?: ToolCallContent;
+  toolResult?: ToolResult;
+}
 
 // ===== Git Types =====
 

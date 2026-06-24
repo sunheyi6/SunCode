@@ -1,68 +1,106 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useChatStore } from '../../stores/chat';
 import AssistantMessage from './AssistantMessage.vue';
 import UserMessage from './UserMessage.vue';
 
 const chatStore = useChatStore();
 const messageListRef = ref<HTMLElement | null>(null);
+const userScrolledUp = ref(false);
+let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Scroll to the bottom of the message list, after DOM layout is complete. */
-function scrollToBottom(): void {
+function scrollToBottom(smooth = false): void {
   const el = messageListRef.value;
   if (!el) return;
-
-  // Double rAF ensures the browser has finished layout after v-html updates
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
+      if (smooth) {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
     });
   });
 }
 
-/** Check if the user is visually near the bottom of the scroll area. */
-function isNearBottom(): boolean {
+function isAtBottom(): boolean {
   const el = messageListRef.value;
   if (!el) return false;
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  // 20px threshold — must be essentially at the very bottom
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 20;
 }
 
-/** Composite key that triggers a scroll when any live content changes. */
+/** Composite key — changes less frequently than every character. */
+let lastKey = '';
 function lastMessageContentKey(): string {
   const last = chatStore.messages[chatStore.messages.length - 1];
   if (!last) return '';
+  // Only trigger on ~100 char chunks, not every character
+  const thinkLen = Math.floor((last.thinking?.length ?? 0) / 100);
+  const contentLen = Math.floor((last.content?.length ?? 0) / 100);
   const tcLen = last.toolCalls?.length ?? 0;
   const tcRunning = last.toolCalls?.filter((t) => t.status === 'running').length ?? 0;
-  return `${last.thinking?.length ?? 0}|${last.content.length}|${tcLen}|${tcRunning}`;
+  return `${thinkLen}|${contentLen}|${tcLen}|${tcRunning}`;
 }
 
-// Scroll to bottom when a new message is added
+function onUserScroll(): void {
+  if (!chatStore.isStreaming) return;
+  userScrolledUp.value = !isAtBottom();
+}
+
+// Scroll to bottom when a new message is added (user initiated)
 watch(
   () => chatStore.messages.length,
   () => {
+    userScrolledUp.value = false;
     void nextTick().then(() => scrollToBottom());
   },
 );
 
-// During streaming, scroll continuously as thinking / content / tool calls grow
+// During streaming, only auto-scroll if user hasn't manually scrolled up
 watch(
   () => lastMessageContentKey(),
-  () => {
-    if (chatStore.isStreaming || isNearBottom()) {
+  (key) => {
+    if (key === lastKey) return;
+    lastKey = key;
+    if (!chatStore.isStreaming) return;
+    if (userScrolledUp.value) return;
+    // Throttle: max one scroll per 150ms during streaming
+    if (scrollTimer) return;
+    scrollTimer = setTimeout(() => {
+      scrollTimer = null;
       scrollToBottom();
-    }
+    }, 150);
   },
 );
 
-// When streaming finishes, ensure the complete response is visible
+// When streaming finishes, scroll to first line of answer
 watch(
   () => chatStore.isStreaming,
   (streaming) => {
     if (!streaming) {
-      setTimeout(() => scrollToBottom(), 50);
+      userScrolledUp.value = false;
+      setTimeout(() => {
+        const el = messageListRef.value;
+        if (!el) return;
+        const contentBlocks = el.querySelectorAll('.message-content');
+        const lastContent = contentBlocks[contentBlocks.length - 1];
+        if (lastContent) {
+          lastContent.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        } else {
+          scrollToBottom(true);
+        }
+      }, 100);
     }
   },
 );
+
+onMounted(() => {
+  messageListRef.value?.addEventListener('scroll', onUserScroll, { passive: true });
+});
+onUnmounted(() => {
+  messageListRef.value?.removeEventListener('scroll', onUserScroll);
+});
 </script>
 
 <template>

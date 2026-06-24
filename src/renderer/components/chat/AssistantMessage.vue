@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 import ToolOperationList from '../tools/ToolOperationList.vue';
 import StreamingText from './StreamingText.vue';
@@ -11,6 +11,18 @@ const props = defineProps<{
 const hasContent = computed(() => props.message.content.length > 0);
 const hasThinking = computed(() => props.message.isStreaming || Boolean(props.message.thinking));
 const copied = ref(false);
+const thinkingBodyRef = ref<HTMLElement | null>(null);
+
+// Auto-scroll thinking body to bottom as new text streams in
+watch(
+  () => props.message.thinking?.length ?? 0,
+  () => {
+    void nextTick(() => {
+      const el = thinkingBodyRef.value;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  },
+);
 
 const timeLabel = computed(() => {
   const d = new Date(props.message.timestamp);
@@ -146,7 +158,7 @@ async function copyContent() {
           <span class="thinking-live-dot" />
           <span>{{ thinkingSummary }}</span>
         </div>
-        <div class="thinking-live-body">
+        <div ref="thinkingBodyRef" class="thinking-live-body">
           <template v-for="(entry, i) in thinkingTimeline" :key="i">
             <StreamingText
               v-if="entry.type === 'thinking'"
@@ -179,11 +191,11 @@ async function copyContent() {
         </div>
       </details>
 
-      <!-- 正文 -->
-      <div v-if="hasContent" class="message-content">
+      <!-- 正文（思考完成后才显示） -->
+      <div v-if="hasContent && !message.isStreaming" class="message-content">
         <StreamingText
           :text="message.content"
-          :is-streaming="message.isStreaming"
+          :is-streaming="false"
         />
       </div>
 
@@ -220,25 +232,23 @@ async function copyContent() {
   max-width: 90%;
 }
 
-/* ── 流式进行中：思考内联展示，如正文可见 ── */
+/* ── 流式进行中：思考内联展示 ── */
 .thinking-live {
-  margin-bottom: var(--spacing-md);
-  border-left: 3px solid var(--color-accent, #6c8cff);
-  padding-left: 12px;
+  margin-bottom: 8px;
 }
 
 .thinking-live-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  margin-bottom: 6px;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
 }
 
 .thinking-live-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--color-accent, #6c8cff);
   animation: pulse-dot 1.4s ease-in-out infinite;
@@ -250,10 +260,20 @@ async function copyContent() {
 }
 
 .thinking-live-body {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.25;
+  color: var(--color-text-muted);
   white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Tighten paragraph gaps inside thinking (marked wraps \n\n → <p>) */
+.thinking-live-body :deep(p) {
+  margin: 0 0 2px 0;
+}
+.thinking-live-body :deep(br) {
+  line-height: 1.1;
 }
 
 /* ── 完成后：折叠 ── */
@@ -274,12 +294,22 @@ async function copyContent() {
 }
 
 .thinking-content {
-  padding: 8px 12px;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.3;
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   white-space: pre-wrap;
   border-top: 1px solid var(--border-color);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.thinking-content :deep(p) {
+  margin: 0 0 2px 0;
+}
+.thinking-content :deep(br) {
+  line-height: 1.1;
 }
 
 .message-content {

@@ -7,13 +7,14 @@ import { bridge } from '../../api/bridge';
 const sessionsStore = useSessionsStore();
 const searchOpen = ref(false);
 const searchQuery = ref('');
+const selectMode = ref(false);
+const selectedIds = ref<Set<string>>(new Set());
 
 onMounted(() => {
   void sessionsStore.init();
 });
 
 async function handleCreateSession(): Promise<void> {
-  // Create a new conversation in the current project directory
   const dir = sessionsStore.sessions.find(
     (s) => s.id === sessionsStore.activeSessionId,
   )?.workingDirectory;
@@ -51,6 +52,76 @@ const groupedSessions = computed(() => {
   return [...groups.values()];
 });
 
+const allDisplayedIds = computed(() => {
+  const ids: string[] = [];
+  for (const group of groupedSessions.value) {
+    for (const s of group.sessions) {
+      ids.push(s.id);
+    }
+  }
+  return ids;
+});
+
+const allSelected = computed(() => {
+  const ids = allDisplayedIds.value;
+  if (ids.length === 0) return false;
+  return ids.every((id) => selectedIds.value.has(id));
+});
+
+function toggleSelectAll(): void {
+  if (allSelected.value) {
+    // Deselect all displayed
+    for (const id of allDisplayedIds.value) {
+      selectedIds.value.delete(id);
+    }
+  } else {
+    // Select all displayed
+    for (const id of allDisplayedIds.value) {
+      selectedIds.value.add(id);
+    }
+  }
+  // Trigger reactivity
+  selectedIds.value = new Set(selectedIds.value);
+}
+
+function toggleSelect(id: string): void {
+  const next = new Set(selectedIds.value);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
+  selectedIds.value = next;
+}
+
+function enterSelectMode(): void {
+  selectMode.value = true;
+  selectedIds.value = new Set();
+}
+
+function exitSelectMode(): void {
+  selectMode.value = false;
+  selectedIds.value = new Set();
+}
+
+async function deleteSingle(id: string): Promise<void> {
+  const confirmed = await bridge.confirm('删除对话', '确定要删除这个对话吗？此操作不可撤销。');
+  if (!confirmed) return;
+  await sessionsStore.deleteSession(id);
+}
+
+async function deleteSelected(): Promise<void> {
+  if (selectedIds.value.size === 0) return;
+  const count = selectedIds.value.size;
+  const confirmed = await bridge.confirm(
+    '批量删除对话',
+    `确定要删除选中的 ${count} 个对话吗？此操作不可撤销。`,
+  );
+  if (!confirmed) return;
+  await sessionsStore.deleteSessions([...selectedIds.value]);
+  exitSelectMode();
+}
+
 function formatTime(value: string): string {
   const date = new Date(value);
   const today = new Date();
@@ -64,7 +135,7 @@ function formatTime(value: string): string {
 <template>
   <div class="conversation-sidebar">
     <div class="sidebar-actions">
-      <template v-if="!searchOpen">
+      <template v-if="!searchOpen && !selectMode">
         <button class="primary-action" @click="handleCreateSession()">
           <span class="action-icon">＋</span>
           <span>新建对话</span>
@@ -76,6 +147,18 @@ function formatTime(value: string): string {
         >
           ⌕
         </button>
+        <button
+          v-if="sessionsStore.sessions.length > 0"
+          class="icon-action"
+          title="批量管理"
+          @click="enterSelectMode()"
+        >
+          ☰
+        </button>
+      </template>
+      <template v-else-if="selectMode">
+        <span class="select-count">已选 {{ selectedIds.size }} 项</span>
+        <button class="text-action" @click="exitSelectMode()">取消</button>
       </template>
       <template v-else>
         <div class="global-search">
@@ -93,6 +176,16 @@ function formatTime(value: string): string {
     </div>
 
     <div class="conversation-list">
+      <!-- Select all toggle in select mode -->
+      <label v-if="selectMode && allDisplayedIds.length > 0" class="select-all-row">
+        <input
+          type="checkbox"
+          :checked="allSelected"
+          @change="toggleSelectAll()"
+        />
+        <span>{{ allSelected ? '取消全选' : '全选' }}</span>
+      </label>
+
       <section v-for="group in groupedSessions" :key="group.path" class="project-group">
         <div class="project-heading" :title="group.path">
           <span class="project-icon">◇</span>
@@ -100,26 +193,63 @@ function formatTime(value: string): string {
           <span class="project-count">{{ group.sessions.length }}</span>
         </div>
 
-        <button
+        <div
           v-for="session in group.sessions"
           :key="session.id"
-          class="conversation-item"
-          :class="{ active: session.id === sessionsStore.activeSessionId }"
-          @click="sessionsStore.selectSession(session.id)"
+          class="conversation-row"
+          :class="{
+            active: session.id === sessionsStore.activeSessionId,
+            selected: selectedIds.has(session.id),
+          }"
         >
-          <span class="conversation-mark" />
-          <span class="conversation-copy">
-            <span class="conversation-name">{{ session.name }}</span>
-            <span class="conversation-meta">
-              {{ session.messageCount }} 条消息 · {{ formatTime(session.updated) }}
+          <!-- Checkbox in select mode -->
+          <label v-if="selectMode" class="select-checkbox">
+            <input
+              type="checkbox"
+              :checked="selectedIds.has(session.id)"
+              @change="toggleSelect(session.id)"
+            />
+          </label>
+
+          <button
+            class="conversation-item"
+            @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
+          >
+            <span class="conversation-mark" />
+            <span class="conversation-copy">
+              <span class="conversation-name">{{ session.name }}</span>
+              <span class="conversation-meta">
+                {{ session.messageCount }} 条消息 · {{ formatTime(session.updated) }}
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+
+          <!-- Delete button on hover (hidden in select mode) -->
+          <button
+            v-if="!selectMode"
+            class="delete-btn"
+            title="删除对话"
+            @click.stop="deleteSingle(session.id)"
+          >
+            ×
+          </button>
+        </div>
       </section>
 
       <div v-if="groupedSessions.length === 0" class="empty-conversations">
         没有找到匹配的对话
       </div>
+    </div>
+
+    <!-- Batch action bar -->
+    <div v-if="selectMode" class="batch-bar">
+      <button
+        class="batch-delete-btn"
+        :disabled="selectedIds.size === 0"
+        @click="deleteSelected()"
+      >
+        删除选中 ({{ selectedIds.size }})
+      </button>
     </div>
   </div>
 </template>
@@ -172,6 +302,28 @@ function formatTime(value: string): string {
   color: var(--color-accent);
 }
 
+.select-count {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  font-size: 13px;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.text-action {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color-strong);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.text-action:hover {
+  color: var(--color-text);
+}
+
 .global-search {
   display: flex;
   flex: 1;
@@ -202,6 +354,20 @@ function formatTime(value: string): string {
 .search-close {
   font-size: 14px;
   padding: 0 4px;
+}
+
+.select-all-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.select-all-row input {
+  accent-color: var(--color-accent);
 }
 
 .conversation-list {
@@ -240,6 +406,45 @@ function formatTime(value: string): string {
   font-size: 10px;
 }
 
+.conversation-row {
+  display: flex;
+  position: relative;
+  align-items: center;
+}
+
+.conversation-row .delete-btn {
+  display: none;
+  position: absolute;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 18px;
+  line-height: 26px;
+}
+
+.conversation-row:hover .delete-btn {
+  display: block;
+}
+
+.conversation-row .delete-btn:hover {
+  color: #e5534b;
+}
+
+.select-checkbox {
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  cursor: pointer;
+}
+
+.select-checkbox input {
+  accent-color: var(--color-accent);
+}
+
 .conversation-item {
   display: flex;
   width: 100%;
@@ -252,14 +457,19 @@ function formatTime(value: string): string {
   text-align: left;
 }
 
-.conversation-item:hover {
+.conversation-row:hover .conversation-item,
+.conversation-row:hover {
   background: var(--color-surface-hover);
   color: var(--color-text);
 }
 
+.conversation-row.active {
+  background: color-mix(in srgb, var(--color-accent) 11%, var(--color-surface));
+}
+
 .conversation-item.active {
   border-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
-  background: color-mix(in srgb, var(--color-accent) 11%, var(--color-surface));
+  background: transparent;
   color: var(--color-text);
 }
 
@@ -299,5 +509,30 @@ function formatTime(value: string): string {
   color: var(--color-text-muted);
   text-align: center;
   font-size: 12px;
+}
+
+/* Batch action bar */
+.batch-bar {
+  padding: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.batch-delete-btn {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #e5534b;
+  background: transparent;
+  color: #e5534b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.batch-delete-btn:hover:not(:disabled) {
+  background: #e5534b;
+  color: #fff;
+}
+
+.batch-delete-btn:disabled {
+  opacity: 0.35;
 }
 </style>

@@ -10,6 +10,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   send: [text: string];
+  stop: [];
 }>();
 
 const modelsStore = useModelsStore();
@@ -328,12 +329,25 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
             </div>
           </div>
 
+          <!-- Stop button (visible during streaming) -->
           <button
+            v-if="props.isStreaming"
+            class="stop-btn"
+            type="button"
+            aria-label="停止生成"
+            title="停止生成 (Esc)"
+            @click="$emit('stop')"
+          >
+            <span aria-hidden="true">■</span>
+          </button>
+
+          <!-- Send / Queue button -->
+          <button
+            v-else
             class="send-btn"
-            :class="{ queued: props.isStreaming }"
             type="button"
             :disabled="!hasInput"
-            :aria-label="props.isStreaming ? '加入等待队列' : '发送消息'"
+            aria-label="发送消息"
             @click="handleSend"
           >
             <span aria-hidden="true">↑</span>
@@ -553,6 +567,24 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 
 .send-btn.queued:not(:disabled) {
   background: var(--color-purple);
+}
+
+.stop-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e5534b;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.stop-btn:hover {
+  background: #c94038;
 }
 
 .dropdown-menu {

@@ -90,7 +90,59 @@ export async function deleteSession(id: string): Promise<void> {
     if (existsSync(tmp)) {
       await unlink(tmp);
     }
+    // Also clean up run directories
+    await deleteRunDirs(id);
   } catch {
     console.warn(`[SessionStore] Failed to delete session: ${id}`);
   }
+}
+
+/** Delete multiple sessions at once. */
+export async function deleteSessions(ids: string[]): Promise<void> {
+  const results = await Promise.allSettled(
+    ids.map(async (id) => {
+      const path = sessionPath(id);
+      if (existsSync(path)) {
+        await unlink(path);
+      }
+      const tmp = tempPath(id);
+      if (existsSync(tmp)) {
+        await unlink(tmp);
+      }
+      await deleteRunDirs(id);
+    }),
+  );
+  for (let i = 0; i < results.length; i++) {
+    if (results[i].status === 'rejected') {
+      console.warn(`[SessionStore] Failed to delete session: ${ids[i]}`);
+    }
+  }
+}
+
+/** Remove run directories associated with a session. */
+async function deleteRunDirs(sessionId: string): Promise<void> {
+  try {
+    const runsDir = join(SESSIONS_DIR, sessionId);
+    if (existsSync(runsDir)) {
+      await rmrf(runsDir);
+    }
+  } catch {
+    // best-effort cleanup
+  }
+}
+
+/** Recursive rmdir using Node fs/promises. */
+async function rmrf(dirPath: string): Promise<void> {
+  const { readdir, rmdir, unlink, stat } = await import('node:fs/promises');
+  const entries = await readdir(dirPath);
+  for (const entry of entries) {
+    const full = join(dirPath, entry);
+    const s = await stat(full);
+    if (s.isDirectory()) {
+      await rmrf(full);
+    } else {
+      await unlink(full);
+    }
+  }
+  await rmdir(dirPath);
 }

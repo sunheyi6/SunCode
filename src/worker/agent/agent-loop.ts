@@ -461,7 +461,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             success: result.success,
             timestamp: '',
           });
-          console.log(`[AgentLoop] Tool ${tc.name} result:`, result.success ? 'success' : 'error');
+          console.log(`[AgentLoop] Tool ${tc.name} result:`, result.success ? 'success' : `error: ${result.error || 'unknown'}`);
         } catch (error) {
           const err: ToolResult = {
             toolCallId: tc.id,

@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import type { ToolCallContent } from '@shared/types';
 import { fileOperationView } from '../../utils/tool-presentation';
+import DiffViewer from '../code/DiffViewer.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -14,6 +15,14 @@ const statusClass = computed(() => {
   if (view.value.label === '编辑失败') return 'status-failed';
   return 'status-edited';
 });
+
+const showDiff = computed(() => {
+  const d = props.call.result?.details;
+  return d?.type === 'file_edit' && d.status === 'edited' && d.oldContent && d.newContent;
+});
+
+const oldCode = computed(() => (props.call.result?.details as Record<string, unknown>)?.oldContent as string ?? '');
+const newCode = computed(() => (props.call.result?.details as Record<string, unknown>)?.newContent as string ?? '');
 </script>
 
 <template>
@@ -24,6 +33,12 @@ const statusClass = computed(() => {
     <span v-if="view.addedLines !== undefined" class="added">+{{ view.addedLines }}</span>
     <span v-if="view.removedLines !== undefined" class="removed">-{{ view.removedLines }}</span>
     <p v-if="view.error" class="file-error">{{ view.error }}</p>
+    <DiffViewer
+      v-if="showDiff"
+      :old-code="oldCode"
+      :new-code="newCode"
+      :filename="view.filePath"
+    />
   </div>
 </template>
 

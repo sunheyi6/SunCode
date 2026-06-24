@@ -72,6 +72,15 @@ export function createEditTool(workingDir: string) {
         const changes = countLineChanges(content, newContent);
         await writeFile(normalized, newContent, 'utf-8');
 
+        // Extract context around the change for diff display (5 lines before/after)
+        const oldIdx = content.indexOf(oldString);
+        const oldLines = content.split('\n');
+        const changedLineIdx = content.slice(0, oldIdx).split('\n').length - 1;
+        const ctxStart = Math.max(0, changedLineIdx - 5);
+        const ctxEnd = Math.min(oldLines.length, changedLineIdx + newString.split('\n').length + 5);
+        const oldCtx = oldLines.slice(ctxStart, ctxEnd).join('\n');
+        const newCtx = newContent.split('\n').slice(ctxStart, ctxEnd + (newString.split('\n').length - oldString.split('\n').length)).join('\n');
+
         const replacementCount = replaceAll ? count : 1;
         return this.success(
           `Edit applied to ${normalized}\n${replacementCount} replacement(s) made.`,
@@ -80,6 +89,8 @@ export function createEditTool(workingDir: string) {
             filePath: normalized,
             status: 'edited',
             ...changes,
+            oldContent: oldCtx,
+            newContent: newCtx,
           },
         );
       } catch (error) {

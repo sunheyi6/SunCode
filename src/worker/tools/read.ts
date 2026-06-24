@@ -1,12 +1,12 @@
-import { readFile, stat } from 'node:fs/promises';
-import { resolve, isAbsolute, normalize } from 'node:path';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { resolve, isAbsolute, normalize, relative } from 'node:path';
 import { BaseTool, p, obj } from './types';
 
 export function createReadTool(workingDir: string) {
   return new (class ReadTool extends BaseTool {
     readonly name = 'read';
     readonly description =
-      'Reads a file from the local filesystem. Returns the file contents with line numbers. Supports reading images (PNG, JPG, GIF, WEBP) as base64. Specify offset/limit for large files.';
+      'Reads a file or directory. For files: returns contents with line numbers. For directories: lists entries. Supports reading images (PNG, JPG, GIF, WEBP) as base64. Specify offset/limit for large files.';
     readonly parameters = obj(
       {
         file_path: p('string', 'The absolute path to the file to read'),
@@ -36,9 +36,17 @@ export function createReadTool(workingDir: string) {
       try {
         const info = await stat(normalized);
 
-        // Handle directories
+        // Handle directories: list contents instead of error
         if (info.isDirectory()) {
-          return this.failure(`Path is a directory, not a file: ${normalized}`);
+          const entries = await readdir(normalized, { withFileTypes: true });
+          const dirs = entries.filter((e) => e.isDirectory()).map((e) => `${e.name}/`);
+          const files = entries.filter((e) => e.isFile()).map((e) => e.name);
+          const listing = [...dirs.sort(), ...files.sort()]
+            .map((name) => `  ${name}`)
+            .join('\n');
+          return this.success(
+            `Directory: ${normalized}\n\n${listing || '  (empty)'}\n\n${entries.length} entries. Use read with a file path to read file contents.`,
+          );
         }
 
         // Handle image files
@@ -80,7 +88,10 @@ export function createReadTool(workingDir: string) {
         return this.success(header + formatted);
       } catch (error) {
         if ((error as { code?: string }).code === 'ENOENT') {
-          return this.failure(`File not found: ${normalized}`);
+          const dir = relative(resolve(workingDir), normalized);
+          return this.failure(
+            `File not found: ${normalized}. Use glob with pattern like "${dir.split(/[\\/]/).slice(0, -1).join('/')}/**/*" to find files in that directory.`,
+          );
         }
         return this.failure(`Failed to read file: ${(error as Error).message}`);
       }

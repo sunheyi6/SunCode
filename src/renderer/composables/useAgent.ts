@@ -86,6 +86,12 @@ export function useAgent() {
     );
 
     cleanups.push(
+      bridge.onSubagentProgress((executionId, agent, delta) => {
+        chatStore.handleSubagentProgress(executionId, agent, delta as unknown as import('@shared/types').SubagentProgressDelta);
+      }),
+    );
+
+    cleanups.push(
       bridge.onDone((message) => {
         chatStore.handleStreamEvent({ type: 'done', message });
         void sessionsStore.refresh();

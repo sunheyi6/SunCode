@@ -3,6 +3,7 @@ import type { ToolCallContent } from '@shared/types';
 import CommandOperationCard from './CommandOperationCard.vue';
 import FileOperationCard from './FileOperationCard.vue';
 import FileInspectCard from './FileInspectCard.vue';
+import SubagentCard from './SubagentCard.vue';
 
 defineProps<{
   calls: ToolCallContent[];
@@ -16,7 +17,8 @@ function isInspectTool(name: string): boolean {
 <template>
   <div class="tool-operation-list">
     <template v-for="call in calls" :key="call.id">
-      <FileOperationCard v-if="call.name === 'edit' || call.name === 'write'" :call="call" />
+      <SubagentCard v-if="call.name === 'subagent'" :call="call" />
+      <FileOperationCard v-else-if="call.name === 'edit' || call.name === 'write'" :call="call" />
       <CommandOperationCard v-else-if="call.name === 'bash'" :call="call" />
       <FileInspectCard v-else-if="isInspectTool(call.name)" :call="call" />
       <div v-else class="generic-tool">

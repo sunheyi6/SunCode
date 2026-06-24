@@ -49,6 +49,32 @@ export const useSessionsStore = defineStore('sessions', () => {
     isLoaded.value = true;
   }
 
+  async function deleteSession(id: string): Promise<void> {
+    const result = await bridge.deleteSession(id);
+    sessions.value = result.remaining;
+    if (result.wasActive) {
+      if (sessions.value.length > 0) {
+        await selectSession(sortedSessions.value[0].id);
+      } else {
+        activeSessionId.value = null;
+        useChatStore().clearMessages();
+      }
+    }
+  }
+
+  async function deleteSessions(ids: string[]): Promise<void> {
+    const result = await bridge.deleteSessions(ids);
+    sessions.value = result.remaining;
+    if (result.wasActive) {
+      if (sessions.value.length > 0) {
+        await selectSession(sortedSessions.value[0].id);
+      } else {
+        activeSessionId.value = null;
+        useChatStore().clearMessages();
+      }
+    }
+  }
+
   return {
     sessions,
     sortedSessions,
@@ -58,5 +84,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     refresh,
     createSession,
     selectSession,
+    deleteSession,
+    deleteSessions,
   };
 });

@@ -10,6 +10,7 @@ import type {
   ToolCallContent,
   ToolResult,
   SessionMeta,
+  TokenUsageSummary,
 } from '@shared/types';
 
 /**
@@ -135,6 +136,31 @@ const suncodeAPI = {
   /** Export session to HTML */
   async exportSession(id: string): Promise<string> {
     return ipcRenderer.invoke('session:export', id);
+  },
+
+  /** Delete a session */
+  async deleteSession(id: string): Promise<{ remaining: SessionMeta[]; wasActive: boolean }> {
+    return ipcRenderer.invoke('session:delete', id);
+  },
+
+  /** Delete multiple sessions */
+  async deleteSessions(ids: string[]): Promise<{ remaining: SessionMeta[]; wasActive: boolean }> {
+    return ipcRenderer.invoke('session:deleteMany', ids);
+  },
+
+  /** Listen for sub-agent progress updates */
+  onSubagentProgress(
+    callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void,
+  ): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, executionId: string, agent: string, delta: Record<string, unknown>): void =>
+      callback(executionId, agent, delta);
+    ipcRenderer.on('agent:subagent-progress', handler);
+    return () => ipcRenderer.removeListener('agent:subagent-progress', handler);
+  },
+
+  /** Get token usage statistics */
+  async getTokenUsage(): Promise<TokenUsageSummary> {
+    return ipcRenderer.invoke('stats:getTokenUsage');
   },
 
   // ===== Settings =====

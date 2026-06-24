@@ -1,4 +1,4 @@
-import type { Message, StreamEvent, ToolCallContent, ToolResult } from '@shared/types';
+import type { Message, StreamEvent, SubagentProgressDelta, SubagentResult, ToolCallContent, ToolResult } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';
@@ -67,7 +67,29 @@ export const useChatStore = defineStore('chat', () => {
         msg.maxTurns = event.maxTurns ?? 0;
         break;
       case 'turn_end':
-        // Intermediate turn with tool calls — keep streaming
+        // Intermediate turn with tool calls — save accumulated state to session
+        if (event.hasToolCalls && msg.toolCalls && msg.toolCalls.length > 0) {
+          console.log('[ChatStore] turn_end save: toolCalls=', msg.toolCalls.length, 'thinking=', (msg.thinking?.length ?? 0), 'content=', (msg.content?.length ?? 0));
+          const content: Message['content'] = [];
+          if (msg.thinking) content.push({ type: 'thinking', text: msg.thinking });
+          if (msg.content) content.push({ type: 'text', text: msg.content });
+          void bridge.saveMessage({
+            role: 'assistant',
+            content: content.length > 0 ? content : '思考中...',
+            toolCalls: msg.toolCalls.map((tc) => ({
+              type: 'tool_call' as const,
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.arguments,
+              status: tc.status,
+              result: tc.result,
+            })),
+          }).then(() => {
+            console.log('[ChatStore] turn_end save: OK');
+          }).catch((e: Error) => {
+            console.error('[ChatStore] turn_end save FAILED:', e.message);
+          });
+        }
         break;
       case 'text_delta':
         currentText += event.text || '';
@@ -164,12 +186,33 @@ export const useChatStore = defineStore('chat', () => {
     const msg = currentAssistantMsg;
     if (!msg) return;
     if (!msg.toolCalls) msg.toolCalls = [];
-    const existing = msg.toolCalls.find((t) => t.id === toolCall.id);
-    if (existing) {
-      existing.status = 'running';
-      existing.arguments = existing.arguments || toolCall.arguments;
+    let target = msg.toolCalls.find((t) => t.id === toolCall.id);
+    if (target) {
+      target.status = 'running';
+      target.arguments = target.arguments || toolCall.arguments;
     } else {
-      msg.toolCalls.push({ ...toolCall, status: 'running' });
+      target = { ...toolCall, status: 'running' };
+      msg.toolCalls.push(target);
+    }
+    // For subagent tool: pre-populate result so SubagentCard shows agent names immediately
+    if (toolCall.name === 'subagent' && !target.result) {
+      try {
+        const args = JSON.parse(target.arguments || toolCall.arguments);
+        const calls = args.calls as Array<{ agent: string; prompt: string }> | undefined;
+        if (calls && calls.length > 0) {
+          (target as unknown as Record<string, unknown>).result = {
+            success: true,
+            output: '',
+            subagentResults: calls.map((c) => ({
+              agent: c.agent,
+              success: true,
+              output: '执行中...',
+              toolCalls: 0,
+              tokenUsage: { input: 0, output: 0, total: 0 },
+            })),
+          };
+        }
+      } catch { /* ignore parse errors */ }
     }
   }
 
@@ -181,6 +224,46 @@ export const useChatStore = defineStore('chat', () => {
     if (tc) {
       tc.status = result.success ? 'done' : 'error';
       tc.result = result;
+      if (result.name === 'subagent') {
+        console.log('[ChatStore] endToolExecution subagent: subagentResults=', result.subagentResults?.length, 'thinking=', result.subagentResults?.[0]?.thinking?.length, 'internalCalls=', result.subagentResults?.[0]?.internalCalls?.length);
+      }
+    }
+  }
+
+  /** Handle incremental sub-agent progress: thinking deltas and tool calls. */
+  function handleSubagentProgress(_executionId: string, _agent: string, delta: SubagentProgressDelta): void {
+    const msg = currentAssistantMsg;
+    if (!msg?.toolCalls) return;
+    // Find the subagent tool call (there should be only one running at a time)
+    const subTc = msg.toolCalls.find((t) => t.name === 'subagent' && t.status === 'running');
+    if (!subTc) return;
+
+    // Ensure result container exists
+    const tcResult = (subTc as unknown as Record<string, unknown>).result as ToolResult | undefined;
+    if (!tcResult?.subagentResults) return;
+
+    const results = tcResult.subagentResults;
+    const target = results.find((r: SubagentResult) => r.agent === _agent);
+    if (!target) return;
+
+    switch (delta.type) {
+      case 'thinking': {
+        target.thinking = (target.thinking || '') + (delta.text || '');
+        break;
+      }
+      case 'tool_start': {
+        if (!target.internalCalls) target.internalCalls = [];
+        target.internalCalls.push(delta.toolCall!);
+        break;
+      }
+      case 'tool_end': {
+        const existing = target.internalCalls?.find((tc) => tc.id === delta.toolResult?.toolCallId);
+        if (existing && delta.toolResult) {
+          existing.status = delta.toolResult.success ? 'done' : 'error';
+          existing.result = delta.toolResult;
+        }
+        break;
+      }
     }
   }
 
@@ -240,6 +323,7 @@ export const useChatStore = defineStore('chat', () => {
     handleStreamEvent,
     startToolExecution,
     endToolExecution,
+    handleSubagentProgress,
     finishCurrentResponse,
     clearMessages,
     loadMessages,

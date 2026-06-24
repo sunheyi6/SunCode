@@ -18,20 +18,24 @@ html, body, #app {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Scrollbar — subtle */
+/* Scrollbar — invisible, only shows when hovering the scrollbar itself */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-overlay);
-  border-radius: 3px;
+  background: transparent;
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
+}
+/* Show faint thumb while actively scrolling */
+::-webkit-scrollbar-thumb:active {
+  background: var(--color-overlay);
 }
 
 /* Selection */

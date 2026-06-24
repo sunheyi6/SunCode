@@ -12,7 +12,7 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
   return new (class BashTool extends BaseTool {
     readonly name = 'bash';
     readonly description =
-      'Executes a shell command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds.\n\nIMPORTANT: Each invocation runs in a fresh shell. Use && to chain commands (&& works on both Linux/macOS and Windows PowerShell).\n\nThis tool runs PowerShell (pwsh.exe) on Windows and bash on Linux/macOS. Both support standard syntax: double quotes for strings with spaces, && for chaining, single quotes for literals.\n\nGit examples that work cross-platform:\n- `git add . && git commit -m "feat(scope): message" && git push`\n- `git status && git log --oneline -5`\n\nSet run_in_background: true for long-running processes (dev servers, etc.). Background processes will keep running and their status is shown in the UI.\n\nSecurity: Commands that are obviously destructive (rm -rf /, etc.) will be blocked.';
+      'Executes a shell command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds.\n\nIMPORTANT: Each invocation runs in a fresh shell. Use && to chain commands (works on PowerShell and bash).\n\nOn Windows this runs PowerShell (powershell.exe, always preinstalled). PowerShell supports: && for chaining, double quotes for strings with spaces, single quotes for literals, Select-String for searching files (instead of grep), Get-ChildItem for directory listing (instead of ls).\n\nOn Linux/macOS this runs bash.\n\nGit examples that work cross-platform:\n- `git add . && git commit -m "feat(scope): message" && git push`\n- `git status && git log --oneline -5`\n\nSet run_in_background: true for long-running processes (dev servers, etc.). Background processes will keep running and their status is shown in the UI.\n\nSecurity: Commands that are obviously destructive (rm -rf /, etc.) will be blocked.';
     readonly parameters = obj(
       {
         command: p('string', 'The bash command to execute'),
@@ -61,9 +61,9 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
         }
       }
 
-      // Use PowerShell on Windows — cmd.exe mangles quotes, parentheses, and special
-      // characters that are common in git commit messages (e.g. "feat(scope): msg").
-      const shell = process.platform === 'win32' ? 'pwsh.exe' : '/bin/bash';
+      // powershell.exe is preinstalled on all Windows 10/11 systems.
+      // pwsh.exe (PowerShell 7+) requires separate install. Use the built-in version.
+      const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/bash';
       const shellArgs =
         process.platform === 'win32'
           ? ['-NoProfile', '-NonInteractive', '-Command', command]
