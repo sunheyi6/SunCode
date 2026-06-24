@@ -1,15 +1,19 @@
 import { DEFAULT_SYSTEM_PROMPT } from '@shared/constants';
-import type { ToolDefinition } from '@shared/types';
+import type { AppSettings, ToolDefinition } from '@shared/types';
 
 export interface SystemPromptInput {
   workingDir: string;
   tools: ToolDefinition[];
   skillsContent: string;
   maxTurns: number;
+  /** Permission mode controls how the model should approach tool execution. */
+  permissionMode: AppSettings['permissionMode'];
   /** Optional: Custom system prompt to override the default */
   customPrompt?: string;
   /** Optional: Content from .agents.md (Codex-style workspace instructions) */
   agentsMdContent?: string;
+  /** Optional: Auto-generated memories from prior sessions */
+  memoryContent?: string;
 }
 
 /**
@@ -17,12 +21,18 @@ export interface SystemPromptInput {
  * Combines the base system prompt, tool descriptions, skills, and environment info.
  */
 export function buildSystemPrompt(input: SystemPromptInput): string {
-  const { workingDir, tools, skillsContent, maxTurns, customPrompt, agentsMdContent } = input;
+  const { workingDir, tools, skillsContent, maxTurns, permissionMode, customPrompt, agentsMdContent, memoryContent } =
+    input;
 
   const parts: string[] = [];
 
   // Base system prompt
   parts.push(customPrompt || DEFAULT_SYSTEM_PROMPT);
+
+  // Permission mode — tells the model how to behave regarding tool execution.
+  parts.push('');
+  parts.push('## Permission Mode');
+  parts.push(permissionInstructions(permissionMode));
 
   // Environment info
   parts.push('');
@@ -31,6 +41,17 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   parts.push(`- Operating system: ${process.platform}`);
   parts.push(`- Date: ${new Date().toISOString().split('T')[0]}`);
   parts.push(`- Maximum turns: ${maxTurns}`);
+
+  // Auto-generated memories from prior sessions (Codex-style).
+  if (memoryContent) {
+    parts.push('');
+    parts.push('<project_memory>');
+    parts.push('The following is a summary of past work in this project. Use it to');
+    parts.push('understand the project context and avoid re-exploring known ground.');
+    parts.push('');
+    parts.push(memoryContent);
+    parts.push('</project_memory>');
+  }
 
   // Workspace instructions from .agents.md (Codex convention).
   // Structured as project_context following the pi/Codex convention so the
@@ -82,6 +103,19 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   );
 
   return parts.join('\n');
+}
+
+function permissionInstructions(mode: AppSettings['permissionMode']): string {
+  switch (mode) {
+    case 'full_access':
+      return '**完全访问** — 你拥有对工作区的完全访问权限。直接执行工具，不需要询问用户确认。大胆行动，承担风险，事后报告结果。';
+    case 'auto_edit':
+      return '**自动编辑** — 你可以自由读写文件。执行 bash 命令前需简要说明目的（一句话即可，不需要等待确认）。';
+    case 'confirm_changes':
+      return '**变更前确认** — 在对文件做任何修改之前，先向用户说明你打算做什么并等待确认，然后再执行。读取操作不需要确认。';
+    case 'plan':
+      return '**计划模式** — 你只能使用 read/grep/glob 等只读工具。不要执行 write/edit/bash 等会修改文件的工具。分析用户请求并给出详细的执行计划。';
+  }
 }
 
 /** One-line summaries for built-in tools.  Concise but complete enough that

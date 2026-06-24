@@ -11,6 +11,7 @@ import type {
   ToolCallContent,
   ToolResult,
 } from '@shared/types';
+import { loadMemories, saveMemory, type MemoryEntry } from './memory';
 import { createMcpManager } from '../mcp/manager';
 import { createModelRegistry } from '../models/registry';
 import { createToolRegistry } from '../tools/registry';
@@ -224,6 +225,9 @@ export class Agent {
     // Load .agents.md (Codex convention): project-level, then user-level
     const agentsMdContent = await loadAgentsMd(this.workingDir);
 
+    // Load auto-generated memories from prior sessions
+    const memoryContent = loadMemories(this.workingDir);
+
     // Compact when enabled and context exceeds the threshold (expressed as
     // a fraction of max context window — roughly 1 message ≈ 1k tokens).
     const compactThresholdMsgs = Math.floor((this.settings.compactThreshold || 0.8) * 100);
@@ -236,6 +240,7 @@ export class Agent {
       workingDir: this.workingDir,
       skillsContent,
       agentsMdContent,
+      memoryContent,
       abortSignal: this.abortController!.signal,
       runId,
       onStream: (event) => {
@@ -291,6 +296,54 @@ export class Agent {
     // Emit done
     this.onDone(result.finalMessage);
     this.emitStatus('done');
+
+    // Persist a memory entry so future sessions recall what we did
+    this.saveSessionMemory();
+  }
+
+  /** Save a summary of the current session to .suncode/memories/. */
+  private saveSessionMemory(): void {
+    try {
+      const lastUserMsg = [...this.messages].reverse().find((m) => m.role === 'user');
+      if (!lastUserMsg) return;
+
+      const userRequest =
+        typeof lastUserMsg.content === 'string'
+          ? lastUserMsg.content
+          : lastUserMsg.content
+              .filter((b) => b.type === 'text')
+              .map((b) => ('text' in b ? b.text : ''))
+              .join(' ');
+
+      // Count tools used across all assistant messages
+      const toolsUsed: Record<string, number> = {};
+      for (const m of this.messages) {
+        if (m.role === 'assistant' && m.toolCalls) {
+          for (const tc of m.toolCalls) {
+            toolsUsed[tc.name] = (toolsUsed[tc.name] || 0) + 1;
+          }
+        }
+      }
+
+      // Slug from the first 40 chars of the user request
+      const slug = userRequest
+        .slice(0, 40)
+        .replace(/[^a-zA-Z0-9一-鿿]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .toLowerCase() || 'session';
+
+      const entry: MemoryEntry = {
+        date: new Date().toISOString().split('T')[0]!,
+        slug,
+        userRequest: userRequest.slice(0, 200),
+        toolsUsed,
+        summary: '', // future: LLM-generated summary
+      };
+
+      saveMemory(this.workingDir, entry);
+    } catch {
+      // Best-effort — never let memory failures break the agent
+    }
   }
 
   private emitStatus(state: AgentStatus['state']): void {

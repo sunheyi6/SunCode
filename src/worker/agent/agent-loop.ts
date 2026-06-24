@@ -31,6 +31,8 @@ export interface AgentLoopInput {
   skillsContent: string;
   /** Content from .agents.md / AGENTS.md (Codex-style workspace instructions). */
   agentsMdContent?: string;
+  /** Auto-generated memories from prior sessions. */
+  memoryContent?: string;
   abortSignal: AbortSignal;
   /** Unique identifier for this run (used for event logging). */
   runId: string;
@@ -68,6 +70,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     workingDir,
     skillsContent,
     agentsMdContent,
+    memoryContent,
     abortSignal,
     runId,
     onStream,
@@ -109,7 +112,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     tools: toolDefs,
     skillsContent,
     maxTurns: settings.maxTurns,
+    permissionMode: settings.permissionMode,
     agentsMdContent,
+    memoryContent,
   });
 
   // Prepend system message
