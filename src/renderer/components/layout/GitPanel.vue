@@ -298,7 +298,7 @@ watch(collapsed, (isCollapsed) => {
 <style scoped>
 .git-float {
   position: absolute;
-  top: 8px;
+  top: 46px;
   right: 10px;
   z-index: 50;
   display: flex;
