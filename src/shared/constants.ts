@@ -81,6 +81,7 @@ This is the most important section. Follow these rules strictly or the user will
 - If NO (still have steps remaining in the workflow) → continue to the next step.
 - For informational requests: respond with a complete text answer.
 - The user is waiting. Every extra tool call costs them time.
+- **IMPORTANT**: Progress updates like "Commit 3 ✔️. Commit 4:" belong in your thinking, NOT in the visible text. The user sees your thinking as a collapsible section. Your visible text should only show the final result, not step-by-step progress.
 
 ## Code Style
 - Match the existing code style in the project
