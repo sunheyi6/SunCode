@@ -34,7 +34,9 @@ No unit-test framework or coverage threshold is currently configured. Before sub
 
 ### Commit & Pull Request Guidelines
 
-Git history is unavailable in this checkout, so use concise Conventional Commit messages such as `feat(renderer): add model filter` or `fix(worker): handle aborted tool calls`. Pull requests should explain user-visible behavior, list verification commands, link relevant issues, and include screenshots for UI changes. Keep generated bundles and local `.suncode/` secrets out of review.
+**CRITICAL: 提交必须由用户明确指示。** 不得在用户未明确说"提交"/"commit"/"push"等指令时自动执行 git add、git commit 或 git push。完成代码修改后，仅报告结果，等待用户指示是否提交。
+
+Use concise Conventional Commit messages such as `feat(renderer): add model filter` or `fix(worker): handle aborted tool calls`. Pull requests should explain user-visible behavior, list verification commands, link relevant issues, and include screenshots for UI changes. Keep generated bundles and local `.suncode/` secrets out of review.
 
 ### Security & Configuration
 
