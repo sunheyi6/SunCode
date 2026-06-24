@@ -240,6 +240,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           }
           case 'done':
             assistantMsgRaw = event.message as unknown as Record<string, unknown>;
+            // Accumulate token usage from pi-ai (tallied per-turn)
+            if (event.message.usage) {
+              tokenUsage.input += event.message.usage.input || 0;
+              tokenUsage.output += event.message.usage.output || 0;
+              tokenUsage.total += event.message.usage.totalTokens || 0;
+            }
             break;
           case 'error': {
             if (event.reason === 'aborted') {
