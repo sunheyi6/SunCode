@@ -117,7 +117,7 @@ function startResize(e: MouseEvent): void {
 }
 
 .settings-icon {
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .settings-label {

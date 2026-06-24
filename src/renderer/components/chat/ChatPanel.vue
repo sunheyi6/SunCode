@@ -117,7 +117,7 @@ onUnmounted(() => {
 }
 
 .welcome-content > p {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--color-text-secondary);
   margin: 0 0 20px;
 }

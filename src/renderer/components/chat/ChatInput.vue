@@ -401,7 +401,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   background: transparent;
   color: var(--color-text);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.55;
   box-shadow: none;
 }
@@ -459,7 +459,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   height: 32px;
   padding: 0;
   color: var(--color-text-secondary);
-  font-size: 23px;
+  font-size: 22px;
   font-weight: 300;
 }
 
@@ -495,7 +495,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 
 .permission-icon,
 .thinking-icon {
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1;
 }
 
@@ -545,7 +545,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   border-radius: 10px;
   background: var(--color-accent);
   color: var(--color-bg);
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   transition:
     background 0.15s ease,
@@ -649,7 +649,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   width: 18px;
   flex-shrink: 0;
   color: var(--color-orange);
-  font-size: 15px;
+  font-size: 14px;
   text-align: center;
 }
 

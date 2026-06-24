@@ -226,7 +226,7 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
 }
 
 .btn-caret {
-  font-size: 9px;
+  font-size: 10px;
   opacity: 0.5;
 }
 

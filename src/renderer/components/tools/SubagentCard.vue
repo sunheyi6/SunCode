@@ -110,6 +110,7 @@ watch(
   border-radius: 6px;
   overflow: hidden;
   margin: 4px 0;
+  transition: border-color 0.15s ease;
 }
 
 .subagent-card.running { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
@@ -121,6 +122,7 @@ watch(
   padding: 7px 10px;
   cursor: pointer; user-select: none;
 }
+.card-header { transition: background 0.15s ease; }
 .card-header:hover { background: var(--color-surface-hover); }
 
 .status-dot {
@@ -147,10 +149,9 @@ watch(
 }
 
 .subagent-result {
-  background: var(--color-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 6px 8px;
+  border-left: 3px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  padding: 6px 8px 6px 10px;
+  margin: 2px 0;
 }
 
 .result-header {
@@ -162,24 +163,21 @@ watch(
 
 .sub-thinking {
   margin: 4px 0;
-  border: 1px solid var(--border-color);
   border-radius: 3px;
   overflow: hidden;
+  background: var(--color-bg-tertiary);
 }
 .sub-thinking-summary {
   font-size: 11px; color: var(--color-text-muted); cursor: pointer;
   padding: 4px 6px;
-  background: var(--color-surface);
   user-select: none;
 }
 .sub-thinking-text {
   font-size: 11px; line-height: 1.25; color: var(--color-text-secondary);
-  background: var(--color-bg);
   padding: 4px 8px;
   margin: 0;
   max-height: 200px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
-  border-top: 1px solid var(--border-color);
 }
 
 .sub-tools { margin: 4px 0; }

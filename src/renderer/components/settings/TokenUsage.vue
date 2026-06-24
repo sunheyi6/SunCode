@@ -313,7 +313,7 @@ function formatDateLabel(date: string): string {
   top: -18px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 9px;
+  font-size: 10px;
   color: var(--color-text-muted);
   white-space: nowrap;
   opacity: 0;
@@ -324,7 +324,7 @@ function formatDateLabel(date: string): string {
 }
 
 .bar-label {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--color-text-muted);
 }
 

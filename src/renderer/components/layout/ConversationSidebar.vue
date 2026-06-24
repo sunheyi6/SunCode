@@ -284,6 +284,7 @@ function formatTime(value: string): string {
   background: var(--color-accent);
   color: var(--color-bg);
   font-weight: 650;
+  transition: background 0.15s ease;
 }
 
 .primary-action:hover { background: var(--color-accent-hover); }
@@ -294,7 +295,8 @@ function formatTime(value: string): string {
   padding: 0;
   background: var(--color-surface);
   color: var(--color-text-secondary);
-  font-size: 21px;
+  font-size: 22px;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
 .icon-action:hover {
@@ -455,6 +457,7 @@ function formatTime(value: string): string {
   background: transparent;
   color: var(--color-text-secondary);
   text-align: left;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .conversation-row:hover .conversation-item,

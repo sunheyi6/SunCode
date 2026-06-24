@@ -338,7 +338,7 @@ function providerLabel(id: string): string {
 .active-model-info strong {
   overflow: hidden;
   color: var(--color-text);
-  font-size: 17px;
+  font-size: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

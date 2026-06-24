@@ -279,9 +279,9 @@ async function copyContent() {
 /* ── 完成后：折叠 ── */
 .thinking-section {
   margin-bottom: var(--spacing-sm);
-  border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   overflow: hidden;
+  background: var(--color-bg-tertiary);
 }
 
 .thinking-summary {
@@ -298,9 +298,8 @@ async function copyContent() {
   font-size: 12px;
   line-height: 1.3;
   color: var(--color-text-secondary);
-  background: var(--color-bg-secondary);
+  background: var(--color-bg);
   white-space: pre-wrap;
-  border-top: 1px solid var(--border-color);
   max-height: 400px;
   overflow-y: auto;
 }

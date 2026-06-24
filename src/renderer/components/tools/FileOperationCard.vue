@@ -53,6 +53,7 @@ const newCode = computed(() => (props.call.result?.details as Record<string, unk
   background: var(--color-surface);
   font-size: 12px;
   flex-wrap: wrap;
+  transition: border-color 0.15s ease;
 }
 
 .file-icon {

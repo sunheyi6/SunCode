@@ -249,7 +249,7 @@ const permissionModes = [
   border: none; border-radius: 6px;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 16px;
+  font-size: 14px;
   cursor: pointer;
   transition: all 0.12s;
 }
@@ -304,7 +304,7 @@ const permissionModes = [
 }
 
 .nav-icon {
-  font-size: 16px;
+  font-size: 14px;
   flex-shrink: 0;
 }
 
@@ -321,7 +321,7 @@ const permissionModes = [
 }
 
 .section-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
   margin-bottom: 4px;
@@ -377,7 +377,7 @@ const permissionModes = [
 }
 .turns-slider { flex: 1; accent-color: var(--color-accent); }
 .turns-value {
-  font-size: 16px; font-weight: 700;
+  font-size: 14px; font-weight: 700;
   color: var(--color-accent);
   min-width: 30px; text-align: center;
 }

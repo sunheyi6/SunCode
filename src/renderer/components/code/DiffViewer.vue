@@ -127,6 +127,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
+  transition: border-color 0.15s ease;
 }
 
 .diff-header {

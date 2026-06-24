@@ -39,6 +39,11 @@
   --sidebar-width: 260px;
   --statusbar-height: 28px;
   --input-height: 80px;
+
+  /* density: compact (default) or comfortable */
+  --density-message-gap: 8px;
+  --density-card-padding: 8px 10px;
+  --density-section-gap: 6px;
 }
 
 /* Light theme */
