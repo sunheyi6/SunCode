@@ -127,8 +127,11 @@ export const useChatStore = defineStore('chat', () => {
               .map((block) => ('text' in block ? block.text : ''))
               .join('');
             if (textBlocks) {
-              // Append to any content already streamed via text_delta
-              msg.content = msg.content ? msg.content + textBlocks : textBlocks;
+              // Only set from done if we haven't already received text via streaming (text_delta).
+              // Otherwise streaming + done = duplicate.
+              if (!msg.content) {
+                msg.content = textBlocks;
+              }
             } else if (!msg.content) {
               // No text blocks — use thinking blocks as the visible answer
               msg.content = finalContent

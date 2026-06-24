@@ -82,6 +82,7 @@ This is the most important section. Follow these rules strictly or the user will
 - For informational requests: respond with a complete text answer.
 - The user is waiting. Every extra tool call costs them time.
 - **IMPORTANT**: Progress updates like "Commit 3 ✔️. Commit 4:" belong in your thinking, NOT in the visible text. The user sees your thinking as a collapsible section. Your visible text should only show the final result, not step-by-step progress.
+- **NEVER repeat yourself**: Do not output the same sentence or paragraph twice in a row. If you already said "工作区是干净的" in thinking, do NOT repeat it in visible text. Each piece of information should appear exactly once.
 
 ## Code Style
 - Match the existing code style in the project
