@@ -21,8 +21,16 @@ export interface SystemPromptInput {
  * Combines the base system prompt, tool descriptions, skills, and environment info.
  */
 export function buildSystemPrompt(input: SystemPromptInput): string {
-  const { workingDir, tools, skillsContent, maxTurns, permissionMode, customPrompt, agentsMdContent, memoryContent } =
-    input;
+  const {
+    workingDir,
+    tools,
+    skillsContent,
+    maxTurns,
+    permissionMode,
+    customPrompt,
+    agentsMdContent,
+    memoryContent,
+  } = input;
 
   const parts: string[] = [];
 
@@ -35,12 +43,17 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   parts.push(permissionInstructions(permissionMode));
 
   // Environment info
+  const shellInfo = getShellInfo();
   parts.push('');
   parts.push('## Environment');
   parts.push(`- Working directory: ${workingDir}`);
-  parts.push(`- Operating system: ${process.platform}`);
+  parts.push(`- Operating system: ${shellInfo.osName}`);
+  parts.push(`- Shell: ${shellInfo.shell}`);
+  parts.push(`- Shell type: ${shellInfo.shellType}`);
   parts.push(`- Date: ${new Date().toISOString().split('T')[0]}`);
   parts.push(`- Maximum turns: ${maxTurns}`);
+  parts.push('');
+  parts.push(shellInfo.guidance);
 
   // Auto-generated memories from prior sessions (Codex-style).
   if (memoryContent) {
@@ -98,6 +111,15 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
 
   // Final instruction
   parts.push('');
+  parts.push('## CRITICAL: Git Push Rule');
+  parts.push(
+    'If the user asked to push/提交到远端/上传: ALL git operations MUST be chained in ONE bash call ending with git push. Example:',
+  );
+  parts.push('  git add <files> && git commit -m "msg" && git push');
+  parts.push(
+    'Never stop after commit. Never output text between commit and push. Commit without push = FAILURE.',
+  );
+  parts.push('');
   parts.push(
     "Begin by analyzing the user's request carefully. Use tools to gather information before proposing or making changes.",
   );
@@ -118,6 +140,46 @@ function permissionInstructions(mode: AppSettings['permissionMode']): string {
   }
 }
 
+/** Shell environment info based on the current platform. */
+function getShellInfo(): { osName: string; shell: string; shellType: string; guidance: string } {
+  const platform = process.platform;
+  let osName: string;
+  let shell: string;
+  let shellType: string;
+  let guidance: string;
+
+  if (platform === 'win32') {
+    osName = 'Windows';
+    shell = 'pwsh.exe';
+    shellType = 'PowerShell';
+    guidance =
+      'The bash tool runs PowerShell (pwsh.exe) on this Windows system. ' +
+      'Key notes for PowerShell:\n' +
+      '  - Use `&&` to chain commands (same as bash).\n' +
+      '  - Double quotes for strings with spaces, single quotes for literals.\n' +
+      '  - Standard Unix aliases (ls, cat, rm, cp, mv, mkdir, grep) are available.\n' +
+      '  - Environment variables: use `$env:VAR` instead of `$VAR`.\n' +
+      '  - Avoid cmd.exe-specific syntax (e.g., `type` for cat, `copy` for cp).\n' +
+      '  - Git commands work identically to Unix.';
+  } else if (platform === 'darwin') {
+    osName = 'macOS';
+    shell = '/bin/bash';
+    shellType = 'Bash';
+    guidance =
+      'The bash tool runs bash on this macOS system. ' +
+      'Standard Unix/Linux commands and shell syntax apply.';
+  } else {
+    osName = 'Linux';
+    shell = '/bin/bash';
+    shellType = 'Bash';
+    guidance =
+      'The bash tool runs bash on this Linux system. ' +
+      'Standard Unix/Linux commands and shell syntax apply.';
+  }
+
+  return { osName, shell, shellType, guidance };
+}
+
 /** One-line summaries for built-in tools.  Concise but complete enough that
  *  the model knows which tool to pick and which parameters are required.
  *  Full JSON Schema is still available via `tool.getDefinition()` for
@@ -127,7 +189,7 @@ function getToolSnippet(tool: ToolDefinition): string {
     read: 'Read file contents with line numbers. `file_path` (required), `offset`, `limit`. Also reads images as base64.',
     write: 'Create or overwrite a file (creates parent dirs). `file_path` and `content` required.',
     edit: 'Exact string replacement in a file. `file_path`, `old_string`, `new_string` required. `replace_all` (bool) replaces all occurrences. Fails if old_string is not unique.',
-    bash: 'Execute a shell command. `command` (required), `description` (short summary), `timeout` ms (max 300000), `run_in_background` (bool).',
+    bash: 'Execute a shell command. `command` (required). For git push: chain add+commit+push with && in one call.',
     grep: 'Regex search via ripgrep. `pattern` (required), `path`, `glob` filter, `type` filter, `multiline` (bool), `ignoreCase` (bool). Supports -A/-B/-C context.',
     glob: 'Find files by glob pattern. `pattern` required (e.g. "**/*.ts"). `path` (search dir). Results sorted by mtime.',
     task_complete:
