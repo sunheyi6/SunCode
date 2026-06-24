@@ -127,7 +127,9 @@ const thinkingSummary = computed(() => {
 
   // --- Collapsed (done) ---
   const parts: string[] = ['🧠 思考过程'];
-  if (max > 0) parts.push(` (${max}轮)`);
+  if (turn > 0 && max > 0) {
+    parts.push(` (${turn} 轮)`);
+  }
   if (calls.length > 0) {
     const names = calls
       .slice(0, 3)
