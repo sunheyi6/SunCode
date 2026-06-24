@@ -12,18 +12,14 @@ function runFilePath(sessionId: string, runId: RunId): string {
   return join(runsDir(sessionId), `${runId}.jsonl`);
 }
 
-/** Create the run directory and write the initial event. */
+/** Create the run directory (the first appendEvent call writes the initial event). */
 export async function startRun(sessionId: string, runId: RunId): Promise<void> {
   const dir = runsDir(sessionId);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  const event: RunEvent = {
-    type: 'run_started',
-    runId,
-    timestamp: new Date().toISOString(),
-  };
-  await appendFile(runFilePath(sessionId, runId), `${JSON.stringify(event)}\n`, 'utf-8');
+  // Don't write a bare run_started here — the worker's appendEvent call
+  // immediately follows with the full event including modelName and tokenUsage.
 }
 
 /** Append a single RunEvent to the JSONL file. */
