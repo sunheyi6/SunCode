@@ -18,8 +18,11 @@ watch(
   () => props.message.thinking?.length ?? 0,
   () => {
     void nextTick(() => {
-      const el = thinkingBodyRef.value;
-      if (el) el.scrollTop = el.scrollHeight;
+      // rAF ensures browser has completed layout before we read scrollHeight
+      requestAnimationFrame(() => {
+        const el = thinkingBodyRef.value;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
     });
   },
 );
@@ -264,7 +267,7 @@ async function copyContent() {
   line-height: 1.25;
   color: var(--color-text-muted);
   white-space: pre-wrap;
-  max-height: 300px;
+  max-height: 600px;
   overflow-y: auto;
 }
 
@@ -279,6 +282,7 @@ async function copyContent() {
 /* ── 完成后：折叠 ── */
 .thinking-section {
   margin-bottom: var(--spacing-sm);
+  border: 1px solid transparent;
   border-radius: var(--border-radius);
   overflow: hidden;
   background: var(--color-bg-tertiary);

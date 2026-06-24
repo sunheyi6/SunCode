@@ -8,6 +8,7 @@ const props = defineProps<{
 }>();
 
 const expanded = ref(true);
+const cardBodyRef = ref<HTMLElement | null>(null);
 const thinkingRefs = ref<Map<string, HTMLElement>>(new Map());
 const outputRefs = ref<Map<string, HTMLElement>>(new Map());
 
@@ -30,17 +31,24 @@ function setOutputRef(agent: string, el: Element | null): void {
   if (el) outputRefs.value.set(agent, el as HTMLElement);
 }
 
-// Auto-scroll thinking and output to bottom as content streams in
+// Auto-scroll thinking and output to bottom as content streams in.
+// Also ensures the card itself is visible within parent scroll containers.
 watch(
   () => results.value.map(r => `${r.agent}:t${r.thinking?.length ?? 0}:o${r.output?.length ?? 0}:c${r.internalCalls?.length ?? 0}`).join(','),
   () => {
     void nextTick(() => {
-      for (const [, el] of thinkingRefs.value) {
-        el.scrollTop = el.scrollHeight;
-      }
-      for (const [, el] of outputRefs.value) {
-        el.scrollTop = el.scrollHeight;
-      }
+      // rAF ensures browser has completed layout before we read scrollHeight
+      requestAnimationFrame(() => {
+        for (const [, el] of thinkingRefs.value) {
+          el.scrollTop = el.scrollHeight;
+        }
+        for (const [, el] of outputRefs.value) {
+          el.scrollTop = el.scrollHeight;
+        }
+        // Keep the card body visible within parent scroll containers
+        // (e.g. .thinking-live-body which clips at 600px)
+        cardBodyRef.value?.scrollIntoView({ block: 'end', behavior: 'instant' });
+      });
     });
   },
 );
@@ -67,7 +75,7 @@ watch(
     </div>
 
     <!-- Expanded body: one section per sub-agent result -->
-    <div v-if="expanded" class="card-body">
+    <div v-if="expanded" ref="cardBodyRef" class="card-body">
       <div v-for="(r, i) in results" :key="i" class="subagent-result">
         <div class="result-header">
           <span class="result-agent">{{ r.agent }}</span>
@@ -144,53 +152,54 @@ watch(
 
 .card-body {
   border-top: 1px solid var(--border-color);
-  padding: 6px 10px;
-  display: flex; flex-direction: column; gap: 6px;
+  padding: 4px 8px;
+  display: flex; flex-direction: column; gap: 4px;
 }
 
 .subagent-result {
   border-left: 3px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  padding: 6px 8px 6px 10px;
-  margin: 2px 0;
+  padding: 4px 6px;
+  margin: 0;
 }
 
 .result-header {
   display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .result-agent { font-size: 12px; font-weight: 600; color: var(--color-text); }
 .result-tokens { font-size: 10px; color: var(--color-text-muted); }
 
 .sub-thinking {
-  margin: 4px 0;
+  margin: 2px 0;
+  border: 1px solid transparent;
   border-radius: 3px;
   overflow: hidden;
   background: var(--color-bg-tertiary);
 }
 .sub-thinking-summary {
   font-size: 11px; color: var(--color-text-muted); cursor: pointer;
-  padding: 4px 6px;
+  padding: 3px 6px;
   user-select: none;
 }
 .sub-thinking-text {
   font-size: 11px; line-height: 1.25; color: var(--color-text-secondary);
-  padding: 4px 8px;
+  padding: 3px 6px;
   margin: 0;
-  max-height: 200px; overflow-y: auto;
+  max-height: 300px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
 }
 
-.sub-tools { margin: 4px 0; }
-.sub-tools-label { font-size: 10px; color: var(--color-text-muted); font-weight: 600; margin-bottom: 2px; }
+.sub-tools { margin: 2px 0; }
+.sub-tools-label { font-size: 10px; color: var(--color-text-muted); font-weight: 600; margin-bottom: 1px; }
 
-.result-output { margin: 4px 0; }
+.result-output { margin: 2px 0; }
 .output-label { font-size: 10px; color: var(--color-text-muted); font-weight: 600; }
 .output-text {
   font-size: 12px; line-height: 1.35; color: var(--color-text);
   background: var(--color-surface);
   padding: 4px 6px; border-radius: 3px;
   margin: 2px 0 0 0;
-  max-height: 200px; overflow-y: auto;
+  max-height: 300px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
 }
 

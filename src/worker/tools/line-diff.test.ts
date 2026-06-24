@@ -1,5 +1,4 @@
-// @ts-expect-error Bun provides this module at test runtime; the repo has no Bun type package.
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { countLineChanges } from './line-diff';
 
 describe('countLineChanges', () => {

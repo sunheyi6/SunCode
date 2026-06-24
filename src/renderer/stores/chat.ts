@@ -195,15 +195,28 @@ export const useChatStore = defineStore('chat', () => {
       msg.toolCalls.push(target);
     }
     // For subagent tool: pre-populate result so SubagentCard shows agent names immediately
+    // and handleSubagentProgress can stream updates to the right target.
     if (toolCall.name === 'subagent' && !target.result) {
       try {
         const args = JSON.parse(target.arguments || toolCall.arguments);
+        // Batch mode: calls[] array
         const calls = args.calls as Array<{ agent: string; prompt: string }> | undefined;
-        if (calls && calls.length > 0) {
+        // Single-call mode: agent + prompt
+        const singleAgent = args.agent as string | undefined;
+        const singlePrompt = args.prompt as string | undefined;
+
+        const agents: Array<{ agent: string; prompt: string }> =
+          calls && calls.length > 0
+            ? calls
+            : singleAgent && singlePrompt
+              ? [{ agent: singleAgent, prompt: singlePrompt }]
+              : [];
+
+        if (agents.length > 0) {
           (target as unknown as Record<string, unknown>).result = {
             success: true,
             output: '',
-            subagentResults: calls.map((c) => ({
+            subagentResults: agents.map((c) => ({
               agent: c.agent,
               success: true,
               output: '执行中...',

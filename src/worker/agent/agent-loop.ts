@@ -36,6 +36,8 @@ export interface AgentLoopInput {
   abortSignal: AbortSignal;
   /** Unique identifier for this run (used for event logging). */
   runId: string;
+  /** Stable session identifier for prompt cache affinity. */
+  sessionId: string;
   onStream: (event: StreamEvent) => void;
   onToolStart: (toolCall: ToolCallContent) => void;
   onToolEnd: (result: ToolResult) => void;
@@ -73,6 +75,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     memoryContent,
     abortSignal,
     runId,
+    sessionId,
     onStream,
     onToolStart,
     onToolEnd,
@@ -164,12 +167,16 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         tools: toolDefs.map(convertToolDef),
       };
 
-      console.log(`[AgentLoop] Calling streamSimple with ${piContext.messages.length} messages`);
+      console.log(`[AgentLoop] Calling streamSimple with ${piContext.messages.length} messages, cache=long, session=${sessionId.slice(0, 8)}`);
 
-      // Call the LLM with real token-by-token streaming
+      // Call the LLM with real token-by-token streaming + prompt caching
       const stream = streamSimpleFn(model, piContext, {
         reasoning: settings.thinkingLevel,
         signal: abortSignal,
+        // Prompt caching — cacheRetention "long" requests Anthropic's 1h TTL
+        cacheRetention: 'long',
+        // Session affinity — same sessionId → same cache replica → higher hit rate
+        sessionId,
       });
 
       // Accumulate content as it streams in
@@ -340,17 +347,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         };
       }
 
-      // Execute tool calls
+      // Execute tool calls (parallel when multiple independent calls)
       console.log(`[AgentLoop] Executing ${toolCalls.length} tool calls`);
+
+      if (abortSignal.aborted) {
+        const err2 = new Error('已中止') as Error & { name: string };
+        err2.name = 'AbortError';
+        throw err2;
+      }
+
+      // Phase 1: Validate all tools synchronously, emit start events
+      interface ValidatedCall {
+        tc: typeof toolCalls[number];
+        tool: Tool;
+        params: Record<string, unknown>;
+      }
       const toolResults: ToolResult[] = [];
+      const toExecute: ValidatedCall[] = [];
 
       for (const tc of toolCalls) {
-        if (abortSignal.aborted) {
-          const err2 = new Error('已中止') as Error & { name: string };
-          err2.name = 'AbortError';
-          throw err2;
-        }
-
         onToolStart(tc);
         onRunEvent({
           type: 'tool_started',
@@ -362,15 +377,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
         const tool = tools.find((t) => t.name === tc.name);
         if (!tool) {
-          const err: ToolResult = {
+          const e: ToolResult = {
             toolCallId: tc.id,
             name: tc.name,
             success: false,
             error: `未知工具: ${tc.name}`,
             output: '',
           };
-          toolResults.push(err);
-          onToolEnd(err);
+          toolResults.push(e);
+          onToolEnd(e);
           onRunEvent({
             type: 'tool_completed',
             runId,
@@ -387,15 +402,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         try {
           params = JSON.parse(tc.arguments);
         } catch {
-          const err: ToolResult = {
+          const e: ToolResult = {
             toolCallId: tc.id,
             name: tc.name,
             success: false,
             error: `参数解析失败: ${tc.arguments}`,
             output: '',
           };
-          toolResults.push(err);
-          onToolEnd(err);
+          toolResults.push(e);
+          onToolEnd(e);
           onRunEvent({
             type: 'tool_completed',
             runId,
@@ -407,7 +422,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           continue;
         }
 
-        // Validate required parameters — skip the tool if any are missing.
+        // Validate required parameters
         {
           const def = tool.getDefinition();
           const required = (def.parameters as { required?: string[] }).required ?? [];
@@ -419,22 +434,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               missing = key;
               break;
             }
-            // Coerce numbers passed as strings (common LLM mistake)
             if (props[key]?.type === 'integer' && typeof params[key] === 'string') {
               const n = Number(params[key]);
               if (Number.isFinite(n)) params[key] = n;
             }
           }
           if (missing) {
-            const err2: ToolResult = {
+            const e: ToolResult = {
               toolCallId: tc.id,
               name: tc.name,
               success: false,
               error: `缺少必需参数: ${missing}`,
               output: '',
             };
-            toolResults.push(err2);
-            onToolEnd(err2);
+            toolResults.push(e);
+            onToolEnd(e);
             onRunEvent({
               type: 'tool_completed',
               runId,
@@ -447,39 +461,66 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           }
         }
 
-        try {
-          console.log(`[AgentLoop] Executing tool: ${tc.name}`);
-          const result = await tool.execute(params);
-          result.toolCallId = tc.id;
-          toolResults.push(result);
-          onToolEnd(result);
-          onRunEvent({
-            type: 'tool_completed',
-            runId,
-            toolCallId: tc.id,
-            toolName: tc.name,
-            success: result.success,
-            timestamp: '',
-          });
-          console.log(`[AgentLoop] Tool ${tc.name} result:`, result.success ? 'success' : `error: ${result.error || 'unknown'}`);
-        } catch (error) {
-          const err: ToolResult = {
-            toolCallId: tc.id,
-            name: tc.name,
-            success: false,
-            error: (error as Error).message,
-            output: '',
-          };
-          toolResults.push(err);
-          onToolEnd(err);
-          onRunEvent({
-            type: 'tool_completed',
-            runId,
-            toolCallId: tc.id,
-            toolName: tc.name,
-            success: false,
-            timestamp: '',
-          });
+        toExecute.push({ tc, tool, params });
+      }
+
+      // Phase 2: Execute all valid tools in parallel
+      if (toExecute.length > 0) {
+        const mode = toExecute.length > 1 ? 'parallel' : 'single';
+        console.log(`[AgentLoop] Executing ${toExecute.length} tools in ${mode}`);
+
+        const settled = await Promise.allSettled(
+          toExecute.map(async ({ tc, tool, params }) => {
+            try {
+              console.log(`[AgentLoop] Tool ${tc.name} executing...`);
+              const result = await tool.execute(params);
+              result.toolCallId = tc.id;
+              onToolEnd(result);
+              onRunEvent({
+                type: 'tool_completed',
+                runId,
+                toolCallId: tc.id,
+                toolName: tc.name,
+                success: result.success,
+                timestamp: '',
+              });
+              console.log(`[AgentLoop] Tool ${tc.name}: ${result.success ? 'success' : `error: ${result.error || 'unknown'}`}`);
+              return result;
+            } catch (error) {
+              const e: ToolResult = {
+                toolCallId: tc.id,
+                name: tc.name,
+                success: false,
+                error: (error as Error).message,
+                output: '',
+              };
+              onToolEnd(e);
+              onRunEvent({
+                type: 'tool_completed',
+                runId,
+                toolCallId: tc.id,
+                toolName: tc.name,
+                success: false,
+                timestamp: '',
+              });
+              return e;
+            }
+          }),
+        );
+
+        for (const s of settled) {
+          if (s.status === 'fulfilled') {
+            toolResults.push(s.value);
+          } else {
+            // Promise rejection from the mapper itself (unlikely, but handle it)
+            toolResults.push({
+              toolCallId: '',
+              name: 'unknown',
+              success: false,
+              error: `内部错误: ${s.reason}`,
+              output: '',
+            });
+          }
         }
       }
 

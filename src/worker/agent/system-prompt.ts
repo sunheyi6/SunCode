@@ -20,6 +20,16 @@ export interface SystemPromptInput {
  * Builds the system prompt for the agent.
  * Combines the base system prompt, tool descriptions, skills, and environment info.
  */
+/**
+ * Builds the system prompt for the agent.
+ *
+ * DESIGN NOTE (prompt caching): The system prompt is ordered for maximum cache
+ * stability. Static content (base prompt, guidelines, rules) comes FIRST so it
+ * always occupies the cacheable prefix. Semi-static content (tools, skills,
+ * memory) comes LATER so changes to those sections only invalidate the tail of
+ * the cache. Dynamic per-request data (date, etc.) is NOT included here — it
+ * belongs in the user message after the cache breakpoint.
+ */
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const {
     workingDir,
@@ -34,57 +44,17 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
 
   const parts: string[] = [];
 
-  // Base system prompt
+  // ═══════════════════════════════════════════════════════
+  // SECTION 1: STATIC CACHEABLE PREFIX
+  // These sections rarely or never change — they form the
+  // cacheable prefix that pi-ai marks with cache_control.
+  // ═══════════════════════════════════════════════════════
+
+  // 1a. Base system prompt (from constants — never changes at runtime)
   parts.push(customPrompt || DEFAULT_SYSTEM_PROMPT);
 
-  // Permission mode — tells the model how to behave regarding tool execution.
+  // 1b. Tool usage guidelines (never changes)
   parts.push('');
-  parts.push('## Permission Mode');
-  parts.push(permissionInstructions(permissionMode));
-
-  // Environment info
-  const shellInfo = getShellInfo();
-  parts.push('');
-  parts.push('## Environment');
-  parts.push(`- Working directory: ${workingDir}`);
-  parts.push(`- Operating system: ${shellInfo.osName}`);
-  parts.push(`- Shell: ${shellInfo.shell}`);
-  parts.push(`- Shell type: ${shellInfo.shellType}`);
-  parts.push(`- Date: ${new Date().toISOString().split('T')[0]}`);
-  parts.push(`- Maximum turns: ${maxTurns}`);
-  parts.push('');
-  parts.push(shellInfo.guidance);
-
-  // Auto-generated memories from prior sessions (Codex-style).
-  if (memoryContent) {
-    parts.push('');
-    parts.push('<project_memory>');
-    parts.push('The following is a summary of past work in this project. Use it to');
-    parts.push('understand the project context and avoid re-exploring known ground.');
-    parts.push('');
-    parts.push(memoryContent);
-    parts.push('</project_memory>');
-  }
-
-  // Workspace instructions from .agents.md (Codex convention).
-  // Structured as project_context following the pi/Codex convention so the
-  // model can clearly separate project rules from general instructions.
-  if (agentsMdContent) {
-    parts.push('');
-    parts.push('<project_context>');
-    parts.push(agentsMdContent);
-    parts.push('</project_context>');
-  }
-
-  // Tools section — one-line summaries save significant tokens vs full JSON Schema.
-  parts.push('');
-  parts.push('## Available Tools');
-  parts.push('');
-  for (const tool of tools) {
-    parts.push(`- **${tool.name}**: ${getToolSnippet(tool)}`);
-  }
-
-  // Tool usage guidelines
   parts.push('## Tool Usage Guidelines');
   parts.push(
     '1. You may call multiple tools in a single response when operations are independent.',
@@ -101,15 +71,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   );
   parts.push('8. Only call task_complete as the final action — never together with other tools.');
 
-  // Skills section — wrapped in available_skills XML per agentskills.io convention
-  if (skillsContent) {
-    parts.push('');
-    parts.push('<available_skills>');
-    parts.push(skillsContent);
-    parts.push('</available_skills>');
-  }
-
-  // Final instruction
+  // 1c. Git push rule (never changes)
   parts.push('');
   parts.push('## CRITICAL: Git Push Rule');
   parts.push(
@@ -119,6 +81,76 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   parts.push(
     'Never stop after commit. Never output text between commit and push. Commit without push = FAILURE.',
   );
+
+  // ═══════════════════════════════════════════════════════
+  // SECTION 2: SEMI-STATIC CONTENT
+  // These change infrequently (per-session or per-settings-change).
+  // They come AFTER the cacheable prefix so prefix cache hits
+  // survive changes to these sections.
+  // ═══════════════════════════════════════════════════════
+
+  // 2a. Permission mode — changes when user toggles settings
+  parts.push('');
+  parts.push('## Permission Mode');
+  parts.push(permissionInstructions(permissionMode));
+
+  // 2b. Environment info — working dir and shell are per-session, OS is constant
+  // NOTE: Date is intentionally OMITTED. Injecting a daily-changing string
+  // into the system prompt would invalidate the prompt cache every midnight.
+  const shellInfo = getShellInfo();
+  parts.push('');
+  parts.push('## Environment');
+  parts.push(`- Working directory: ${workingDir}`);
+  parts.push(`- Operating system: ${shellInfo.osName}`);
+  parts.push(`- Shell: ${shellInfo.shell}`);
+  parts.push(`- Shell type: ${shellInfo.shellType}`);
+  parts.push(`- Maximum turns: ${maxTurns}`);
+  parts.push('');
+  parts.push(shellInfo.guidance);
+
+  // 2c. Available Tools — changes when tool registry changes (rare)
+  parts.push('');
+  parts.push('## Available Tools');
+  parts.push('');
+  for (const tool of tools) {
+    parts.push(`- **${tool.name}**: ${getToolSnippet(tool)}`);
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // SECTION 3: PROJECT-SPECIFIC DYNAMIC CONTENT
+  // These change with project state (memory, skills, agents.md).
+  // They're at the END so the static/semi-static prefix above
+  // stays cacheable even when project content updates.
+  // ═══════════════════════════════════════════════════════
+
+  // 3a. Project memory (auto-generated, changes between sessions)
+  if (memoryContent) {
+    parts.push('');
+    parts.push('<project_memory>');
+    parts.push('The following is a summary of past work in this project. Use it to');
+    parts.push('understand the project context and avoid re-exploring known ground.');
+    parts.push('');
+    parts.push(memoryContent);
+    parts.push('</project_memory>');
+  }
+
+  // 3b. Workspace instructions from .agents.md
+  if (agentsMdContent) {
+    parts.push('');
+    parts.push('<project_context>');
+    parts.push(agentsMdContent);
+    parts.push('</project_context>');
+  }
+
+  // 3c. Skills — changes when skill files are added/modified
+  if (skillsContent) {
+    parts.push('');
+    parts.push('<available_skills>');
+    parts.push(skillsContent);
+    parts.push('</available_skills>');
+  }
+
+  // Final instruction (stable, kept at end for readability)
   parts.push('');
   parts.push(
     "Begin by analyzing the user's request carefully. Use tools to gather information before proposing or making changes.",

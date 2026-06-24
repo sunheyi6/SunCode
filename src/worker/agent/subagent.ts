@@ -291,6 +291,8 @@ export class SubagentDispatcher {
       memoryContent: '',
       abortSignal: signal,
       runId: executionId,
+      // Use parent session + agent name for cache affinity across subagent invocations
+      sessionId: `${this.opts.parentSessionId}:${call.agent}`,
       onStream: (event: StreamEvent) => {
         if (event.type === 'thinking_delta' && event.text) {
           subThinking += event.text;

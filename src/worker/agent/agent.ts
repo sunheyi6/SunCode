@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import type {
   AgentStatus,
   AppSettings,
@@ -35,6 +36,8 @@ export class Agent {
   private isRunning = false;
   private turnCount = 0;
   private totalTokens = { input: 0, output: 0, total: 0 };
+  /** Stable session ID for prompt cache affinity (Anthropic). */
+  private sessionId: string;
 
   private onStream: (event: StreamEvent) => void;
   private onStatus: (status: AgentStatus) => void;
@@ -73,6 +76,7 @@ export class Agent {
     this.onBackgroundComplete = onBackgroundComplete;
     this.onRunEvent = onRunEvent;
     this.onSubagentEvent = onSubagentEvent;
+    this.sessionId = randomUUID();
 
     void this.initialize();
   }
@@ -87,7 +91,7 @@ export class Agent {
         settings: this.settings,
         workingDir: this.workingDir,
         parentMessages: this.messages,
-        parentSessionId: 'main',
+        parentSessionId: this.sessionId,
         abortSignal: new AbortController().signal,
         depth: 0,
         ancestorStack: [],
@@ -152,7 +156,7 @@ export class Agent {
         settings: this.settings,
         workingDir: path,
         parentMessages: this.messages,
-        parentSessionId: 'main',
+        parentSessionId: this.sessionId,
         abortSignal: new AbortController().signal,
         depth: 0,
         ancestorStack: [],
@@ -310,6 +314,7 @@ export class Agent {
       memoryContent,
       abortSignal: this.abortController!.signal,
       runId,
+      sessionId: this.sessionId,
       onStream: (event) => {
         this.onStream(event);
       },

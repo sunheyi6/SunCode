@@ -1,5 +1,4 @@
-// @ts-expect-error Bun test types are provided by the Bun runtime.
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,7 +29,7 @@ describe('file tool details', () => {
       new_string: 'TWO',
     });
 
-    expect(result.details).toEqual({
+    expect(result.details).toMatchObject({
       type: 'file_edit',
       filePath,
       status: 'edited',

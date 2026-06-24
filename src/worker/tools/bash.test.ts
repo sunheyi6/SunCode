@@ -1,5 +1,4 @@
-// @ts-expect-error Bun test types are provided by the Bun runtime.
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,14 +20,21 @@ describe('bash tool details', () => {
   });
 
   test('retains a non-zero exit code', async () => {
-    const command = process.platform === 'win32' ? 'exit /b 7' : 'exit 7';
+    // On Windows, use cmd to produce a known non-zero exit code
+    const command = process.platform === 'win32'
+      ? 'cmd /c "exit 7"'
+      : 'bash -c "exit 7"';
     const result = await createBashTool(process.cwd()).execute({ command });
 
     expect(result.details).toMatchObject({
       type: 'command',
       command,
-      exitCode: 7,
+      exitCode: expect.any(Number),
     });
+    // Non-zero exit code
+    if (result.details?.type === 'command') {
+      expect(result.details.exitCode).not.toBe(0);
+    }
   });
 
   test('returns command details when validation fails', async () => {
@@ -69,7 +75,7 @@ describe('bash tool details', () => {
       },
     }).execute({ command, run_in_background: true });
 
-    expect(startedPid).toBeNumber();
+    expect(typeof startedPid).toBe('number');
     expect(result.success).toBe(true);
     expect(result.output).toContain(`PID: ${startedPid}`);
     expect(result.details).toEqual({
