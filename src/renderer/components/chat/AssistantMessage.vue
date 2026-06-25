@@ -10,6 +10,21 @@ const props = defineProps<{
 
 const hasContent = computed(() => props.message.content.length > 0);
 const hasThinking = computed(() => props.message.isStreaming || Boolean(props.message.thinking));
+
+/**
+ * Auto-expand the thinking section when the visible text answer is very short
+ * relative to the thinking content. Reasoning models often put the real answer
+ * inside thinking and leave only a token sentence as text — without expansion
+ * the user can't find the actual results.
+ */
+const autoExpandThinking = computed(() => {
+  if (props.message.isStreaming) return false; // Already inline during streaming
+  const textLen = props.message.content.length;
+  const thinkingLen = props.message.thinking?.length ?? 0;
+  // Auto-expand when text is empty or trivially short, and thinking is substantial
+  return thinkingLen > 200 && textLen < 120;
+});
+
 const copied = ref(false);
 const thinkingBodyRef = ref<HTMLElement | null>(null);
 
@@ -176,8 +191,8 @@ async function copyContent() {
         </div>
       </div>
 
-      <!-- 完成后：思考过程折叠 -->
-      <details v-else-if="hasThinking" class="thinking-section" :open="false">
+      <!-- 完成后：思考过程折叠（文本过短时自动展开） -->
+      <details v-else-if="hasThinking" class="thinking-section" :open="autoExpandThinking">
         <summary class="thinking-summary">{{ thinkingSummary }}</summary>
         <div class="thinking-content">
           <template v-for="(entry, i) in thinkingTimeline" :key="i">

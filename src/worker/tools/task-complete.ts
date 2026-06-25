@@ -8,7 +8,7 @@ export function createTaskCompleteTool() {
   return new (class TaskCompleteTool extends BaseTool {
     readonly name = TASK_COMPLETE_TOOL_NAME;
     readonly description =
-      "Signal that the task is completely finished. Call this tool as the final action when you have fully completed the user's request. Provide a concise summary of what was accomplished. Do NOT call this together with other tools.";
+      "Signal that the task is completely finished. Call this as the FINAL action ONLY after you have FULLY completed AND verified the user's request. Provide a concise summary of what was accomplished, including evidence that your work is correct (e.g., test output, run results). Do NOT call this together with other tools. Do NOT call this if your code hasn't been tested and confirmed working — untested code is not done.";
     readonly parameters = obj(
       {
         summary: p(

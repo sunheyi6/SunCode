@@ -1,16 +1,19 @@
+import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import { MAX_TURNS } from '@shared/constants';
+import { isIncompleteProgressText } from '@shared/finalization';
 import type {
   AppSettings,
+  ContentBlock,
   Message,
   RunEvent,
   StreamEvent,
   ToolCallContent,
+  ToolDefinition,
   ToolResult,
 } from '@shared/types';
+import { TASK_COMPLETE_TOOL_NAME } from '../tools/task-complete';
 import type { Tool } from '../tools/types';
 import { buildSystemPrompt } from './system-prompt';
-import { TASK_COMPLETE_TOOL_NAME } from '../tools/task-complete';
-import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 
 /** Context passed to prepareNextTurn so implementors can trim or adjust. */
 export interface PrepareNextTurnContext {
@@ -169,7 +172,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         tools: toolDefs.map(convertToolDef),
       };
 
-      console.log(`[AgentLoop] Calling streamSimple with ${piContext.messages.length} messages, cache=long, session=${sessionId.slice(0, 8)}`);
+      console.log(
+        `[AgentLoop] Calling streamSimple with ${piContext.messages.length} messages, cache=long, session=${sessionId.slice(0, 8)}`,
+      );
 
       // Call the LLM with real token-by-token streaming + prompt caching
       const stream = streamSimpleFn(model, piContext, {
@@ -286,6 +291,30 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // No tool calls → final turn. Send text_end so the frontend finalises.
       if (toolCalls.length === 0) {
+        if (
+          isIncompleteProgressText(assistantText) &&
+          turnCount < (settings.maxTurns || MAX_TURNS)
+        ) {
+          contextMessages.push({
+            role: 'assistant',
+            content: [{ type: 'text', text: assistantText }],
+          });
+          contextMessages.push({
+            role: 'user',
+            content:
+              '你的上一条回复是在描述尚未完成的下一步，不是最终交付物。请继续使用工具完成这些步骤；只有在已经验证完成后，才输出最终答案或调用 task_complete。',
+          });
+          onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
+          onRunEvent({
+            type: 'turn_completed',
+            runId,
+            turnNumber: turnCount,
+            hasToolCalls: false,
+            timestamp: '',
+          });
+          continue;
+        }
+
         onStream({ type: 'text_end' });
         onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
         onRunEvent({
@@ -296,11 +325,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           timestamp: '',
         });
 
-        const contentBlocks: Array<{ type: string; text: string }> = [];
+        // When the model outputs substantial thinking but little/no text
+        // (common with reasoning models like DeepSeek), include the thinking
+        // content as the visible answer so the user sees actual results instead
+        // of an empty "已完成。" placeholder.
+        const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
+
+        const contentBlocks: Array<
+          { type: 'thinking'; text: string } | { type: 'text'; text: string }
+        > = [];
         if (thinkingText) {
           contentBlocks.push({ type: 'thinking', text: thinkingText });
         }
-        contentBlocks.push({ type: 'text', text: assistantText || '已完成。' });
+        contentBlocks.push({ type: 'text', text: mergedText });
 
         return {
           finalMessage: {
@@ -329,6 +366,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           assistantText = assistantText ? `${assistantText}\n\n${summary}` : summary;
         }
 
+        // Merge thinking into answer when text is empty/minimal (same logic as the
+        // no-tool-calls path above). Reasoning models often put the real answer in
+        // thinking and leave text blank — without this the user sees nothing useful.
+        const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
+
         onStream({ type: 'text_end' });
         onStream({ type: 'turn_end', turnCount, hasToolCalls: true });
         onRunEvent({
@@ -339,11 +381,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           timestamp: '',
         });
 
-        const contentBlocks: Array<{ type: string; text: string }> = [];
+        const contentBlocks: Array<
+          { type: 'thinking'; text: string } | { type: 'text'; text: string }
+        > = [];
         if (thinkingText) {
           contentBlocks.push({ type: 'thinking', text: thinkingText });
         }
-        contentBlocks.push({ type: 'text', text: assistantText || '已完成。' });
+        contentBlocks.push({ type: 'text', text: mergedText });
 
         return {
           finalMessage: {
@@ -366,7 +410,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // Phase 1: Validate all tools synchronously, emit start events
       interface ValidatedCall {
-        tc: typeof toolCalls[number];
+        tc: (typeof toolCalls)[number];
         tool: Tool;
         params: Record<string, unknown>;
       }
@@ -492,7 +536,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 success: result.success,
                 timestamp: '',
               });
-              console.log(`[AgentLoop] Tool ${tc.name}: ${result.success ? 'success' : `error: ${result.error || 'unknown'}`}`);
+              console.log(
+                `[AgentLoop] Tool ${tc.name}: ${result.success ? 'success' : `error: ${result.error || 'unknown'}`}`,
+              );
               return result;
             } catch (error) {
               const e: ToolResult = {
@@ -535,7 +581,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // Add assistant + tool results to context.
       // With real streaming, the model already correctly separates thinking
       // from text content — store each with its proper type as received.
-      const assistantBlocks: Array<Record<string, unknown>> = [];
+      const assistantBlocks: ContentBlock[] = [];
       if (thinkingText) {
         assistantBlocks.push({ type: 'thinking', text: thinkingText });
       }
@@ -549,7 +595,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
       const assistantMsg2: Message = {
         role: 'assistant',
-        content: assistantBlocks as Message['content'],
+        content: assistantBlocks,
         toolCalls,
       };
       contextMessages.push(assistantMsg2);
@@ -669,11 +715,7 @@ function convertMessage(msg: Message): Record<string, unknown> {
   };
 }
 
-function convertToolDef(tool: {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-}): Record<string, unknown> {
+function convertToolDef(tool: ToolDefinition): Record<string, unknown> {
   return {
     name: tool.name,
     description: tool.description,
@@ -691,6 +733,86 @@ function safeParseJson(str: string): unknown {
   } catch {
     return {};
   }
+}
+
+/**
+ * Merge thinking content into the visible answer when the model outputs
+ * substantial reasoning but little or no visible text.
+ *
+ * Reasoning models (DeepSeek, o1, etc.) often put the entire analysis in
+ * the thinking/reasoning stream and produce only a token sentence as text.
+ * Without merging, the user sees "已完成。" while the real answer is hidden
+ * inside a collapsed thinking section.
+ *
+ * Strategy:
+ * - If text is substantial (≥120 chars), return it unchanged.
+ * - If text is short/empty but thinking is substantial, extract a useful
+ *   summary from the end of the thinking stream (reasoning models typically
+ *   conclude their chain-of-thought with the final answer).
+ * - If nothing is available, fall back to a meaningful default.
+ */
+function mergeThinkingIntoAnswer(assistantText: string, thinkingText: string): string {
+  const textLen = assistantText.trim().length;
+
+  // Already has a meaningful visible answer — use it as-is
+  if (textLen >= 120) return assistantText;
+
+  // No thinking to fall back to
+  if (!thinkingText || thinkingText.trim().length === 0) {
+    return assistantText || '已完成。';
+  }
+
+  // Text is empty or too short, but thinking is available.
+  // Reasoning models typically conclude their thinking with a summary —
+  // extract the tail portion as the visible answer.
+  const cleanThinking = thinkingText.trim();
+  const thinkingLen = cleanThinking.length;
+
+  // If thinking is short enough to show entirely, just use it
+  if (thinkingLen <= 2000) {
+    return assistantText ? `${assistantText}\n\n---\n\n${cleanThinking}` : cleanThinking;
+  }
+
+  // For long thinking, extract the concluding portion (last ~1500 chars).
+  // Reasoning models tend to restate findings at the end of their chain-of-thought.
+  const tail = cleanThinking.slice(-1500);
+  // Try to start at a natural boundary (paragraph break or sentence end)
+  const boundary = findNaturalBoundary(tail);
+  const excerpt = tail.slice(boundary).trim();
+
+  if (assistantText) {
+    return `${assistantText}\n\n---\n\n${excerpt}`;
+  }
+
+  // Prepend a brief note so the user understands what they're reading
+  return `思考结论：\n\n${excerpt}`;
+}
+
+/**
+ * Find a natural text boundary (paragraph break, double newline, or period+newline)
+ * within the first 300 chars of the given text. Returns the offset to start from.
+ */
+function findNaturalBoundary(text: string): number {
+  // Prefer paragraph breaks
+  const paraIdx = text.indexOf('\n\n');
+  if (paraIdx !== -1 && paraIdx < 300) return paraIdx + 2;
+
+  // Try to find end of a sentence followed by newline
+  const sentenceMatch = text.slice(0, 400).match(/[。！？.!?]\n/g);
+  if (sentenceMatch) {
+    const firstMatch = sentenceMatch[0];
+    if (firstMatch) {
+      const idx = text.indexOf(firstMatch);
+      if (idx !== -1) return idx + firstMatch.length;
+    }
+  }
+
+  // Try to break at any newline
+  const nlIdx = text.indexOf('\n');
+  if (nlIdx !== -1 && nlIdx < 300) return nlIdx + 1;
+
+  // Fallback: no good boundary found, start from beginning of extracted text
+  return 0;
 }
 
 /**

@@ -1,7 +1,16 @@
-import type { Message, StreamEvent, SubagentProgressDelta, SubagentResult, ToolCallContent, ToolResult } from '@shared/types';
+import { isIncompleteProgressText } from '@shared/finalization';
+import type {
+  Message,
+  StreamEvent,
+  SubagentProgressDelta,
+  SubagentResult,
+  ToolCallContent,
+  ToolResult,
+} from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';
+import { buildPersistedAssistantMessage } from './chat-message-persistence';
 
 export interface ChatMessage {
   id: string;
@@ -67,29 +76,8 @@ export const useChatStore = defineStore('chat', () => {
         msg.maxTurns = event.maxTurns ?? 0;
         break;
       case 'turn_end':
-        // Intermediate turn with tool calls — save accumulated state to session
-        if (event.hasToolCalls && msg.toolCalls && msg.toolCalls.length > 0) {
-          console.log('[ChatStore] turn_end save: toolCalls=', msg.toolCalls.length, 'thinking=', (msg.thinking?.length ?? 0), 'content=', (msg.content?.length ?? 0));
-          const content: Message['content'] = [];
-          if (msg.thinking) content.push({ type: 'thinking', text: msg.thinking });
-          if (msg.content) content.push({ type: 'text', text: msg.content });
-          void bridge.saveMessage({
-            role: 'assistant',
-            content: content.length > 0 ? content : '思考中...',
-            toolCalls: msg.toolCalls.map((tc) => ({
-              type: 'tool_call' as const,
-              id: tc.id,
-              name: tc.name,
-              arguments: tc.arguments,
-              status: tc.status,
-              result: tc.result,
-            })),
-          }).then(() => {
-            console.log('[ChatStore] turn_end save: OK');
-          }).catch((e: Error) => {
-            console.error('[ChatStore] turn_end save FAILED:', e.message);
-          });
-        }
+        // Intermediate tool turns belong to the current assistant response.
+        // Persist only after the final worker done event arrives.
         break;
       case 'text_delta':
         currentText += event.text || '';
@@ -102,16 +90,6 @@ export const useChatStore = defineStore('chat', () => {
       case 'text_end':
         msg.isStreaming = false;
         isStreaming.value = false;
-        // Save message
-        {
-          const content: Message['content'] = [];
-          if (msg.thinking) content.push({ type: 'thinking', text: msg.thinking });
-          content.push({ type: 'text', text: msg.content });
-          void bridge.saveMessage({
-            role: 'assistant',
-            content,
-          });
-        }
         break;
       case 'toolcall_start':
         if (!msg.toolCalls) msg.toolCalls = [];
@@ -140,32 +118,56 @@ export const useChatStore = defineStore('chat', () => {
           if (typeof finalContent === 'string') {
             if (!msg.content) msg.content = finalContent;
           } else {
-            // Extract all text blocks for the final answer body.
-            // If the model only returned thinking blocks, fall back to
-            // those so the final answer always shows outside the thinking
-            // section.
-            const textBlocks = finalContent
+            // Extract text and thinking blocks from the final message.
+            // The agent loop may have merged thinking into text when the model
+            // produced reasoning-heavy but text-light output (common with
+            // DeepSeek-like reasoning models).
+            const finalText = finalContent
               .filter((block) => block.type === 'text')
               .map((block) => ('text' in block ? block.text : ''))
               .join('');
-            if (textBlocks) {
-              // Only set from done if we haven't already received text via streaming (text_delta).
-              // Otherwise streaming + done = duplicate.
-              if (!msg.content) {
-                msg.content = textBlocks;
+            const finalThinking = finalContent
+              .filter((block) => block.type === 'thinking')
+              .map((block) => ('text' in block ? block.text : ''))
+              .join('');
+
+            // Use final text if we didn't receive any streaming text deltas
+            if (finalText && (!msg.content || isIncompleteProgressText(msg.content))) {
+              msg.content = finalText;
+            } else if (!msg.content && finalThinking) {
+              // No text at all — use thinking as the visible answer
+              msg.content = finalThinking;
+            } else {
+              // Content was already streamed (text_delta). But if the
+              // streamed content is trivially short and the final message
+              // has merged thinking into text, prefer the merged version.
+              if (
+                finalText &&
+                msg.content &&
+                msg.content.length < 60 &&
+                finalText.length > msg.content.length
+              ) {
+                msg.content = finalText;
               }
-            } else if (!msg.content) {
-              // No text blocks — use thinking blocks as the visible answer
-              msg.content = finalContent
-                .filter((block) => block.type === 'thinking')
-                .map((block) => ('text' in block ? block.text : ''))
-                .join('');
-              if (!msg.content) msg.content = '已完成。';
+            }
+
+            // Update thinking if the final message has thinking blocks we
+            // didn't receive during streaming (e.g. from task_complete path)
+            if (finalThinking && !msg.thinking) {
+              msg.thinking = finalThinking;
             }
           }
         }
         msg.isStreaming = false;
         isStreaming.value = false;
+        void bridge.saveMessage(
+          buildPersistedAssistantMessage({
+            visibleContent: msg.content,
+            thinking: msg.thinking,
+            toolCalls: msg.toolCalls,
+            finalMessage: event.message,
+          }),
+        );
         currentAssistantMsg = null;
         currentText = '';
         currentThinking = '';
@@ -225,7 +227,9 @@ export const useChatStore = defineStore('chat', () => {
             })),
           };
         }
-      } catch { /* ignore parse errors */ }
+      } catch {
+        /* ignore parse errors */
+      }
     }
   }
 
@@ -238,13 +242,24 @@ export const useChatStore = defineStore('chat', () => {
       tc.status = result.success ? 'done' : 'error';
       tc.result = result;
       if (result.name === 'subagent') {
-        console.log('[ChatStore] endToolExecution subagent: subagentResults=', result.subagentResults?.length, 'thinking=', result.subagentResults?.[0]?.thinking?.length, 'internalCalls=', result.subagentResults?.[0]?.internalCalls?.length);
+        console.log(
+          '[ChatStore] endToolExecution subagent: subagentResults=',
+          result.subagentResults?.length,
+          'thinking=',
+          result.subagentResults?.[0]?.thinking?.length,
+          'internalCalls=',
+          result.subagentResults?.[0]?.internalCalls?.length,
+        );
       }
     }
   }
 
   /** Handle incremental sub-agent progress: thinking deltas and tool calls. */
-  function handleSubagentProgress(_executionId: string, _agent: string, delta: SubagentProgressDelta): void {
+  function handleSubagentProgress(
+    _executionId: string,
+    _agent: string,
+    delta: SubagentProgressDelta,
+  ): void {
     const msg = currentAssistantMsg;
     if (!msg?.toolCalls) return;
     // Find the subagent tool call (there should be only one running at a time)
@@ -265,8 +280,9 @@ export const useChatStore = defineStore('chat', () => {
         break;
       }
       case 'tool_start': {
+        if (!delta.toolCall) return;
         if (!target.internalCalls) target.internalCalls = [];
-        target.internalCalls.push(delta.toolCall!);
+        target.internalCalls.push(delta.toolCall);
         break;
       }
       case 'tool_end': {

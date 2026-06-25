@@ -55,7 +55,7 @@ export function createEditTool(workingDir: string) {
 
         if (count === 0) {
           return failForTarget(
-            `old_string not found in file. Make sure the string matches exactly, including whitespace and indentation.`,
+            'old_string not found in file. Make sure the string matches exactly, including whitespace and indentation. Do not keep guessing old_string; use read to inspect the exact current file content, or use write to replace the full file when a precise edit is unreliable.',
           );
         }
 

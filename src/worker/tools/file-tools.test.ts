@@ -56,6 +56,8 @@ describe('file tool details', () => {
       status: 'failed',
       error: expect.stringContaining('old_string not found'),
     });
+    expect(result.error).toContain('use read');
+    expect(result.error).toContain('write');
   });
 
   test('edit sandbox failure retains the normalized target path', async () => {
