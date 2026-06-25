@@ -25,6 +25,9 @@ import { createSubagentTool } from '../tools/subagent';
 import { runAgentLoop } from './agent-loop';
 import { createSkillsLoader } from './skills';
 import { SubagentDispatcher } from './subagent';
+import { applyContextBudget } from './context-budget';
+import type { ContextBudgetPolicy } from '@shared/types';
+import { DEFAULT_CONTEXT_BUDGET_POLICY } from '@shared/constants';
 
 export class Agent {
   private workingDir: string;
@@ -299,9 +302,8 @@ export class Agent {
     // Load auto-generated memories from prior sessions
     const memoryContent = loadMemories(this.workingDir);
 
-    // Compact when enabled and context exceeds the threshold (expressed as
-    // a fraction of max context window — roughly 1 message ≈ 1k tokens).
-    const compactThresholdMsgs = Math.floor((this.settings.compactThreshold || 0.8) * 100);
+    // Build context budget policy from settings + model info
+    const contextBudgetPolicy = buildContextBudgetPolicy(this.settings, contextWindowFromModel(model));
 
     const result = await runAgentLoop({
       model,
@@ -331,18 +333,22 @@ export class Agent {
       initialTurnCount: this.turnCount,
       prepareNextTurn: this.settings.autoCompact
         ? (ctx) => {
-            if (ctx.contextMessages.length <= compactThresholdMsgs) return undefined;
-            const keepCount = Math.floor(compactThresholdMsgs / 2);
-            const systemMsg = ctx.contextMessages.find((m) => m.role === 'system');
-            const rest = ctx.contextMessages.filter((m) => m.role !== 'system');
-            const trimmed = rest.slice(-keepCount);
-            const compacted: Message[] = systemMsg ? [systemMsg, ...trimmed] : trimmed;
-            if (compacted.length < ctx.contextMessages.length) {
+            const policy = contextBudgetPolicy;
+            // Adjust max tokens based on model context window if available
+            if (ctx.modelContextWindow && !policy.maxHistoryTokens) {
+              policy.maxHistoryTokens = Math.floor(ctx.modelContextWindow * 0.9);
+            }
+            const result = applyContextBudget(ctx.contextMessages, policy);
+            if (result.diagnostic.changed) {
               console.log(
-                `[Agent] Context compacted: ${ctx.contextMessages.length} → ${compacted.length} messages`,
+                `[ContextBudget] ${result.diagnostic.beforeMessages}→${result.diagnostic.afterMessages} msgs, ` +
+                `${result.diagnostic.beforeTokens}→${result.diagnostic.afterTokens} tokens` +
+                (result.diagnostic.prunedToolResults ? `, ${result.diagnostic.prunedToolResults} tool results pruned` : '') +
+                (result.diagnostic.droppedTurns ? `, ${result.diagnostic.droppedTurns} turns dropped` : '') +
+                (result.diagnostic.compactedTurns ? `, ${result.diagnostic.compactedTurns} turns compacted` : ''),
               );
             }
-            return { contextMessages: compacted };
+            return { contextMessages: result.messages };
           }
         : undefined,
     });
@@ -435,6 +441,36 @@ export class Agent {
   getWorkingDir(): string {
     return this.workingDir;
   }
+}
+
+/**
+ * Build a ContextBudgetPolicy from app settings and model context window.
+ */
+function buildContextBudgetPolicy(settings: AppSettings, contextWindow: number): ContextBudgetPolicy {
+  return {
+    maxHistoryTokens: Math.floor(contextWindow * (settings.compactThreshold || 0.8)),
+    minRecentTurns: DEFAULT_CONTEXT_BUDGET_POLICY.minRecentTurns,
+    charsPerToken: DEFAULT_CONTEXT_BUDGET_POLICY.charsPerToken,
+    staleToolResultPrune: {
+      ...DEFAULT_CONTEXT_BUDGET_POLICY.staleToolResultPrune,
+    },
+    historyCompact: {
+      ...DEFAULT_CONTEXT_BUDGET_POLICY.historyCompact,
+    },
+  };
+}
+
+/**
+ * Extract the model's context window size from the pi-ai model object.
+ */
+function contextWindowFromModel(model: unknown): number {
+  const m = model as Record<string, unknown> | null | undefined;
+  if (!m) return 128_000;
+  for (const key of ['contextWindow', 'context_window', 'maxInputTokens', 'max_input_tokens']) {
+    const val = m[key];
+    if (typeof val === 'number' && val > 0) return val;
+  }
+  return 128_000;
 }
 
 /**

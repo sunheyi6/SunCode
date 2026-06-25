@@ -392,6 +392,66 @@ export interface SubagentProgressDelta {
   toolResult?: ToolResult;
 }
 
+// ===== Context Budget Types =====
+
+/** Placeholder replacing an oversized tool result in conversation context. */
+export interface ArchivedToolResultPlaceholder {
+  kind: 'suncode.archived_tool_result';
+  toolCallId: string;
+  toolName: string;
+  bodyHash: string;
+  originalTokens: number;
+  originalChars: number;
+  reason: 'pruned_exceeds_budget';
+}
+
+/** Policy for pruning stale tool results from conversation context. */
+export interface StaleToolResultPrunePolicy {
+  enabled: boolean;
+  /** Tool results above this estimated token count are replaced with placeholders. Default 2048. */
+  maxResultTokens?: number;
+  /** Keep this many newest turns' tool results intact. Default 1. */
+  minRecentTurnsFull?: number;
+}
+
+/** Policy for history compaction (turn-level summarization). */
+export interface HistoryCompactPolicy {
+  enabled: boolean;
+  /** Trigger when prior history exceeds this ratio of context window. Default 0.8. */
+  highWaterRatio?: number;
+  /** Turns to keep intact after compaction. Default 3. */
+  keepRecentTurns?: number;
+}
+
+/** Top-level context budget policy. */
+export interface ContextBudgetPolicy {
+  /** Max estimated tokens for prior history. Falls back to model contextWindow * 0.9. */
+  maxHistoryTokens?: number;
+  /** Max turns to retain. */
+  maxHistoryTurns?: number;
+  /** Always keep at least this many recent turns. Default 2. */
+  minRecentTurns?: number;
+  /** Token estimation ratio. Default 4 chars/token. */
+  charsPerToken?: number;
+  /** Stale tool result pruning configuration. */
+  staleToolResultPrune?: StaleToolResultPrunePolicy;
+  /** History compaction configuration. */
+  historyCompact?: HistoryCompactPolicy;
+}
+
+/** Diagnostic info emitted after context budget is applied. */
+export interface ContextBudgetDiagnostic {
+  changed: boolean;
+  beforeTokens: number;
+  afterTokens: number;
+  beforeMessages: number;
+  afterMessages: number;
+  prunedToolResults?: number;
+  prunedTokensSaved?: number;
+  droppedTurns?: number;
+  compactedTurns?: number;
+}
+
 // ===== Git Types =====
 
 export interface GitInfo {

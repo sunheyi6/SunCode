@@ -255,3 +255,115 @@ prepareNextTurn: this.settings.autoCompact
 | Claude Haiku | 200K | ~30 turns | 很少需要压缩 |
 | GPT-5.1 Codex | 128K | ~20 turns | 中等频率 |
 | Gemini Flash | 1M | ~150 turns | 几乎不需要 |
+
+---
+
+## 9. V2：Tool Result Prune（工具结果裁剪）— 2026-06 实现
+
+### 9.1 动机
+
+Maka Agent 的实践表明：对 tool result 做激进裁剪（超长结果 → 结构化占位符），推理质量几乎不变。原因有三：
+
+1. **信息已被蒸馏进 Assistant Message**——每次 tool result 之后，模型都会输出 Assistant Message 表达理解和下一步决策，这是一次语义蒸馏
+2. **Attention 在长上下文里本来就稀疏**——"Lost in the Middle" 证明模型更关注开头和最近几轮，中间段的 tool result 信息密度低
+3. **决策点已经过去**——5 轮之后，旧 tool result 早已不是边际信息
+
+SunCode 当前只有 V1 的消息数截断，缺少这一层"细粒度裁剪"。
+
+### 9.2 三层压缩架构
+
+```
+原始 contextMessages
+    │
+    ▼
+[1] Stale Tool Result Prune     ← 单条裁剪：超长 tool result → 占位符
+    │
+    ▼
+[2] Token Budget Turn 截断       ← 按 token 预算保留最近 N 个 turn
+    │
+    ▼
+[3] History Compact（高水位触发）  ← 折叠旧 turn → 摘要消息
+    │
+    ▼
+压缩后的 contextMessages
+```
+
+### 9.3 第一层：Stale Tool Result Prune
+
+**算法**：
+1. 将消息按 turn 分组（turn = user message + 后续所有非 user message）
+2. 保护最近 `minRecentTurnsFull`（默认 1）个 turn 的 tool result 不裁剪
+3. 对保护窗口之外的每个 `role: 'tool'` 消息：
+   - 估算 content 的 token 数
+   - 如果 > `maxResultTokens`（默认 2048）→ 替换为占位符
+
+**占位符格式**（~180 字符 / 45 tokens）：
+```json
+{
+  "kind": "suncode.archived_tool_result",
+  "toolCallId": "tc_abc123",
+  "toolName": "bash",
+  "bodyHash": "sha256-a1b2c3d4...",
+  "originalTokens": 5230,
+  "originalChars": 20918,
+  "reason": "pruned_exceeds_budget"
+}
+```
+
+**效果**：一条 5000 token 的工具返回被替换为 ~45 token 的占位符，节省 ~99%。
+
+### 9.4 第二层：Token Budget Turn 截断
+
+替代 V1 的"消息数阈值"，改为 token 预算控制：
+
+1. 从最新 turn 往前累计 estimated tokens
+2. 保护 `minRecentTurns`（默认 2）个 turn 一定保留
+3. 超过 `maxHistoryTokens` 时停止保留更早的 turn
+4. 可结合模型 context window 自动计算合理预算
+
+### 9.5 第三层：History Compact（复用）
+
+当裁剪+截断后仍然超过高水位（默认 80% context window），触发 turn 级别的折叠压缩。复用 V1 的 `compactMessages()` 函数，用规则式摘要替代旧 turn。
+
+### 9.6 集成方式
+
+通过 `prepareNextTurn` 钩子集成到 agent loop，每轮结束后自动调用：
+
+```typescript
+prepareNextTurn: (ctx) => {
+  const policy = buildContextBudgetPolicy(settings, modelContextWindow);
+  const result = applyContextBudget(ctx.contextMessages, policy);
+  return { contextMessages: result.messages };
+}
+```
+
+### 9.7 配置
+
+```typescript
+interface ContextBudgetPolicy {
+  maxHistoryTokens?: number;       // 先验历史的最大 token 预算
+  maxHistoryTurns?: number;        // 保留的最大 turn 数
+  minRecentTurns?: number;         // 最小保留 turn 数（默认 2）
+  charsPerToken?: number;          // token 估算比例（默认 4）
+  staleToolResultPrune?: {
+    enabled: boolean;              // 默认 true
+    maxResultTokens?: number;      // 超过此值的 tool result 被替换（默认 2048）
+    minRecentTurnsFull?: number;   // 最近 N 个 turn 的结果不裁剪（默认 1）
+  };
+  historyCompact?: {
+    enabled: boolean;              // 默认 true
+    highWaterRatio?: number;       // 触发阈值（默认 0.8）
+    keepRecentTurns?: number;      // 压缩时保留的最近 turn 数（默认 3）
+  };
+}
+```
+
+### 9.8 设计决策
+
+| 决策 | 取值 | 理由 |
+|---|---|---|
+| prune 阈值 | 2048 estimated tokens | 约 8000 字符，覆盖短结果；长的才裁剪 |
+| 保护窗口 | 最近 1 个 turn | 模型正在"用"的信息不裁剪 |
+| 占位符格式 | 结构化 JSON (~180 chars) | 保留元数据，为 V3 archive retrieval 留接口 |
+| 不持久化存档 | V2 暂不做 | 先验证裁剪本身的效果 |
+| 默认开启 | autoCompact=true 时自动启用 | 对用户透明 |

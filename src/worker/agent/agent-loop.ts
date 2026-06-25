@@ -20,6 +20,8 @@ export interface PrepareNextTurnContext {
   contextMessages: Message[];
   turnCount: number;
   maxTurns: number;
+  /** Model's maximum context window size (tokens). Available for budget decisions. */
+  modelContextWindow?: number;
 }
 
 export interface AgentLoopInput {
@@ -565,6 +567,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // Allow hook to trim context or adjust state before the next turn
       if (prepareNextTurn) {
+        // Extract model context window for budget-aware compaction
+        const modelContextWindow = extractContextWindow(model);
         const result = prepareNextTurn({
           assistantText,
           thinkingText,
@@ -572,6 +576,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           contextMessages,
           turnCount,
           maxTurns: settings.maxTurns || MAX_TURNS,
+          modelContextWindow,
         });
         if (result?.contextMessages) {
           // Replace the mutable context array contents
@@ -686,4 +691,19 @@ function safeParseJson(str: string): unknown {
   } catch {
     return {};
   }
+}
+
+/**
+ * Extract the model's context window size (in tokens) from the pi-ai model object.
+ * Falls back to a conservative default if unavailable.
+ */
+function extractContextWindow(model: unknown): number {
+  const m = model as Record<string, unknown> | null | undefined;
+  if (!m) return 128_000;
+  // Try common property names across providers
+  for (const key of ['contextWindow', 'context_window', 'maxInputTokens', 'max_input_tokens']) {
+    const val = m[key];
+    if (typeof val === 'number' && val > 0) return val;
+  }
+  return 128_000; // Conservative default
 }

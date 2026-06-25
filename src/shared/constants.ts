@@ -127,6 +127,39 @@ export const CHARS_PER_TOKEN = 4;
 /** Context window safety margin (don't use more than this fraction) */
 export const CONTEXT_SAFETY_MARGIN = 0.9;
 
+// ===== Context Budget Defaults =====
+
+/** Default max estimated tokens for a single tool result before pruning. */
+export const DEFAULT_MAX_TOOL_RESULT_TOKENS = 2048;
+
+/** Default number of recent turns whose tool results are kept intact. */
+export const DEFAULT_MIN_RECENT_TURNS_FULL = 1;
+
+/** Default minimum recent turns to always retain. */
+export const DEFAULT_MIN_RECENT_TURNS = 2;
+
+/** Default ratio of context window that triggers history compaction. */
+export const DEFAULT_HIGH_WATER_RATIO = 0.8;
+
+/** Default number of recent turns to keep after history compaction. */
+export const DEFAULT_KEEP_RECENT_TURNS = 3;
+
+/** Default context budget policy (used when autoCompact is enabled). */
+export const DEFAULT_CONTEXT_BUDGET_POLICY = {
+  staleToolResultPrune: {
+    enabled: true,
+    maxResultTokens: DEFAULT_MAX_TOOL_RESULT_TOKENS,
+    minRecentTurnsFull: DEFAULT_MIN_RECENT_TURNS_FULL,
+  },
+  historyCompact: {
+    enabled: true,
+    highWaterRatio: DEFAULT_HIGH_WATER_RATIO,
+    keepRecentTurns: DEFAULT_KEEP_RECENT_TURNS,
+  },
+  minRecentTurns: DEFAULT_MIN_RECENT_TURNS,
+  charsPerToken: CHARS_PER_TOKEN,
+} as const;
+
 /** Directories to ignore in file tree */
 export const IGNORED_DIRECTORIES = [
   'node_modules',
