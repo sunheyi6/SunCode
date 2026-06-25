@@ -110,7 +110,7 @@ export class Agent {
       const registry = createToolRegistry(this.workingDir, {
         onBackgroundStart: (proc) => this.onBackgroundStart(proc),
         onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
-      });
+      }, this.settings);
       // Register subagent tool separately (after dispatcher is created)
       // to avoid circular import between tools/registry.ts and agent/subagent.ts
       registry.register(createSubagentTool(this.dispatcher));
@@ -176,7 +176,7 @@ export class Agent {
     const registry = createToolRegistry(path, {
       onBackgroundStart: (proc) => this.onBackgroundStart(proc),
       onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
-    });
+    }, this.settings);
     if (this.dispatcher) {
       registry.register(createSubagentTool(this.dispatcher));
     }

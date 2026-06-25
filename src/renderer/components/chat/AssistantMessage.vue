@@ -264,7 +264,7 @@ async function copyContent() {
 
 .thinking-live-body {
   font-size: 12px;
-  line-height: 1.25;
+  line-height: 1.15;
   color: var(--color-text-muted);
   white-space: pre-wrap;
   max-height: 600px;
@@ -273,10 +273,10 @@ async function copyContent() {
 
 /* Tighten paragraph gaps inside thinking (marked wraps \n\n → <p>) */
 .thinking-live-body :deep(p) {
-  margin: 0 0 2px 0;
+  margin: 0;
 }
 .thinking-live-body :deep(br) {
-  line-height: 1.1;
+  line-height: 1;
 }
 
 /* ── 完成后：折叠 ── */
@@ -300,7 +300,7 @@ async function copyContent() {
 .thinking-content {
   padding: 6px 10px;
   font-size: 12px;
-  line-height: 1.3;
+  line-height: 1.2;
   color: var(--color-text-secondary);
   background: var(--color-bg);
   white-space: pre-wrap;
@@ -309,10 +309,10 @@ async function copyContent() {
 }
 
 .thinking-content :deep(p) {
-  margin: 0 0 2px 0;
+  margin: 0;
 }
 .thinking-content :deep(br) {
-  line-height: 1.1;
+  line-height: 1;
 }
 
 .message-content {

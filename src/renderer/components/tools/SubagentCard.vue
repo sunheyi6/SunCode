@@ -182,7 +182,7 @@ watch(
   user-select: none;
 }
 .sub-thinking-text {
-  font-size: 11px; line-height: 1.25; color: var(--color-text-secondary);
+  font-size: 11px; line-height: 1.15; color: var(--color-text-secondary);
   padding: 3px 6px;
   margin: 0;
   max-height: 300px; overflow-y: auto;
@@ -195,7 +195,7 @@ watch(
 .result-output { margin: 2px 0; }
 .output-label { font-size: 10px; color: var(--color-text-muted); font-weight: 600; }
 .output-text {
-  font-size: 12px; line-height: 1.35; color: var(--color-text);
+  font-size: 12px; line-height: 1.2; color: var(--color-text);
   background: var(--color-surface);
   padding: 4px 6px; border-radius: 3px;
   margin: 2px 0 0 0;

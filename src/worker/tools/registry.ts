@@ -6,6 +6,9 @@ import { createBashTool, type BashToolCallbacks } from './bash';
 import { createGrepTool } from './grep';
 import { createGlobTool } from './glob';
 import { createTaskCompleteTool } from './task-complete';
+import { createWebFetchTool } from './web-fetch';
+import { createWebSearchTool } from './web-search';
+import type { AppSettings } from '@shared/types';
 
 /**
  * Tool Registry manages all available tools (built-in + MCP).
@@ -76,6 +79,7 @@ export class ToolRegistry {
 export function createToolRegistry(
   workingDir: string,
   callbacks?: BashToolCallbacks,
+  settings?: AppSettings,
 ): ToolRegistry {
   const registry = new ToolRegistry();
 
@@ -86,6 +90,8 @@ export function createToolRegistry(
   registry.register(createGrepTool(workingDir));
   registry.register(createGlobTool(workingDir));
   registry.register(createTaskCompleteTool());
+  registry.register(createWebFetchTool(workingDir));
+  registry.register(createWebSearchTool(settings));
 
   return registry;
 }
