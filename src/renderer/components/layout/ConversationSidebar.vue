@@ -21,6 +21,13 @@ async function handleCreateSession(): Promise<void> {
   await sessionsStore.createSession(dir);
 }
 
+async function handleCreateSessionWithNewFolder(): Promise<void> {
+  const dir = await bridge.selectDirectory();
+  if (dir) {
+    await sessionsStore.createSession(dir);
+  }
+}
+
 function projectName(path: string): string {
   const segments = path.split(/[\\/]/).filter(Boolean);
   return segments[segments.length - 1] || path || '未命名项目';
@@ -139,6 +146,13 @@ function formatTime(value: string): string {
         <button class="primary-action" @click="handleCreateSession()">
           <span class="action-icon">＋</span>
           <span>新建对话</span>
+        </button>
+        <button
+          class="icon-action"
+          title="在新文件夹中新建对话"
+          @click="handleCreateSessionWithNewFolder"
+        >
+          📁
         </button>
         <button
           class="icon-action"
@@ -295,7 +309,7 @@ function formatTime(value: string): string {
   padding: 0;
   background: var(--color-surface);
   color: var(--color-text-secondary);
-  font-size: 22px;
+  font-size: 16px;
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 
@@ -324,6 +338,11 @@ function formatTime(value: string): string {
 
 .text-action:hover {
   color: var(--color-text);
+}
+
+.icon-action + .icon-action {
+  margin-left: -2px;
+
 }
 
 .global-search {

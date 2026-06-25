@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted } from 'vue';
 import { useAgent } from '../../composables/useAgent';
 import { useChatStore } from '../../stores/chat';
+import { useSettingsStore } from '../../stores/settings';
 import ChatHeader from './ChatHeader.vue';
 import MessageList from './MessageList.vue';
 import ChatInput from './ChatInput.vue';
@@ -9,8 +10,11 @@ import PendingPromptQueue from './PendingPromptQueue.vue';
 
 const { send, abort, interruptAndSend, isStreaming } = useAgent();
 const chatStore = useChatStore();
+const settingsStore = useSettingsStore();
 
 const hasMessages = computed(() => chatStore.messages.length > 0);
+
+const chatZoom = computed(() => settingsStore.settings.fontSize / 14);
 
 function handleSend(text: string): void {
   send(text);
@@ -36,7 +40,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="chat-panel">
+  <div class="chat-panel" :style="{ zoom: chatZoom }">
     <!-- Header -->
     <ChatHeader />
 
@@ -56,15 +60,6 @@ onUnmounted(() => {
           <div class="welcome-icon">☀️</div>
           <h2>欢迎使用 SunCode</h2>
           <p>你的 AI 智能编程助手</p>
-          <div class="welcome-hints">
-            <p>试试这样问：</p>
-            <ul>
-              <li>"解释一下这个项目的认证系统是怎么工作的"</li>
-              <li>"当前文件夹结构是什么样的"</li>
-              <li>"给 UserService 类添加单元测试"</li>
-              <li>"重构这个函数，让它更易读"</li>
-            </ul>
-          </div>
         </div>
         <div class="welcome-input-area">
           <PendingPromptQueue @send-now="interruptAndSend" />
@@ -120,33 +115,6 @@ onUnmounted(() => {
   font-size: 14px;
   color: var(--color-text-secondary);
   margin: 0 0 20px;
-}
-
-.welcome-hints {
-  text-align: left;
-  background: var(--color-surface);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  padding: var(--spacing-md) var(--spacing-lg);
-}
-
-.welcome-hints p {
-  margin: 0 0 6px;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--color-text);
-}
-
-.welcome-hints ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.welcome-hints li {
-  margin: 3px 0;
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  line-height: 1.5;
 }
 
 .welcome-input-area {

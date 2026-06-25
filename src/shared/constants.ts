@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   compactThreshold: 0.7,
   theme: 'system' as const,
   permissionMode: 'full_access' as const,
+  fontSize: 14,
   mcpServers: [],
   skills: [],
   envApiKeys: {},

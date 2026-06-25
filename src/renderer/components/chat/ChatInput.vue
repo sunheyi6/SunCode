@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
+import { useSessionsStore } from '../../stores/sessions';
 import { getComposerTextareaHeight } from './chat-input';
+import { bridge } from '../../api/bridge';
+import type { GitInfo } from '@shared/types';
 
 const props = defineProps<{
   isStreaming: boolean;
@@ -15,6 +18,7 @@ const emit = defineEmits<{
 
 const modelsStore = useModelsStore();
 const settingsStore = useSettingsStore();
+const sessionsStore = useSessionsStore();
 
 const inputText = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -22,6 +26,52 @@ const inputRef = ref<HTMLElement | null>(null);
 const modelOpen = ref(false);
 const thinkingOpen = ref(false);
 const permOpen = ref(false);
+
+// Workspace / Git info
+const gitInfo = ref<GitInfo>({
+  isRepo: false,
+  addedLines: 0,
+  deletedLines: 0,
+  changedFiles: 0,
+  stagedFiles: 0,
+});
+
+const activeSession = computed(() =>
+  sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
+);
+
+const workspaceName = computed(() => {
+  const dir = activeSession.value?.workingDirectory;
+  if (!dir) return '未选择文件夹';
+  const segments = dir.split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] || dir;
+});
+
+const workspacePath = computed(() => activeSession.value?.workingDirectory || '');
+
+const gitBranch = computed(() => (gitInfo.value.isRepo ? gitInfo.value.branch : null));
+
+async function refreshGitInfo() {
+  const dir = workspacePath.value;
+  if (!dir) {
+    gitInfo.value = { isRepo: false, addedLines: 0, deletedLines: 0, changedFiles: 0, stagedFiles: 0 };
+    return;
+  }
+  try {
+    gitInfo.value = await bridge.getGitInfo(dir);
+  } catch {
+    gitInfo.value = { isRepo: false, addedLines: 0, deletedLines: 0, changedFiles: 0, stagedFiles: 0 };
+  }
+}
+
+watch(() => activeSession.value?.workingDirectory, refreshGitInfo, { immediate: true });
+
+async function selectFolder() {
+  const dir = await bridge.selectDirectory();
+  if (dir) {
+    await sessionsStore.createSession(dir);
+  }
+}
 
 const hasInput = computed(() => inputText.value.trim().length > 0);
 const availableModels = computed(() => modelsStore.recommendedModels);
@@ -208,12 +258,28 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
-onMounted(() => document.addEventListener('click', onDocumentClick));
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick);
+  void refreshGitInfo();
+});
 onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 </script>
 
 <template>
   <div ref="inputRef" class="chat-input">
+    <!-- Workspace info bar -->
+    <div class="workspace-bar">
+      <button class="workspace-folder" type="button" @click="selectFolder">
+        <span class="folder-icon" aria-hidden="true">📁</span>
+        <span class="workspace-name">{{ workspaceName }}</span>
+        <span class="chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div v-if="gitBranch" class="git-branch">
+        <span class="branch-icon" aria-hidden="true">⑂</span>
+        <span class="branch-name">{{ gitBranch }}</span>
+      </div>
+    </div>
+
     <div class="composer" :class="{ streaming: props.isStreaming }">
       <textarea
         ref="textareaRef"
@@ -363,6 +429,73 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   padding: 10px 20px 16px;
   background: var(--color-bg-secondary);
   flex-shrink: 0;
+}
+
+/* Workspace info bar */
+.workspace-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+
+.workspace-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.workspace-folder:hover {
+  border-color: var(--border-color-strong);
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.folder-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.workspace-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.workspace-folder .chevron {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  transform: translateY(-1px);
+}
+
+.git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-accent);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.branch-icon {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.8;
 }
 
 .composer {

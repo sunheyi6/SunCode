@@ -184,6 +184,7 @@ export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
   /** Agent permission mode */
   permissionMode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes';
+  fontSize: number; // base font size in px, default 14
   mcpServers: McpServerConfig[];
   skills: string[]; // paths to skill directories
   envApiKeys: Record<string, string>;

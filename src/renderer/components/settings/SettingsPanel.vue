@@ -35,6 +35,11 @@ function updatePermissionMode(mode: AppSettings['permissionMode']): void {
   settingsStore.update({ permissionMode: mode });
 }
 
+function updateFontSize(e: Event): void {
+  const val = Number.parseInt((e.target as HTMLInputElement).value, 10);
+  if (val >= 12 && val <= 20) settingsStore.setFontSize(val);
+}
+
 const thinkingLevels = [
   { value: 'minimal', label: '最小', desc: '最快，不思考' },
   { value: 'low', label: '低', desc: '简短思考' },
@@ -121,6 +126,21 @@ const permissionModes = [
                     @input="(e) => updateMaxTurns(e as unknown as Event)"
                   />
                   <span class="turns-value">{{ settingsStore.settings.maxTurns }}</span>
+                </div>
+              </div>
+
+              <div class="option-group">
+                <h4>字体大小</h4>
+                <p class="option-desc">
+                  调整界面字体大小。默认为 14px，可调范围 12–20px。
+                </p>
+                <div class="turns-control">
+                  <input
+                    type="range" class="turns-slider" min="12" max="20" step="1"
+                    :value="settingsStore.settings.fontSize"
+                    @input="(e) => updateFontSize(e as unknown as Event)"
+                  />
+                  <span class="turns-value">{{ settingsStore.settings.fontSize }}px</span>
                 </div>
               </div>
 

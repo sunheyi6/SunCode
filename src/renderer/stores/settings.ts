@@ -13,6 +13,7 @@ export const useSettingsStore = defineStore('settings', () => {
     compactThreshold: 0.7,
     theme: 'system',
     permissionMode: 'full_access',
+    fontSize: 14,
     mcpServers: [],
     skills: [],
     envApiKeys: {},
@@ -25,6 +26,7 @@ export const useSettingsStore = defineStore('settings', () => {
       const s = await bridge.getSettings();
       settings.value = { ...settings.value, ...s };
       applyTheme(settings.value.theme);
+      applyFontSize(settings.value.fontSize);
       isLoaded.value = true;
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -54,6 +56,19 @@ export const useSettingsStore = defineStore('settings', () => {
     update({ theme });
   }
 
+  function applyFontSize(size: number): void {
+    // Only affects chat panel via --chat-zoom (zoom ratio relative to default 14px)
+    document.documentElement.style.setProperty('--chat-zoom', String(size / 14));
+  }
+
+  function setFontSize(size: number): void {
+    // Update local state immediately so Vue reactivity kicks in right away
+    settings.value = { ...settings.value, fontSize: size };
+    applyFontSize(size);
+    // Persist in background (fire-and-forget)
+    update({ fontSize: size });
+  }
+
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
   systemTheme.addEventListener('change', () => {
     if (settings.value.theme === 'system') applyTheme('system');
@@ -66,5 +81,7 @@ export const useSettingsStore = defineStore('settings', () => {
     update,
     applyTheme,
     setTheme,
+    applyFontSize,
+    setFontSize,
   };
 });
