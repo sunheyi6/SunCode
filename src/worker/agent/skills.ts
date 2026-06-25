@@ -20,16 +20,37 @@ export interface Skill {
 }
 
 export function createSkillsLoader(workingDir: string, additionalPaths: string[] = []) {
+  /**
+   * Resolve the built-in skills directory shipped with SunCode.
+   * In dev: __dirname is dist-electron/worker/, go up 2 levels to project root.
+   * In production (packaged Electron): __dirname is app.asar/..., go up to resources/.
+   */
+  const builtinSkillsDir = (() => {
+    // Check for Electron production path first
+    if (typeof process !== 'undefined' && process.resourcesPath) {
+      return join(process.resourcesPath, 'skills');
+    }
+    // Development: resolve relative to worker directory
+    return join(__dirname, '..', '..', 'skills');
+  })();
+
   return {
     /**
      * Load all skills from configured paths.
-     * Searches: .suncode/skills/ (project), ~/.suncode/skills/ (user),
-     * and any additional configured paths.
+     * Searches: built-in (shipped with SunCode), .suncode/skills/ (project),
+     * ~/.suncode/skills/ (user), and any additional configured paths.
+     * Built-in skills load first so project/user skills can override them by name.
      */
     async loadAll(): Promise<string> {
       const skills: Skill[] = [];
 
-      // Project-level skills
+      // Built-in skills (shipped with SunCode)
+      if (existsSync(builtinSkillsDir)) {
+        const builtinSkills = await loadSkillsFromDir(builtinSkillsDir, 'builtin');
+        skills.push(...builtinSkills);
+      }
+
+      // Project-level skills (can override built-in by name)
       const projectSkillsDir = join(workingDir, '.suncode', 'skills');
       if (existsSync(projectSkillsDir)) {
         const projectSkills = await loadSkillsFromDir(projectSkillsDir, 'project');
@@ -52,11 +73,19 @@ export function createSkillsLoader(workingDir: string, additionalPaths: string[]
         }
       }
 
+      // Deduplicate: later sources (project/user/extra) override built-in by name
+      const deduped = new Map<string, Skill>();
+      for (const skill of skills) {
+        deduped.set(skill.name, skill);
+      }
+
       // Sort by priority (higher first)
-      skills.sort((a, b) => (b.metadata?.priority || 0) - (a.metadata?.priority || 0));
+      const sorted = [...deduped.values()].sort(
+        (a, b) => (b.metadata?.priority || 0) - (a.metadata?.priority || 0),
+      );
 
       // Format skills into system prompt content
-      return formatSkillsForPrompt(skills);
+      return formatSkillsForPrompt(sorted);
     },
 
     /**
