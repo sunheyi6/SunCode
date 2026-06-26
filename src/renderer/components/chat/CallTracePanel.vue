@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 import ToolOperationList from '../tools/ToolOperationList.vue';
 import StreamingText from '../chat/StreamingText.vue';
+
+const SYSTEM_PROMPT_PREVIEW_LEN = 500;
+const showFullSystemPrompt = ref(false);
 
 const props = defineProps<{
   messages: ChatMessage[];
@@ -51,6 +54,13 @@ function messageTimeline(msg: ChatMessage) {
   return timeline;
 }
 
+const systemPromptPreview = computed(() => {
+  if (showFullSystemPrompt.value || props.systemPrompt.length <= SYSTEM_PROMPT_PREVIEW_LEN) {
+    return props.systemPrompt;
+  }
+  return props.systemPrompt.slice(0, SYSTEM_PROMPT_PREVIEW_LEN) + '...';
+});
+
 function formatTime(ts: number): string {
   const d = new Date(ts);
   const hh = String(d.getHours()).padStart(2, '0');
@@ -74,7 +84,14 @@ function formatTime(ts: number): string {
           <span>📝 系统提示词</span>
           <span class="trace-section-meta">{{ systemPrompt.length }} 字符</span>
         </summary>
-        <pre class="trace-pre">{{ systemPrompt }}</pre>
+        <pre class="trace-pre">{{ systemPromptPreview }}</pre>
+        <button
+          v-if="systemPrompt.length > SYSTEM_PROMPT_PREVIEW_LEN"
+          class="trace-expand-btn"
+          @click="showFullSystemPrompt = !showFullSystemPrompt"
+        >
+          {{ showFullSystemPrompt ? '收起' : `展开全文 (${systemPrompt.length} 字符)` }}
+        </button>
       </details>
 
       <!-- Empty state -->
@@ -220,6 +237,23 @@ function formatTime(ts: number): string {
   overflow-y: auto;
   background: var(--color-bg-tertiary);
   border-top: 1px solid var(--border-color);
+}
+
+.trace-expand-btn {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.trace-expand-btn:hover {
+  color: var(--color-accent);
 }
 
 /* Messages */

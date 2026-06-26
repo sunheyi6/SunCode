@@ -53,25 +53,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   // 1a. Base system prompt (from constants — never changes at runtime)
   parts.push(customPrompt || DEFAULT_SYSTEM_PROMPT);
 
-  // 1b. Tool usage guidelines (never changes)
-  parts.push('');
-  parts.push('## Tool Usage Guidelines');
-  parts.push(
-    '1. You may call multiple tools in a single response when operations are independent.',
-  );
-  parts.push('2. Always read files before editing them - never assume file contents.');
-  parts.push('3. When making edits, use the edit tool with exact string matching.');
-  parts.push(
-    '4. When executing bash commands, include clear descriptions of what each command does.',
-  );
-  parts.push('5. Search for code patterns with grep before making broad changes.');
-  parts.push('6. If a tool returns an error, analyze the error and adjust your approach.');
-  parts.push(
-    '7. After completing all necessary changes, call task_complete with a summary of what was done.',
-  );
-  parts.push('8. Only call task_complete as the final action — never together with other tools.');
-
-  // 1c. Git push rule (never changes)
+  // 1b. Git push rule (never changes)
   parts.push('');
   parts.push('## CRITICAL: Git Push Rule');
   parts.push(
