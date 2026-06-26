@@ -103,9 +103,11 @@ Electron Main Process (ipc-handlers.ts)
 - **Build**: electron-builder 25 (Win NSIS/Portable, Mac DMG arm64, Linux AppImage/deb)
 - **CI**: GitHub Actions, trigger on `v*` tag push
 
-## 项目上下文文件
+## 项目上下文
 
-此 `CLAUDE.md` 同时作为 SunCode Agent 的项目上下文加载。Agent 启动时会按优先级搜索：
-`.agents.md`（Codex）→ `CLAUDE.md`（Claude Code）→ `AGENTS.md`（旧格式），优先使用第一个找到的文件。
+此文件是 SunCode 项目的唯一权威上下文文档。不同的 Agent 生态（Claude Code、Codex、SunCode 自身）都会加载它作为项目说明，只是文件命名习惯不同：
+- Claude Code 加载 `CLAUDE.md`
+- Codex 加载 `.agents.md`
+- SunCode 加载 `CLAUDE.md` → `.agents.md` → `AGENTS.md`（优先级递减，内容应一致）
 
-也就是说，在 SunCode 中打开本项目的目录时，Agent 会自动读入此文档作为系统提示的 `<project_context>` 段落。
+**因此，不要维护多份不同的项目上下文文件。所有项目说明、架构决策、编码规范都应写在这个文件里。**
