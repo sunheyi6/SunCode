@@ -16,7 +16,11 @@
     "test:bun": "bun test",
     "typecheck": "tsc --noEmit",
     "electron:dev": "vite",
-    "electron:build": "vite build && electron-builder",
+    "electron:build": "vite build && electron-builder --config electron-builder.yml",
+    "electron:build:win": "vite build && electron-builder --config electron-builder.yml --win",
+    "electron:build:mac": "vite build && electron-builder --config electron-builder.yml --mac",
+    "electron:build:linux": "vite build && electron-builder --config electron-builder.yml --linux",
+    "release": "vite build && electron-builder --config electron-builder.yml --publish always",
     "test:ai": "bun run scripts/test-ai.ts"
   },
   "dependencies": {

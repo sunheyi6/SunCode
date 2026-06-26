@@ -119,6 +119,7 @@ function formatTime(ts: number): string {
 .call-trace-panel {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   height: 100%;
   background: var(--color-bg);
   border-left: 1px solid var(--border-color);
@@ -131,6 +132,7 @@ function formatTime(ts: number): string {
   justify-content: space-between;
   padding: 0 12px;
   height: 38px;
+  min-height: 38px;
   border-bottom: 1px solid var(--border-color);
   background: var(--color-bg-secondary);
   flex-shrink: 0;
@@ -163,7 +165,9 @@ function formatTime(ts: number): string {
 
 .trace-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -175,6 +179,7 @@ function formatTime(ts: number): string {
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .trace-section-header {
@@ -197,16 +202,20 @@ function formatTime(ts: number): string {
 .trace-section-meta {
   font-size: 10px;
   color: var(--color-text-muted);
+  flex-shrink: 0;
+  margin-left: 8px;
 }
 
 .trace-pre {
   margin: 0;
   padding: 8px 10px;
   font-size: 11px;
+  line-height: 1.5;
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: break-word;
   max-height: 400px;
   overflow-y: auto;
   background: var(--color-bg-tertiary);
@@ -218,6 +227,7 @@ function formatTime(ts: number): string {
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .trace-msg-header {
@@ -228,6 +238,7 @@ function formatTime(ts: number): string {
   background: var(--color-surface);
   font-size: 11px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .trace-msg-label {
@@ -239,13 +250,18 @@ function formatTime(ts: number): string {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: 10px;
+  flex-shrink: 0;
+  margin-left: 8px;
 }
 
 .trace-thinking {
   padding: 4px 8px;
   font-size: 11px;
-  line-height: 1.2;
+  line-height: 1.4;
   color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
   max-height: 300px;
   overflow-y: auto;
 }
@@ -255,6 +271,9 @@ function formatTime(ts: number): string {
   font-size: 12px;
   line-height: 1.4;
   border-top: 1px solid var(--border-color);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .trace-empty {
