@@ -50,22 +50,23 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npx electron-builder --config electron-builder.yml --publish never
 
-      - name: Prepare artifacts
-        shell: bash
-        run: |
-          mkdir -p artifacts-upload
-          cp release/*.{exe,dmg,AppImage,deb} artifacts-upload/ 2>/dev/null || true
-          cd artifacts-upload
-          sha256sum * 2>/dev/null > SHA256SUMS || true
-
       - name: Prepare artifacts (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts-upload | Out-Null
           Copy-Item release\*.exe artifacts-upload\ -ErrorAction SilentlyContinue
-          cd artifacts-upload
+          Set-Location artifacts-upload
           Get-FileHash -Algorithm SHA256 * | ForEach-Object { "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)" } | Out-File -Encoding ASCII SHA256SUMS
+
+      - name: Prepare artifacts (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p artifacts-upload
+          cp release/*.exe release/*.dmg release/*.AppImage release/*.deb artifacts-upload/ 2>/dev/null || true
+          cd artifacts-upload
+          sha256sum * 2>/dev/null > SHA256SUMS || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
