@@ -27,9 +27,14 @@ export const useAgentStore = defineStore('agent', () => {
   const toolExecutions = ref<ToolExecution[]>([]);
   const error = ref<string | null>(null);
   const pendingPrompts = ref<PendingPrompt[]>([]);
+  const goalActive = ref(false);
 
   function setStatus(newStatus: AgentStatus): void {
     status.value = newStatus;
+  }
+
+  function setGoalActive(active: boolean): void {
+    goalActive.value = active;
   }
 
   function startToolExecution(toolCallId: string, toolName: string): void {
@@ -85,6 +90,7 @@ export const useAgentStore = defineStore('agent', () => {
     toolExecutions.value = [];
     error.value = null;
     pendingPrompts.value = [];
+    goalActive.value = false;
   }
 
   return {
@@ -92,7 +98,9 @@ export const useAgentStore = defineStore('agent', () => {
     toolExecutions,
     error,
     pendingPrompts,
+    goalActive,
     setStatus,
+    setGoalActive,
     startToolExecution,
     endToolExecution,
     setError,

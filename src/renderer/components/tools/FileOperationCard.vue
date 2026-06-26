@@ -21,8 +21,12 @@ const showDiff = computed(() => {
   return d?.type === 'file_edit' && d.status === 'edited' && d.oldContent && d.newContent;
 });
 
-const oldCode = computed(() => (props.call.result?.details as Record<string, unknown>)?.oldContent as string ?? '');
-const newCode = computed(() => (props.call.result?.details as Record<string, unknown>)?.newContent as string ?? '');
+const oldCode = computed(
+  () => ((props.call.result?.details as Record<string, unknown>)?.oldContent as string) ?? '',
+);
+const newCode = computed(
+  () => ((props.call.result?.details as Record<string, unknown>)?.newContent as string) ?? '',
+);
 </script>
 
 <template>

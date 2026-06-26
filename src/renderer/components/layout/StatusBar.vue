@@ -50,6 +50,9 @@ const tokenInfo = computed(() => {
     <div class="status-left">
       <span class="status-dot" :style="{ background: statusColor }" />
       <span class="status-text">{{ statusText }}</span>
+      <template v-if="agentStore.goalActive">
+        <span class="goal-badge">🎯 Goal</span>
+      </template>
       <span class="status-separator">|</span>
       <span class="status-model">{{ modelsStore.getCurrentLabel() }}</span>
     </div>
@@ -95,5 +98,17 @@ const tokenInfo = computed(() => {
 .status-model {
   color: var(--color-text);
   font-weight: 500;
+}
+
+.goal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #d97706;
+  font-weight: 700;
+  font-size: 11px;
 }
 </style>

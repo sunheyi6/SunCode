@@ -87,7 +87,11 @@ export function useAgent() {
 
     cleanups.push(
       bridge.onSubagentProgress((executionId, agent, delta) => {
-        chatStore.handleSubagentProgress(executionId, agent, delta as unknown as import('@shared/types').SubagentProgressDelta);
+        chatStore.handleSubagentProgress(
+          executionId,
+          agent,
+          delta as unknown as import('@shared/types').SubagentProgressDelta,
+        );
       }),
     );
 
@@ -102,6 +106,22 @@ export function useAgent() {
           modelName: agentStore.status.modelName,
         });
         scheduleLatestPrompt();
+      }),
+    );
+
+    cleanups.push(
+      bridge.onGoalEvent((event) => {
+        console.log('[useAgent] Goal event:', event.type, event);
+        if (event.type === 'goal_started') {
+          agentStore.setGoalActive(true);
+        } else if (
+          event.type === 'goal_completed' ||
+          event.type === 'goal_budget_exhausted' ||
+          event.type === 'goal_blocked' ||
+          event.type === 'goal_aborted'
+        ) {
+          agentStore.setGoalActive(false);
+        }
       }),
     );
   }

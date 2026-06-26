@@ -105,7 +105,10 @@ function htmlToText(html: string): string {
     .replace(/&nbsp;/g, ' ');
 
   // Collapse whitespace
-  text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+  text = text
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 
   return text;
 }
@@ -152,13 +155,24 @@ async function extractContent(
 
 // ── GitHub URL Handling ──
 
-function isGithubUrl(url: string): { owner: string; repo: string; ref?: string; subpath?: string } | null {
-  const match = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/tree\/([^/]+)\/(.+))?$/);
+function isGithubUrl(
+  url: string,
+): { owner: string; repo: string; ref?: string; subpath?: string } | null {
+  const match = url.match(
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/tree\/([^/]+)\/(.+))?$/,
+  );
   if (!match) return null;
-  return { owner: match[1]!, repo: match[2]!.replace(/\.git$/, ''), ref: match[3], subpath: match[4] };
+  return {
+    owner: match[1]!,
+    repo: match[2]!.replace(/\.git$/, ''),
+    ref: match[3],
+    subpath: match[4],
+  };
 }
 
-function isGithubBlobUrl(url: string): { owner: string; repo: string; ref: string; filePath: string } | null {
+function isGithubBlobUrl(
+  url: string,
+): { owner: string; repo: string; ref: string; filePath: string } | null {
   const match = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+?)\/blob\/([^/]+)\/(.+)$/);
   if (!match) return null;
   return { owner: match[1]!, repo: match[2]!, ref: match[3]!, filePath: match[4]! };
@@ -186,7 +200,10 @@ async function cloneGithubRepo(
 
     const cloneUrl = blobMatch
       ? `https://github.com/${blobMatch.owner}/${blobMatch.repo}.git`
-      : url.replace(/\/tree\/.*$/, '').replace(/\/$/, '').replace(/\/$/, '.git');
+      : url
+          .replace(/\/tree\/.*$/, '')
+          .replace(/\/$/, '')
+          .replace(/\/$/, '.git');
 
     execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${cloneDir}"`, {
       timeout: 30_000,
@@ -203,7 +220,11 @@ async function cloneGithubRepo(
           isClone: true,
         };
       }
-      return { text: `文件 ${blobMatch.filePath} 在仓库中不存在`, isClone: true, error: 'file not found in repo' };
+      return {
+        text: `文件 ${blobMatch.filePath} 在仓库中不存在`,
+        isClone: true,
+        error: 'file not found in repo',
+      };
     }
 
     const fs = await import('node:fs/promises');
@@ -220,13 +241,14 @@ async function cloneGithubRepo(
   } catch (err) {
     const errMsg = (err as Error).message;
     // Detect common failures for better LLM guidance
-    const reason = errMsg.includes('not found') || errMsg.includes('Repository not found')
-      ? '仓库不存在或无访问权限'
-      : errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')
-        ? '克隆超时（可能需要配置 git 代理）'
-        : errMsg.includes('Permission denied') || errMsg.includes('publickey')
-          ? 'SSH 权限不足，尝试用 HTTPS URL'
-          : `克隆失败: ${errMsg}`;
+    const reason =
+      errMsg.includes('not found') || errMsg.includes('Repository not found')
+        ? '仓库不存在或无访问权限'
+        : errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')
+          ? '克隆超时（可能需要配置 git 代理）'
+          : errMsg.includes('Permission denied') || errMsg.includes('publickey')
+            ? 'SSH 权限不足，尝试用 HTTPS URL'
+            : `克隆失败: ${errMsg}`;
 
     return {
       text: `GitHub 克隆失败: ${reason}。请改用 web_fetch 直接获取 https://github.com/${cloneMatch?.owner ?? blobMatch?.owner}/${cloneMatch?.repo ?? blobMatch?.repo} 的页面内容。`,
@@ -315,7 +337,10 @@ export function createWebFetchTool(workingDir: string): Tool {
         let response: Response;
         try {
           response = await fetch(url, {
-            headers: { 'User-Agent': USER_AGENT, Accept: 'text/html, text/plain, application/json, application/xml, */*' },
+            headers: {
+              'User-Agent': USER_AGENT,
+              Accept: 'text/html, text/plain, application/json, application/xml, */*',
+            },
             signal: controller.signal,
             redirect: 'follow',
           });
@@ -343,7 +368,10 @@ export function createWebFetchTool(workingDir: string): Tool {
           output: text,
         };
       } catch (err) {
-        const msg = (err as Error).name === 'AbortError' ? `请求超时（${FETCH_TIMEOUT_MS / 1000} 秒）` : (err as Error).message;
+        const msg =
+          (err as Error).name === 'AbortError'
+            ? `请求超时（${FETCH_TIMEOUT_MS / 1000} 秒）`
+            : (err as Error).message;
         return {
           toolCallId: '',
           name: 'web_fetch',

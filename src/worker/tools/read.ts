@@ -41,9 +41,7 @@ export function createReadTool(workingDir: string) {
           const entries = await readdir(normalized, { withFileTypes: true });
           const dirs = entries.filter((e) => e.isDirectory()).map((e) => `${e.name}/`);
           const files = entries.filter((e) => e.isFile()).map((e) => e.name);
-          const listing = [...dirs.sort(), ...files.sort()]
-            .map((name) => `  ${name}`)
-            .join('\n');
+          const listing = [...dirs.sort(), ...files.sort()].map((name) => `  ${name}`).join('\n');
           return this.success(
             `Directory: ${normalized}\n\n${listing || '  (empty)'}\n\n${entries.length} entries. Use read with a file path to read file contents.`,
           );

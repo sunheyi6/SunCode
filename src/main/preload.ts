@@ -4,6 +4,7 @@ import type {
   BackgroundProcess,
   FileNode,
   GitInfo,
+  GoalEvent,
   StreamEvent,
   AgentStatus,
   Message,
@@ -152,8 +153,12 @@ const suncodeAPI = {
   onSubagentProgress(
     callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void,
   ): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, executionId: string, agent: string, delta: Record<string, unknown>): void =>
-      callback(executionId, agent, delta);
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      executionId: string,
+      agent: string,
+      delta: Record<string, unknown>,
+    ): void => callback(executionId, agent, delta);
     ipcRenderer.on('agent:subagent-progress', handler);
     return () => ipcRenderer.removeListener('agent:subagent-progress', handler);
   },
@@ -271,6 +276,13 @@ const suncodeAPI = {
       callback(pid, exitCode);
     ipcRenderer.on('agent:bg-process-completed', handler);
     return () => ipcRenderer.removeListener('agent:bg-process-completed', handler);
+  },
+
+  /** Listen for goal lifecycle events */
+  onGoalEvent(callback: (event: GoalEvent) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, event: GoalEvent): void => callback(event);
+    ipcRenderer.on('agent:goal-event', handler);
+    return () => ipcRenderer.removeListener('agent:goal-event', handler);
   },
 };
 

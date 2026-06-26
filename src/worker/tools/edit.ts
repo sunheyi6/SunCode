@@ -79,7 +79,10 @@ export function createEditTool(workingDir: string) {
         const ctxStart = Math.max(0, changedLineIdx - 5);
         const ctxEnd = Math.min(oldLines.length, changedLineIdx + newString.split('\n').length + 5);
         const oldCtx = oldLines.slice(ctxStart, ctxEnd).join('\n');
-        const newCtx = newContent.split('\n').slice(ctxStart, ctxEnd + (newString.split('\n').length - oldString.split('\n').length)).join('\n');
+        const newCtx = newContent
+          .split('\n')
+          .slice(ctxStart, ctxEnd + (newString.split('\n').length - oldString.split('\n').length))
+          .join('\n');
 
         const replacementCount = replaceAll ? count : 1;
         return this.success(

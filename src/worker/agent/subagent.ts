@@ -82,9 +82,7 @@ export class SubagentDispatcher {
     // Process in batches
     for (let i = 0; i < calls.length; i += cap) {
       const batch = calls.slice(i, i + cap);
-      const batchResults = await Promise.all(
-        batch.map((call) => this.dispatchOne(call)),
-      );
+      const batchResults = await Promise.all(batch.map((call) => this.dispatchOne(call)));
       results.push(...batchResults);
     }
 
@@ -104,10 +102,17 @@ export class SubagentDispatcher {
   // ===== Private =====
 
   private async dispatchOne(call: SubagentCall): Promise<SubagentResult> {
-    console.log('[SubagentDispatcher] dispatchOne: agent=', call.agent, 'prompt=', call.prompt.slice(0, 80));
+    console.log(
+      '[SubagentDispatcher] dispatchOne: agent=',
+      call.agent,
+      'prompt=',
+      call.prompt.slice(0, 80),
+    );
     const def = this.definitions.get(call.agent);
     if (!def) {
-      console.log('[SubagentDispatcher] ERROR: unknown agent:', call.agent, 'available:', [...this.definitions.keys()]);
+      console.log('[SubagentDispatcher] ERROR: unknown agent:', call.agent, 'available:', [
+        ...this.definitions.keys(),
+      ]);
       return {
         agent: call.agent,
         success: false,
@@ -169,7 +174,10 @@ export class SubagentDispatcher {
       this.opts.abortSignal.removeEventListener('abort', onParentAbort);
 
       const text = extractText(result.finalMessage);
-      const extras = result as AgentLoopResult & { thinking?: string; internalCalls?: ToolCallContent[] };
+      const extras = result as AgentLoopResult & {
+        thinking?: string;
+        internalCalls?: ToolCallContent[];
+      };
       const subResult: SubagentResult = {
         agent: call.agent,
         session: call.session,
@@ -256,7 +264,10 @@ export class SubagentDispatcher {
 
     // Build tool whitelist
     const allowedTools = this.buildToolWhitelist(def.tools);
-    console.log('[SubagentDispatcher] Whitelisted tools:', allowedTools.map(t => t.name));
+    console.log(
+      '[SubagentDispatcher] Whitelisted tools:',
+      allowedTools.map((t) => t.name),
+    );
 
     // Get model: definition model > parent model
     const modelRegistry = createModelRegistry();
@@ -328,8 +339,12 @@ export class SubagentDispatcher {
     });
 
     // Store internal state in the result for SubagentCard rendering
-    (result as AgentLoopResult & { thinking?: string; internalCalls?: ToolCallContent[] }).thinking = subThinking;
-    (result as AgentLoopResult & { thinking?: string; internalCalls?: ToolCallContent[] }).internalCalls = subToolCalls;
+    (
+      result as AgentLoopResult & { thinking?: string; internalCalls?: ToolCallContent[] }
+    ).thinking = subThinking;
+    (
+      result as AgentLoopResult & { thinking?: string; internalCalls?: ToolCallContent[] }
+    ).internalCalls = subToolCalls;
 
     // Save to named session
     if (call.session) {
@@ -359,9 +374,7 @@ export class SubagentDispatcher {
   /** Build filtered tool array from whitelist. */
   private buildToolWhitelist(names: string[]): Tool[] {
     const allTools = createToolRegistry(this.opts.workingDir).getAll();
-    return names
-      .map((n) => allTools.find((t) => t.name === n))
-      .filter(Boolean) as Tool[];
+    return names.map((n) => allTools.find((t) => t.name === n)).filter(Boolean) as Tool[];
   }
 
   private sessionKey(call: SubagentCall): string {

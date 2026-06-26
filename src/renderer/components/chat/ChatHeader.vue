@@ -26,11 +26,15 @@ const folderName = computed(() => {
 });
 
 // Sync folder name to native title bar overlay
-watch(folderName, (name) => {
-  if (name) {
-    bridge.setTitleBarOverlayText(name);
-  }
-}, { immediate: true });
+watch(
+  folderName,
+  (name) => {
+    if (name) {
+      bridge.setTitleBarOverlayText(name);
+    }
+  },
+  { immediate: true },
+);
 
 async function refreshGitInfo(): Promise<void> {
   const dir = activeSession.value?.workingDirectory;

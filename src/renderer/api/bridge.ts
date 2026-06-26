@@ -5,6 +5,7 @@
 import type {
   BackgroundProcess,
   GitInfo,
+  GoalEvent,
   StreamEvent,
   AgentStatus,
   Message,
@@ -176,6 +177,10 @@ export const bridge = {
 
   onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void {
     return api().onBgProcessCompleted(callback);
+  },
+
+  onGoalEvent(callback: (event: GoalEvent) => void): () => void {
+    return api().onGoalEvent(callback);
   },
 
   // ===== Subagent =====

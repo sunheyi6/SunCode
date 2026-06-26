@@ -4,6 +4,7 @@
 import type {
   BackgroundProcess,
   GitInfo,
+  GoalEvent,
   StreamEvent,
   AgentStatus,
   Message,
@@ -90,7 +91,11 @@ declare global {
       // Window
       setTitleBarOverlayText(text: string): void;
       // Subagent
-      onSubagentProgress(callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void): () => void;
+      onSubagentProgress(
+        callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void,
+      ): () => void;
+      // Goal
+      onGoalEvent(callback: (event: GoalEvent) => void): () => void;
     };
   }
 }

@@ -15,6 +15,8 @@ export const DEFAULT_SETTINGS = {
   mcpServers: [],
   skills: [],
   envApiKeys: {},
+  goalMaxTurns: 5,
+  goalMaxWallTimeMs: 600000, // 10 minutes
 };
 
 /** Default system prompt template */
@@ -138,11 +140,32 @@ If the user uses English: use English throughout.
 
 **task_complete 之前自问：如果我是用户，拿到这个回复会满意吗？**
 
+### /goal 自主任务模式 / Goal Autonomous Mode
+当用户使用 /goal 命令时，你进入自主循环模式。在此模式下：
+- 你会被自动重复调用，直到目标完成或预算耗尽。
+- 每次执行后，系统会自动运行验证命令（如果用户指定了 --verify）。
+- 验证失败时会收到失败输出作为反馈，你需要据此修复问题。
+- 验证通过（exit code 0）后目标自动完成。
+- 如果没有指定 --verify，你需要主动调用 task_complete 来表明目标已完成。
+- 约束条件用 --constraints "..." 指定，你必须严格遵守。
+- 不要等待用户确认——这是自主模式，直接行动。
+
 ## 代码风格 / Code Style
 - 遵循项目现有代码风格
 - 改动尽量最小化、聚焦
 - 只在有意义的上下文处添加注释
 - 使用描述性的变量和函数名`;
+
+/** Prompt used to generate a concise session title from the first user message. */
+export const TITLE_GENERATION_PROMPT = `Generate a concise title for this coding session.
+
+Rules:
+- Use the user's primary language.
+- Use 3-7 words when possible.
+- Keep it recognizable in a session list.
+- Preserve important proper nouns, file names, APIs, and technology names.
+- Do not use markdown, numbering, quotes, trailing punctuation, or explanations.
+- Return only JSON in this shape: {"title":"..."}`;
 
 /** Maximum number of turns before forcing a stop */
 export const MAX_TURNS = 100;
@@ -185,6 +208,12 @@ export const DEFAULT_CONTEXT_BUDGET_POLICY = {
   minRecentTurns: DEFAULT_MIN_RECENT_TURNS,
   charsPerToken: CHARS_PER_TOKEN,
 } as const;
+
+/** Default max turns for a goal-level loop. */
+export const DEFAULT_GOAL_MAX_TURNS = 5;
+
+/** Default max wall time for a goal (10 minutes). */
+export const DEFAULT_GOAL_MAX_WALL_TIME_MS = 600000;
 
 /** Directories to ignore in file tree */
 export const IGNORED_DIRECTORIES = [

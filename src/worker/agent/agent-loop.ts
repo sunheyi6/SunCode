@@ -1,19 +1,27 @@
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import { MAX_TURNS } from '@shared/constants';
-import { isIncompleteProgressText } from '@shared/finalization';
 import type {
   AppSettings,
   ContentBlock,
   Message,
   RunEvent,
+  StopHookRegistry,
   StreamEvent,
   ToolCallContent,
   ToolDefinition,
   ToolResult,
+  TurnDecision,
 } from '@shared/types';
 import { TASK_COMPLETE_TOOL_NAME } from '../tools/task-complete';
 import type { Tool } from '../tools/types';
 import { buildSystemPrompt } from './system-prompt';
+import {
+  computeNeedsFollowUp,
+  hasTaskCompleteToolCall,
+  findTaskCompleteCall,
+  taxonomyFromError,
+  type NeedsFollowUpInput,
+} from './turn-decision';
 
 /** Context passed to prepareNextTurn so implementors can trim or adjust. */
 export interface PrepareNextTurnContext {
@@ -52,6 +60,10 @@ export interface AgentLoopInput {
   /** Optional hook called after each intermediate turn. Can trim context or return
    *  new settings for the next turn (e.g. switch model, adjust thinking). */
   prepareNextTurn?: (ctx: PrepareNextTurnContext) => PrepareNextTurnResult | undefined;
+  /** Stop hook registry for post-turn checks (verification, safety, etc.). */
+  stopHooks?: StopHookRegistry;
+  /** Whether there is pending user input that was queued while the agent was running. */
+  hasPendingInput?: boolean;
 }
 
 export interface PrepareNextTurnResult {
@@ -63,10 +75,21 @@ export interface AgentLoopResult {
   finalMessage: Message;
   turnCount: number;
   tokenUsage: { input: number; output: number; total: number };
+  /** Structured decision about why the loop terminated. */
+  decision: TurnDecision;
 }
 
 /**
  * Core agent loop: prompt → LLM stream → tool execution → repeat.
+ *
+ * Termination decisions are driven by `computeNeedsFollowUp()` (Codex-inspired):
+ * - Model called tools → execute them, then continue
+ * - Model called task_complete → explicit stop signal
+ * - Model produced only text → natural stop (no follow-up needed)
+ * - Budget / abort → stop
+ *
+ * Stop hooks run before finalizing any stop decision, allowing verification,
+ * safety checks, or other post-turn processing to block or override.
  */
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   const {
@@ -87,6 +110,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     onRunEvent,
     initialTurnCount,
     prepareNextTurn,
+    stopHooks,
+    hasPendingInput: inputHasPending,
   } = input;
 
   if (!model) {
@@ -108,6 +133,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       },
       turnCount: initialTurnCount + 1,
       tokenUsage,
+      decision: { decision: 'stop', reason: 'no_follow_up', taxonomy: 'completed' },
     };
   }
 
@@ -289,86 +315,35 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         );
       }
 
-      // No tool calls → final turn. Send text_end so the frontend finalises.
-      if (toolCalls.length === 0) {
-        if (
-          isIncompleteProgressText(assistantText) &&
-          turnCount < (settings.maxTurns || MAX_TURNS)
-        ) {
-          contextMessages.push({
-            role: 'assistant',
-            content: [{ type: 'text', text: assistantText }],
-          });
-          contextMessages.push({
-            role: 'user',
-            content:
-              '你的上一条回复是在描述尚未完成的下一步，不是最终交付物。请继续使用工具完成这些步骤；只有在已经验证完成后，才输出最终答案或调用 task_complete。',
-          });
-          onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
-          onRunEvent({
-            type: 'turn_completed',
-            runId,
-            turnNumber: turnCount,
-            hasToolCalls: false,
-            timestamp: '',
-          });
-          continue;
-        }
+      // ===== Turn Decision: compute whether we need another turn =====
+      // Codex-style: model naturally expresses "done" by not calling tools,
+      // or explicitly via task_complete. Stop hooks can override.
+      const hasTaskComplete = hasTaskCompleteToolCall(toolCalls);
+      const { decision: turnDecision } = computeNeedsFollowUp({
+        toolCalls: toolCalls.filter((tc) => tc.name !== TASK_COMPLETE_TOOL_NAME),
+        hasPendingInput: Boolean(inputHasPending),
+        isMaxTurnsReached: turnCount >= (settings.maxTurns || MAX_TURNS),
+        isAborted: false,
+        assistantText,
+        hasTaskComplete,
+      });
 
-        onStream({ type: 'text_end' });
-        onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
-        onRunEvent({
-          type: 'turn_completed',
-          runId,
-          turnNumber: turnCount,
-          hasToolCalls: false,
-          timestamp: '',
-        });
-
-        // When the model outputs substantial thinking but little/no text
-        // (common with reasoning models like DeepSeek), include the thinking
-        // content as the visible answer so the user sees actual results instead
-        // of an empty "已完成。" placeholder.
-        const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
-
-        const contentBlocks: Array<
-          { type: 'thinking'; text: string } | { type: 'text'; text: string }
-        > = [];
-        if (thinkingText) {
-          contentBlocks.push({ type: 'thinking', text: thinkingText });
-        }
-        contentBlocks.push({ type: 'text', text: mergedText });
-
-        return {
-          finalMessage: {
-            role: 'assistant',
-            content: contentBlocks,
-          },
-          turnCount,
-          tokenUsage,
-        };
-      }
-
-      // task_complete tool → model explicitly signals that the task is done.
-      // Treat this as a final turn: extract the summary, skip tool execution,
-      // and return the final message immediately.
-      const taskCompleteTC = toolCalls.find((tc) => tc.name === TASK_COMPLETE_TOOL_NAME);
-      if (taskCompleteTC) {
+      // task_complete → explicit signal, extract summary and return.
+      if (hasTaskComplete) {
+        const taskCompleteTC = findTaskCompleteCall(toolCalls);
         let summary = '';
-        try {
-          const args = JSON.parse(taskCompleteTC.arguments);
-          summary = (args.summary as string) || '';
-        } catch {
-          // If arguments can't be parsed, just use whatever text the model output
+        if (taskCompleteTC) {
+          try {
+            const args = JSON.parse(taskCompleteTC.arguments);
+            summary = (args.summary as string) || '';
+          } catch {
+            // ignore parse failures
+          }
         }
-
         if (summary) {
           assistantText = assistantText ? `${assistantText}\n\n${summary}` : summary;
         }
 
-        // Merge thinking into answer when text is empty/minimal (same logic as the
-        // no-tool-calls path above). Reasoning models often put the real answer in
-        // thinking and leave text blank — without this the user sees nothing useful.
         const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
 
         onStream({ type: 'text_end' });
@@ -379,6 +354,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           turnNumber: turnCount,
           hasToolCalls: true,
           timestamp: '',
+          taxonomy: 'completed',
         });
 
         const contentBlocks: Array<
@@ -390,12 +366,106 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         contentBlocks.push({ type: 'text', text: mergedText });
 
         return {
-          finalMessage: {
-            role: 'assistant',
-            content: contentBlocks,
-          },
+          finalMessage: { role: 'assistant', content: contentBlocks },
           turnCount,
           tokenUsage,
+          decision: { decision: 'stop', reason: 'task_complete', taxonomy: 'completed' },
+        };
+      }
+
+      // Non-task_complete tool calls → execute them and continue
+      if (turnDecision.decision === 'continue' && toolCalls.length > 0) {
+        // Fall through to tool execution below
+      } else if (turnDecision.decision === 'stop') {
+        // Stop decision: run stop hooks before finalizing
+        if (stopHooks) {
+          const hookResult = await stopHooks.runAll({
+            assistantText,
+            thinkingText,
+            toolCalls,
+            toolResults: [],
+            turnCount,
+            maxTurns: settings.maxTurns || MAX_TURNS,
+            tokenUsage,
+          });
+
+          if (hookResult.shouldStop) {
+            const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
+            onStream({ type: 'text_end' });
+            onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
+            onRunEvent({
+              type: 'turn_completed',
+              runId,
+              turnNumber: turnCount,
+              hasToolCalls: false,
+              timestamp: '',
+              taxonomy: 'blocked',
+            });
+
+            const contentBlocks: Array<
+              { type: 'thinking'; text: string } | { type: 'text'; text: string }
+            > = [];
+            if (thinkingText) {
+              contentBlocks.push({ type: 'thinking', text: thinkingText });
+            }
+            contentBlocks.push({ type: 'text', text: mergedText });
+
+            return {
+              finalMessage: { role: 'assistant', content: contentBlocks },
+              turnCount,
+              tokenUsage,
+              decision: { decision: 'stop', reason: 'blocked', taxonomy: 'blocked' },
+            };
+          }
+
+          if (hookResult.shouldBlock && hookResult.continuationPrompt) {
+            contextMessages.push({
+              role: 'assistant',
+              content: [{ type: 'text', text: assistantText || '处理中...' }],
+            });
+            contextMessages.push({
+              role: 'user',
+              content: hookResult.continuationPrompt,
+            });
+            onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
+            onRunEvent({
+              type: 'turn_completed',
+              runId,
+              turnNumber: turnCount,
+              hasToolCalls: false,
+              timestamp: '',
+            });
+            continue;
+          }
+        }
+
+        // Normal stop — no follow-up needed, model is done
+        const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
+
+        onStream({ type: 'text_end' });
+        onStream({ type: 'turn_end', turnCount, hasToolCalls: toolCalls.length > 0 });
+        onRunEvent({
+          type: 'turn_completed',
+          runId,
+          turnNumber: turnCount,
+          hasToolCalls: toolCalls.length > 0,
+          timestamp: '',
+          taxonomy: turnDecision.taxonomy,
+        });
+
+        const contentBlocks: Array<
+          { type: 'thinking'; text: string } | { type: 'text'; text: string }
+        > = [];
+        if (thinkingText) {
+          contentBlocks.push({ type: 'thinking', text: thinkingText });
+        }
+        contentBlocks.push({ type: 'text', text: mergedText });
+
+        return {
+          finalMessage: { role: 'assistant', content: contentBlocks },
+          turnCount,
+          tokenUsage,
+          decision: turnDecision,
         };
       }
 
@@ -610,12 +680,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // Emit turn_end for intermediate (tool-use) turns
       onStream({ type: 'turn_end', turnCount, hasToolCalls: true });
+      onRunEvent({
+        type: 'turn_completed',
+        runId,
+        turnNumber: turnCount,
+        hasToolCalls: true,
+        timestamp: '',
+      });
 
       // Allow hook to trim context or adjust state before the next turn
       if (prepareNextTurn) {
         // Extract model context window for budget-aware compaction
         const modelContextWindow = extractContextWindow(model);
-        const result = prepareNextTurn({
+        const result2 = prepareNextTurn({
           assistantText,
           thinkingText,
           toolResults,
@@ -624,10 +701,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           maxTurns: settings.maxTurns || MAX_TURNS,
           modelContextWindow,
         });
-        if (result?.contextMessages) {
+        if (result2?.contextMessages) {
           // Replace the mutable context array contents
           contextMessages.length = 0;
-          contextMessages.push(...result.contextMessages);
+          contextMessages.push(...result2.contextMessages);
         }
       }
 
@@ -649,6 +726,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     },
     turnCount,
     tokenUsage,
+    decision: { decision: 'stop', reason: 'max_turns', taxonomy: 'max_turns_exhausted' },
   };
 }
 

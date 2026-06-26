@@ -188,6 +188,10 @@ export interface AppSettings {
   mcpServers: McpServerConfig[];
   skills: string[]; // paths to skill directories
   envApiKeys: Record<string, string>;
+  /** Goal mode: max goal-level turns (each turn = one full agent run). Default 5. */
+  goalMaxTurns?: number;
+  /** Goal mode: max wall-clock time in milliseconds. Default 600000 (10 min). */
+  goalMaxWallTimeMs?: number;
 }
 
 /** MCP server configuration */
@@ -197,6 +201,128 @@ export interface McpServerConfig {
   args: string[];
   env?: Record<string, string>;
   enabled: boolean;
+}
+
+// ===== Turn Decision Types =====
+
+/** Structured outcome taxonomy for a turn/run termination. */
+export type TurnTaxonomy =
+  | 'completed' // Task completed normally (task_complete or no_follow_up)
+  | 'max_turns_exhausted' // Turn budget exhausted
+  | 'aborted' // User aborted
+  | 'blocked' // Blocked by stop hook (e.g. verification failed)
+  | 'error'; // Stream/LLM error
+
+/** Structured decision about whether to continue or stop the agent loop. */
+export type TurnDecision =
+  | { decision: 'continue'; reason?: string }
+  | {
+      decision: 'stop';
+      reason: 'task_complete' | 'no_follow_up' | 'max_turns' | 'aborted' | 'blocked' | 'error';
+      taxonomy: TurnTaxonomy;
+    };
+
+// ===== Goal Types =====
+
+/** User-defined goal for autonomous multi-turn execution. */
+export interface GoalDefinition {
+  /** Human-readable description of the desired end state. */
+  description: string;
+  /** Shell command that must exit 0 for the goal to be considered met. */
+  verificationCommand?: string;
+  /** Constraints the agent must respect while working toward the goal. */
+  constraints?: string;
+  /** Maximum goal-level turns (each turn = one full agent run). */
+  maxGoalTurns?: number;
+  /** Maximum wall-clock time in milliseconds for the entire goal. */
+  maxWallTimeMs?: number;
+}
+
+/** Current status of a goal execution. */
+export type GoalStatus =
+  | 'active' // Goal is being worked on
+  | 'verification_passed' // Verification command exited 0 → goal met
+  | 'budget_exhausted' // Turn or time budget hit
+  | 'blocked' // No valid path remains
+  | 'aborted'; // User cancelled
+
+/** Runtime state of a goal execution. */
+export interface GoalState {
+  definition: GoalDefinition;
+  status: GoalStatus;
+  turnsCompleted: number;
+  tokenUsage: TokenUsage;
+  lastVerificationOutput?: string;
+  lastVerificationExitCode?: number | null;
+  startedAt: number;
+  reason?: string; // why the goal stopped (when not verification_passed)
+}
+
+/** Events emitted during goal execution. */
+export type GoalEvent =
+  | { type: 'goal_started'; goal: GoalDefinition; goalRunId: string }
+  | {
+      type: 'goal_turn_completed';
+      turnNumber: number;
+      tokenUsage: TokenUsage;
+      verificationOutput?: string;
+      verificationExitCode?: number | null;
+    }
+  | { type: 'goal_verification_passed'; tokenUsage: TokenUsage }
+  | { type: 'goal_budget_exhausted'; reason: string }
+  | { type: 'goal_blocked'; reason: string }
+  | { type: 'goal_aborted' }
+  | { type: 'goal_completed'; state: GoalState };
+
+/** Result of a goal loop execution. */
+export interface GoalLoopResult {
+  goalRunId: string;
+  state: GoalState;
+  finalMessage: Message;
+  totalTurnCount: number;
+  tokenUsage: TokenUsage;
+}
+
+// ===== Stop Hook Types =====
+
+/** Context provided to stop hooks for decision-making. */
+export interface StopHookContext {
+  assistantText: string;
+  thinkingText: string;
+  toolCalls: ToolCallContent[];
+  toolResults: ToolResult[];
+  turnCount: number;
+  maxTurns: number;
+  tokenUsage: TokenUsage;
+  /** If goal is active, the goal definition. */
+  goal?: GoalDefinition;
+}
+
+/** Result of a stop hook check. */
+export interface StopHookResult {
+  /** Block turn completion and inject a continuation prompt. */
+  shouldBlock: boolean;
+  /** Force immediate termination. */
+  shouldStop: boolean;
+  /** Prompt to inject when shouldBlock is true. */
+  continuationPrompt?: string;
+  /** Human-readable reason for the decision. */
+  reason?: string;
+}
+
+/** A stop hook that runs before a turn is finalized. */
+export interface StopHook {
+  name: string;
+  /** Execution priority (lower number = earlier execution). */
+  priority: number;
+  /** Check whether the turn should be blocked or stopped. */
+  check(ctx: StopHookContext): Promise<StopHookResult>;
+}
+
+/** Registry of stop hooks, run in priority order before turn finalization. */
+export interface StopHookRegistry {
+  register(hook: StopHook): void;
+  runAll(ctx: StopHookContext): Promise<StopHookResult>;
 }
 
 // ===== Worker Messages =====
@@ -224,7 +350,8 @@ export type WorkerOutMessage =
   | { type: 'runEvent'; event: RunEvent }
   | { type: 'subagentStart'; execution: SubagentExecution }
   | { type: 'subagentEnd'; id: string; result: SubagentResult }
-  | { type: 'subagentProgress'; executionId: string; agent: string; delta: SubagentProgressDelta };
+  | { type: 'subagentProgress'; executionId: string; agent: string; delta: SubagentProgressDelta }
+  | { type: 'goalEvent'; event: GoalEvent };
 
 /** Streaming event types from the LLM */
 export type StreamEventType =
@@ -286,11 +413,28 @@ export type RunEvent =
       turnNumber: number;
       hasToolCalls: boolean;
       timestamp: string;
+      taxonomy?: TurnTaxonomy;
     }
-  | { type: 'run_completed'; runId: RunId; turnCount: number; timestamp: string; tokenUsage?: { input: number; output: number; total: number } }
+  | {
+      type: 'run_completed';
+      runId: RunId;
+      turnCount: number;
+      timestamp: string;
+      tokenUsage?: { input: number; output: number; total: number };
+      taxonomy?: TurnTaxonomy;
+    }
   | { type: 'run_failed'; runId: RunId; error: string; timestamp: string }
   | { type: 'run_aborted'; runId: RunId; timestamp: string }
-  | { type: 'run_recovered'; runId: RunId; reason: string; timestamp: string };
+  | { type: 'run_recovered'; runId: RunId; reason: string; timestamp: string }
+  | { type: 'goal_started'; runId: RunId; goal: GoalDefinition; timestamp: string }
+  | {
+      type: 'goal_turn_completed';
+      runId: RunId;
+      turnNumber: number;
+      timestamp: string;
+      verificationExitCode?: number | null;
+    }
+  | { type: 'goal_completed'; runId: RunId; status: GoalStatus; timestamp: string };
 
 // ===== IPC API Types (Renderer ↔ Main) =====
 

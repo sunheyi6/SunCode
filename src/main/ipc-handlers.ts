@@ -5,7 +5,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { DEFAULT_SETTINGS } from '@shared/constants';
+import { DEFAULT_SETTINGS, TITLE_GENERATION_PROMPT } from '@shared/constants';
 import type {
   AppSettings,
   DayStats,
@@ -135,7 +135,15 @@ function getAgentWorker(): Worker {
           mainWindow.webContents.send('agent:subagent-end', msg.id, msg.result);
           break;
         case 'subagentProgress':
-          mainWindow.webContents.send('agent:subagent-progress', msg.executionId, msg.agent, msg.delta);
+          mainWindow.webContents.send(
+            'agent:subagent-progress',
+            msg.executionId,
+            msg.agent,
+            msg.delta,
+          );
+          break;
+        case 'goalEvent':
+          mainWindow.webContents.send('agent:goal-event', msg.event);
           break;
       }
     });
@@ -597,17 +605,20 @@ export function registerIpcHandlers(wm: WindowManager): void {
       const model = pi.getModel(currentSettings.activeProvider as any, currentSettings.activeModel);
       // pi-ai's TS types for completeSimple params differ from its runtime API — safe to cast
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await pi.completeSimple(model as any, {
-        system:
-          'You are a commit message generator. Write a concise Conventional Commit message (e.g. "feat(scope): summary") based on the git diff. Use types: feat, fix, refactor, chore, docs, style, test. Keep it under 72 characters. Return ONLY the message, no quotes, no explanation.',
-        messages: [
-          {
-            role: 'user',
-            content: `Generate a Conventional Commit message for this diff:\n\n${diff.slice(0, 4000)}`,
-          },
-        ],
-        tools: [],
-      } as any);
+      const result = await pi.completeSimple(
+        model as any,
+        {
+          system:
+            'You are a commit message generator. Write a concise Conventional Commit message (e.g. "feat(scope): summary") based on the git diff. Use types: feat, fix, refactor, chore, docs, style, test. Keep it under 72 characters. Return ONLY the message, no quotes, no explanation.',
+          messages: [
+            {
+              role: 'user',
+              content: `Generate a Conventional Commit message for this diff:\n\n${diff.slice(0, 4000)}`,
+            },
+          ],
+          tools: [],
+        } as any,
+      );
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const content = (result as any).content;
@@ -653,8 +664,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
           contextWindow: (d.contextWindow as number) || 128000,
           maxTokens: (d.maxTokens as number) || 4096,
           supportsReasoning: Boolean(d.reasoning),
-          supportsImages:
-            Array.isArray(d.input) && (d.input as string[]).includes('image'),
+          supportsImages: Array.isArray(d.input) && (d.input as string[]).includes('image'),
         };
       });
     } catch {
@@ -716,65 +726,71 @@ export function registerIpcHandlers(wm: WindowManager): void {
   // ===== Token Usage Stats =====
   ipcMain.handle('stats:getTokenUsage', async (): Promise<TokenUsageSummary> => {
     try {
-    const dailyMap = new Map<string, { input: number; output: number; total: number; runs: number }>();
-    const modelMap = new Map<string, { input: number; output: number; total: number; runs: number }>();
+      const dailyMap = new Map<
+        string,
+        { input: number; output: number; total: number; runs: number }
+      >();
+      const modelMap = new Map<
+        string,
+        { input: number; output: number; total: number; runs: number }
+      >();
 
-    const diskSessions = await loadAllSessions();
-    for (const session of diskSessions) {
-      const runIds = await listRuns(session.id);
-      let sessionModel = 'unknown';
+      const diskSessions = await loadAllSessions();
+      for (const session of diskSessions) {
+        const runIds = await listRuns(session.id);
+        let sessionModel = 'unknown';
 
-      for (const runId of runIds) {
-        const events = await getEvents(session.id, runId);
+        for (const runId of runIds) {
+          const events = await getEvents(session.id, runId);
 
-        // Extract model from run_started
-        const started = events.find((e) => e.type === 'run_started');
-        if (started && started.type === 'run_started' && started.modelName) {
-          sessionModel = started.modelName;
-        }
+          // Extract model from run_started
+          const started = events.find((e) => e.type === 'run_started');
+          if (started && started.type === 'run_started' && started.modelName) {
+            sessionModel = started.modelName;
+          }
 
-        // Extract token usage from run_completed
-        const completed = events.find((e) => e.type === 'run_completed');
-        if (completed && completed.type === 'run_completed' && completed.tokenUsage) {
-          const { input, output, total } = completed.tokenUsage;
-          const date = completed.timestamp.split('T')[0]!;
+          // Extract token usage from run_completed
+          const completed = events.find((e) => e.type === 'run_completed');
+          if (completed && completed.type === 'run_completed' && completed.tokenUsage) {
+            const { input, output, total } = completed.tokenUsage;
+            const date = completed.timestamp.split('T')[0]!;
 
-          // Aggregate daily
-          const day = dailyMap.get(date) || { input: 0, output: 0, total: 0, runs: 0 };
-          day.input += input;
-          day.output += output;
-          day.total += total;
-          day.runs += 1;
-          dailyMap.set(date, day);
+            // Aggregate daily
+            const day = dailyMap.get(date) || { input: 0, output: 0, total: 0, runs: 0 };
+            day.input += input;
+            day.output += output;
+            day.total += total;
+            day.runs += 1;
+            dailyMap.set(date, day);
 
-          // Aggregate by model
-          const model = modelMap.get(sessionModel) || { input: 0, output: 0, total: 0, runs: 0 };
-          model.input += input;
-          model.output += output;
-          model.total += total;
-          model.runs += 1;
-          modelMap.set(sessionModel, model);
+            // Aggregate by model
+            const model = modelMap.get(sessionModel) || { input: 0, output: 0, total: 0, runs: 0 };
+            model.input += input;
+            model.output += output;
+            model.total += total;
+            model.runs += 1;
+            modelMap.set(sessionModel, model);
+          }
         }
       }
-    }
 
-    // Sort and build result
-    const daily: DayStats[] = [...dailyMap.entries()]
-      .map(([date, d]) => ({ date, ...d }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      // Sort and build result
+      const daily: DayStats[] = [...dailyMap.entries()]
+        .map(([date, d]) => ({ date, ...d }))
+        .sort((a, b) => a.date.localeCompare(b.date));
 
-    const byModel: ModelStats[] = [...modelMap.entries()]
-      .map(([modelName, m]) => ({ modelName, ...m }))
-      .sort((a, b) => b.total - a.total);
+      const byModel: ModelStats[] = [...modelMap.entries()]
+        .map(([modelName, m]) => ({ modelName, ...m }))
+        .sort((a, b) => b.total - a.total);
 
-    const totals = {
-      input: byModel.reduce((s, m) => s + m.input, 0),
-      output: byModel.reduce((s, m) => s + m.output, 0),
-      total: byModel.reduce((s, m) => s + m.total, 0),
-      runs: byModel.reduce((s, m) => s + m.runs, 0),
-    };
+      const totals = {
+        input: byModel.reduce((s, m) => s + m.input, 0),
+        output: byModel.reduce((s, m) => s + m.output, 0),
+        total: byModel.reduce((s, m) => s + m.total, 0),
+        runs: byModel.reduce((s, m) => s + m.runs, 0),
+      };
 
-    return { daily, byModel, totals };
+      return { daily, byModel, totals };
     } catch (err) {
       console.error('[Main] stats:getTokenUsage failed:', (err as Error).message);
       return { daily: [], byModel: [], totals: { input: 0, output: 0, total: 0, runs: 0 } };
@@ -782,6 +798,20 @@ export function registerIpcHandlers(wm: WindowManager): void {
   });
 }
 
+/**
+ * Extract a concise session title from the first user message.
+ *
+ * Uses the rules defined in TITLE_GENERATION_PROMPT:
+ * - Use the user's primary language.
+ * - Use 3-7 words when possible.
+ * - Keep it recognizable in a session list.
+ * - Preserve important proper nouns, file names, APIs, and technology names.
+ * - No markdown, numbering, quotes, trailing punctuation.
+ *
+ * For AI-based title generation, send the message content with
+ * TITLE_GENERATION_PROMPT to a lightweight model. This fallback
+ * extracts the first meaningful sentence and cleans it up.
+ */
 function extractTitle(message: Message): string | null {
   let text = '';
 
@@ -794,12 +824,49 @@ function extractTitle(message: Message): string | null {
       .join(' ');
   }
 
-  // Take the first line, trim, and truncate
-  const firstLine = text.split('\n')[0].trim();
+  if (!text.trim()) return null;
+
+  // Take the first non-empty line and strip common formatting
+  const firstLine =
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? '';
+
   if (!firstLine) return null;
 
-  const maxLen = 30;
-  return firstLine.length > maxLen ? `${firstLine.slice(0, maxLen)}...` : firstLine;
+  // Clean up: remove markdown formatting, code fences, blockquotes, lists, and trailing punctuation
+  let cleaned = firstLine
+    .replace(/^[#>*-]+/, '') // strip leading markdown markers
+    .replace(/`{1,3}[^`]*`{1,3}/g, '') // strip inline code
+    .replace(/[*_~]{1,2}/g, '') // strip bold/italic/strikethrough markers
+    .replace(/[\[\]\(\)]/g, '') // strip link brackets
+    .replace(/["「」『』"']/g, '') // strip quotes
+    .replace(/[.。,，!！?？;；:：、]+$/, '') // strip trailing punctuation
+    .replace(/\s+/g, ' ') // collapse whitespace
+    .trim();
+
+  if (!cleaned) return null;
+
+  // Limit to ~7 words as per the prompt rules
+  const words = cleaned.split(/\s+/);
+  const maxWords = 7;
+  if (words.length > maxWords) {
+    cleaned = words.slice(0, maxWords).join(' ');
+    // Avoid ending mid-sentence: remove trailing function words
+    cleaned = cleaned.replace(
+      /\s+(的|了|吗|呢|吧|啊|哦|嗯|和|与|或|the|a|an|in|on|at|to|for|of|and|or|but)$/i,
+      '',
+    );
+  }
+
+  // Truncate to a safe max length as final guard
+  const maxLen = 50;
+  if (cleaned.length > maxLen) {
+    cleaned = cleaned.slice(0, maxLen).replace(/\s+\S*$/, '');
+  }
+
+  return cleaned || null;
 }
 
 function getProviderEnvKey(provider: string): string | undefined {

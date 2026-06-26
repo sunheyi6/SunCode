@@ -115,7 +115,12 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
           (proc) => post({ type: 'bgProcessStarted', process: proc }),
           (pid, exitCode) => post({ type: 'bgProcessCompleted', pid, exitCode }),
           (event) => post({ type: 'runEvent', event }),
-          (type, data) => post({ type: type as WorkerOutMessage['type'], ...(data as Record<string, unknown>) } as WorkerOutMessage),
+          (type, data) =>
+            post({
+              type: type as WorkerOutMessage['type'],
+              ...(data as Record<string, unknown>),
+            } as WorkerOutMessage),
+          (event) => post({ type: 'goalEvent', event }),
         );
         console.log('[Worker] Agent created');
       }

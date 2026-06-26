@@ -54,13 +54,25 @@ const gitBranch = computed(() => (gitInfo.value.isRepo ? gitInfo.value.branch : 
 async function refreshGitInfo() {
   const dir = workspacePath.value;
   if (!dir) {
-    gitInfo.value = { isRepo: false, addedLines: 0, deletedLines: 0, changedFiles: 0, stagedFiles: 0 };
+    gitInfo.value = {
+      isRepo: false,
+      addedLines: 0,
+      deletedLines: 0,
+      changedFiles: 0,
+      stagedFiles: 0,
+    };
     return;
   }
   try {
     gitInfo.value = await bridge.getGitInfo(dir);
   } catch {
-    gitInfo.value = { isRepo: false, addedLines: 0, deletedLines: 0, changedFiles: 0, stagedFiles: 0 };
+    gitInfo.value = {
+      isRepo: false,
+      addedLines: 0,
+      deletedLines: 0,
+      changedFiles: 0,
+      stagedFiles: 0,
+    };
   }
 }
 
@@ -74,6 +86,7 @@ async function selectFolder() {
 }
 
 const hasInput = computed(() => inputText.value.trim().length > 0);
+const isGoalInput = computed(() => inputText.value.trim().startsWith('/goal'));
 const availableModels = computed(() => modelsStore.recommendedModels);
 const currentModelLabel = computed(() => {
   const model = availableModels.value.find(
@@ -281,6 +294,12 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
     </div>
 
     <div class="composer" :class="{ streaming: props.isStreaming }">
+      <!-- Goal mode indicator -->
+      <div v-if="isGoalInput" class="goal-indicator">
+        <span class="goal-icon">🎯</span>
+        <span class="goal-label">Goal 自主模式</span>
+        <span class="goal-hint">系统将自动验证并重试直到目标完成</span>
+      </div>
       <textarea
         ref="textareaRef"
         v-model="inputText"
@@ -510,6 +529,39 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
+}
+
+.composer:has(.goal-indicator) {
+  border-color: color-mix(in srgb, #f59e0b 50%, var(--border-color-strong));
+  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.15);
+}
+
+.goal-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: -6px 0 8px 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, #f59e0b 12%, var(--color-bg));
+  border: 1px solid color-mix(in srgb, #f59e0b 25%, transparent);
+  font-size: 13px;
+}
+
+.goal-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.goal-label {
+  font-weight: 700;
+  color: #d97706;
+}
+
+.goal-hint {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin-left: auto;
 }
 
 .composer:focus-within {

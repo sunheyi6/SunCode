@@ -34,7 +34,13 @@ function setOutputRef(agent: string, el: Element | null): void {
 // Auto-scroll thinking and output to bottom as content streams in.
 // Also ensures the card itself is visible within parent scroll containers.
 watch(
-  () => results.value.map(r => `${r.agent}:t${r.thinking?.length ?? 0}:o${r.output?.length ?? 0}:c${r.internalCalls?.length ?? 0}`).join(','),
+  () =>
+    results.value
+      .map(
+        (r) =>
+          `${r.agent}:t${r.thinking?.length ?? 0}:o${r.output?.length ?? 0}:c${r.internalCalls?.length ?? 0}`,
+      )
+      .join(','),
   () => {
     void nextTick(() => {
       // rAF ensures browser has completed layout before we read scrollHeight

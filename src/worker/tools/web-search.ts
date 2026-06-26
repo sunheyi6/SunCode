@@ -42,7 +42,8 @@ async function searchDuckDuckGo(query: string, maxResults: number): Promise<Sear
 
     // Parse DuckDuckGo HTML results
     const results: SearchResult[] = [];
-    const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+    const resultRegex =
+      /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
 
     let match;
     while ((match = resultRegex.exec(html)) !== null && results.length < maxResults) {
@@ -52,8 +53,18 @@ async function searchDuckDuckGo(query: string, maxResults: number): Promise<Sear
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"');
 
-      const title = match[2]!.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
-      const snippet = match[3]!.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+      const title = match[2]!
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .trim();
+      const snippet = match[3]!
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .trim();
 
       // Extract real URL from DDG redirect
       const urlMatch = rawUrl.match(/uddg=(https?%3A[^&]+)/);
@@ -106,7 +117,9 @@ async function searchTavily(
       throw new Error(`Tavily API 返回 HTTP ${response.status}: ${errText.slice(0, 200)}`);
     }
 
-    const data = (await response.json()) as { results?: Array<{ title: string; url: string; content: string }> };
+    const data = (await response.json()) as {
+      results?: Array<{ title: string; url: string; content: string }>;
+    };
     return (data.results || []).slice(0, maxResults).map((r) => ({
       title: r.title,
       url: r.url,
@@ -188,7 +201,9 @@ export function createWebSearchTool(settings?: AppSettings): Tool {
         }
       } catch (tavilyErr) {
         // Tavily failed — fall back to DuckDuckGo
-        console.warn(`[web_search] Tavily 失败，回退到 DuckDuckGo: ${(tavilyErr as Error).message}`);
+        console.warn(
+          `[web_search] Tavily 失败，回退到 DuckDuckGo: ${(tavilyErr as Error).message}`,
+        );
       }
 
       // Default: DuckDuckGo

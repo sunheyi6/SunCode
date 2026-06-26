@@ -52,9 +52,34 @@ Design documents live in `docs/*.md`. They describe the *current* architecture, 
 - When adding a new design doc or updating an existing one, the corresponding code change must already be in the working tree.
 - This prevents documentation drift and ensures docs always reflect reality.
 
+**Design doc recording discipline:**
+- After implementing a non-trivial feature or making a key design decision, record a design doc in `docs/` by default.
+- Judge whether to create a new file or append to an existing one based on the functional area:
+  - New independent feature → create `docs/<feature-name>.md`.
+  - Extension or refinement of an existing feature → update the existing doc.
+  - Cross-cutting concern (e.g. context budget, IPC protocol) → create or update a dedicated doc.
+- Design docs must be written immediately after the code change, before moving on to the next task.
+
+**Design doc synchronization rule:**
+- When you modify code that is covered by an existing design doc in `docs/`, you MUST update the corresponding design doc in the same commit batch.
+- This includes: architecture changes, new design decisions, bug fixes that change behavior, addition/removal of modules, interface changes, and lessons learned.
+- If you are unsure which design doc covers a file, grep `docs/` for the file path or the module name.
+- A design doc update can be as small as adding a bullet point to "Lessons Learned" or updating a flow diagram — the key is that docs never drift from code.
+- This rule applies to ALL code changes, not just new features. Bug fixes that reveal design flaws are especially important to document.
+
 **Design doc structure:**
 1. Problem / design goal
 2. Architecture (diagrams, data flow)
 3. Implementation details (code excerpts, key types)
 4. Design decisions and trade-offs
 5. Lessons learned (effective practices and anti-patterns)
+
+**Design doc index** (current as of last commit):
+
+| 文档 | 覆盖范围 |
+|------|----------|
+| `docs/system-prompt-design.md` | 系统提示词的三层缓存布局、权限模式、工具片段注入 |
+| `docs/tool-calling-design.md` | 工具注册、并行执行、JSON Schema、MCP 集成 |
+| `docs/context-compaction-design.md` | 三层上下文预算（stale prune / turn cap / history compact） |
+| `docs/subagent-architecture-comparison.md` | 子 Agent 调度、深度守卫、循环检测、沙箱隔离 |
+| `docs/task-completion-mechanism.md` | `needs_follow_up` 决策、`/goal` 自主循环、Stop Hooks |

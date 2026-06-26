@@ -138,7 +138,10 @@ export function pruneStaleToolResults(
   }
 
   const maxResultTokens = prunePolicy.maxResultTokens ?? 2048;
-  const minRecentTurnsFull = Math.max(0, prunePolicy.minRecentTurnsFull ?? policy.minRecentTurns ?? 1);
+  const minRecentTurnsFull = Math.max(
+    0,
+    prunePolicy.minRecentTurnsFull ?? policy.minRecentTurns ?? 1,
+  );
 
   // Build a message → turnId map so tool messages know which turn they belong to
   const messageTurnMap = buildMessageTurnMap(messages);
@@ -252,7 +255,12 @@ export function selectTurnsByBudget(
       // Check turn cap
       if (options.maxTurns !== undefined && nextCount > options.maxTurns) break;
       // Check token budget
-      if (options.maxTokens !== undefined && keptTokens > 0 && keptTokens + group.estimatedTokens > options.maxTokens) break;
+      if (
+        options.maxTokens !== undefined &&
+        keptTokens > 0 &&
+        keptTokens + group.estimatedTokens > options.maxTokens
+      )
+        break;
     }
 
     kept.add(group.turnId);
@@ -270,11 +278,7 @@ export function selectTurnsByBudget(
 /** Approximate token count of a placeholder — used for savings estimation. */
 const PLACEHOLDER_TOKENS = 45;
 
-function buildPlaceholder(
-  msg: Message,
-  content: string,
-  originalTokens: number,
-): string {
+function buildPlaceholder(msg: Message, content: string, originalTokens: number): string {
   const bodyHash = createHash('sha256').update(content).digest('hex').slice(0, 16);
 
   const placeholder: ArchivedToolResultPlaceholder = {
@@ -304,11 +308,7 @@ function isPlaceholderString(content: string): boolean {
   }
 }
 
-function buildTurnGroup(
-  turnId: string,
-  messages: Message[],
-  charsPerToken: number,
-): TurnGroup {
+function buildTurnGroup(turnId: string, messages: Message[], charsPerToken: number): TurnGroup {
   return {
     turnId,
     messages,
@@ -322,15 +322,18 @@ function estimateMessagesTokens(messages: Message[], charsPerToken: number): num
       if (typeof msg.content === 'string') {
         return total + msg.content.length;
       }
-      return total + msg.content.reduce((sum, block) => {
-        if (block.type === 'text' || block.type === 'thinking') {
-          return sum + block.text.length;
-        }
-        if (block.type === 'tool_call') {
-          return sum + block.name.length + block.arguments.length;
-        }
-        return sum;
-      }, 0);
+      return (
+        total +
+        msg.content.reduce((sum, block) => {
+          if (block.type === 'text' || block.type === 'thinking') {
+            return sum + block.text.length;
+          }
+          if (block.type === 'tool_call') {
+            return sum + block.name.length + block.arguments.length;
+          }
+          return sum;
+        }, 0)
+      );
     }, 0) / Math.max(1, charsPerToken),
   );
 }
@@ -346,10 +349,7 @@ function buildMessageTurnMap(messages: Message[]): Map<Message, string> {
   return map;
 }
 
-function recentTurnIdsFromGroups(
-  messageTurnMap: Map<Message, string>,
-  count: number,
-): Set<string> {
+function recentTurnIdsFromGroups(messageTurnMap: Map<Message, string>, count: number): Set<string> {
   if (count <= 0) return new Set();
   // Collect unique non-system turn IDs in document order
   const order: string[] = [];

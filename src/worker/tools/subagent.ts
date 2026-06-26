@@ -23,7 +23,8 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
       },
       prompt: {
         type: 'string' as const,
-        description: '发送给子 Agent 的任务描述。应自包含所有必要的上下文，因为子 Agent 默认看不到父对话历史。',
+        description:
+          '发送给子 Agent 的任务描述。应自包含所有必要的上下文，因为子 Agent 默认看不到父对话历史。',
       },
       session: {
         type: 'string' as const,
@@ -93,12 +94,21 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
             initialContext: (params.initialContext as 'empty' | 'parent') || undefined,
           },
         ];
-        console.log('[Subagent] Single-call mode: agent=', params.agent, 'prompt=', (params.prompt as string).slice(0, 50));
+        console.log(
+          '[Subagent] Single-call mode: agent=',
+          params.agent,
+          'prompt=',
+          (params.prompt as string).slice(0, 50),
+        );
       } else {
-        const hint = agentList.length > 0
-          ? `用法: { agent: "${agentList[0]}", prompt: "任务描述" } 或 { calls: [{ agent: "...", prompt: "..." }] }`
-          : '没有可用的子 Agent。请在 .suncode/agents/ 下创建 agent 定义。';
-        console.log('[Subagent] ERROR: no agent+prompt or calls found. Params:', JSON.stringify(params).slice(0, 200));
+        const hint =
+          agentList.length > 0
+            ? `用法: { agent: "${agentList[0]}", prompt: "任务描述" } 或 { calls: [{ agent: "...", prompt: "..." }] }`
+            : '没有可用的子 Agent。请在 .suncode/agents/ 下创建 agent 定义。';
+        console.log(
+          '[Subagent] ERROR: no agent+prompt or calls found. Params:',
+          JSON.stringify(params).slice(0, 200),
+        );
         return {
           toolCallId: '',
           name: 'subagent',
@@ -134,7 +144,13 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
 
       console.log('[Subagent] Dispatching', calls.length, 'calls...');
       const results = await dispatcher.dispatch(calls);
-      console.log('[Subagent] Dispatch complete:', results.map(r => `${r.agent}: ${r.success ? 'OK' : r.error} think=${r.thinking?.length ?? 0} calls=${r.internalCalls?.length ?? 0}`));
+      console.log(
+        '[Subagent] Dispatch complete:',
+        results.map(
+          (r) =>
+            `${r.agent}: ${r.success ? 'OK' : r.error} think=${r.thinking?.length ?? 0} calls=${r.internalCalls?.length ?? 0}`,
+        ),
+      );
       const succeeded = results.filter((r) => r.success).length;
 
       const output = [
@@ -158,7 +174,11 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
         error: succeeded === 0 ? '所有子 Agent 均执行失败' : undefined,
         subagentResults: results,
       };
-      console.log('[Subagent] ToolResult has subagentResults:', toolResult.subagentResults.length, 'items');
+      console.log(
+        '[Subagent] ToolResult has subagentResults:',
+        toolResult.subagentResults.length,
+        'items',
+      );
       return toolResult;
     },
 

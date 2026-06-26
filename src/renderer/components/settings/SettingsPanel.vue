@@ -52,7 +52,12 @@ const permissionModes = [
   { value: 'plan' as const, label: '计划模式', icon: '📋', desc: '仅规划，不修改文件' },
   { value: 'full_access' as const, label: '完全访问', icon: '🔓', desc: '无限制，可自由读写' },
   { value: 'auto_edit' as const, label: '自动编辑', icon: '✏️', desc: '自动编辑文件无需确认' },
-  { value: 'confirm_changes' as const, label: '变更前确认', icon: '✅', desc: '修改前需要用户确认' },
+  {
+    value: 'confirm_changes' as const,
+    label: '变更前确认',
+    icon: '✅',
+    desc: '修改前需要用户确认',
+  },
 ];
 </script>
 

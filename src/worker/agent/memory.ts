@@ -16,7 +16,14 @@
  *   - MEMORY.md is replaced on every save (not appended).
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 const MEMORIES_DIR = '.suncode/memories';
@@ -134,7 +141,11 @@ function pruneOldMemories(memDir: string): void {
   if (files.length <= MAX_FILES) return;
 
   for (const file of files.slice(MAX_FILES)) {
-    try { unlinkSync(join(memDir, file!)); } catch { /* skip */ }
+    try {
+      unlinkSync(join(memDir, file!));
+    } catch {
+      /* skip */
+    }
   }
 }
 

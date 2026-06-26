@@ -82,7 +82,7 @@ export function createGrepTool(workingDir: string) {
           resolveResult(
             this.failure(
               'ripgrep (rg) is not installed. Install it from https://github.com/BurntSushi/ripgrep/releases\n' +
-              'Or use glob + read to explore files, or bash with findstr/PowerShell Select-String instead.',
+                'Or use glob + read to explore files, or bash with findstr/PowerShell Select-String instead.',
             ),
           );
           return;
@@ -93,7 +93,7 @@ export function createGrepTool(workingDir: string) {
             resolveResult(
               this.failure(
                 'ripgrep (rg) is not installed. Install it from https://github.com/BurntSushi/ripgrep/releases\n' +
-                'Alternatively, use glob to find files and read to inspect them.',
+                  'Alternatively, use glob to find files and read to inspect them.',
               ),
             );
           } else {

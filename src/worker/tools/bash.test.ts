@@ -21,9 +21,7 @@ describe('bash tool details', () => {
 
   test('retains a non-zero exit code', async () => {
     // On Windows, use cmd to produce a known non-zero exit code
-    const command = process.platform === 'win32'
-      ? 'cmd /c "exit 7"'
-      : 'bash -c "exit 7"';
+    const command = process.platform === 'win32' ? 'cmd /c "exit 7"' : 'bash -c "exit 7"';
     const result = await createBashTool(process.cwd()).execute({ command });
 
     expect(result.details).toMatchObject({

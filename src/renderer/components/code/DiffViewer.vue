@@ -43,7 +43,11 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
 
   // Find common prefix
   let prefixEnd = 0;
-  while (prefixEnd < oldLines.length && prefixEnd < newLines.length && oldLines[prefixEnd] === newLines[prefixEnd]) {
+  while (
+    prefixEnd < oldLines.length &&
+    prefixEnd < newLines.length &&
+    oldLines[prefixEnd] === newLines[prefixEnd]
+  ) {
     prefixEnd++;
   }
 
