@@ -5,20 +5,35 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建的 Tag（如 v0.2.0）'
+        required: true
+        type: string
 
-permissions:
-  contents: write
+permissions: {}
+
+# 防止同一 tag 重复构建
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  # ===== Stage 1: 三平台并行构建 =====
   build:
-    name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: actions/setup-node@v4
         with:
@@ -32,52 +47,158 @@ jobs:
 
       - name: Package Electron
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npx electron-builder --config electron-builder.yml --publish never
 
-      - name: Upload Windows artifacts
+      - name: Generate SHA256 checksums
+        shell: bash
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd release
+          sha256sum *.{exe,dmg,AppImage,deb} 2>/dev/null > SHA256SUMS || true
+
+      - name: Generate SHA256 checksums (Windows)
         if: matrix.os == 'windows-latest'
+        run: |
+          cd release
+          Get-FileHash -Algorithm SHA256 *.exe | ForEach-Object { "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)" } | Out-File -Encoding ASCII SHA256SUMS
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SunCode-Windows
+          name: binaries-${{ matrix.os }}
           path: |
             release/*.exe
-
-      - name: Upload macOS artifacts
-        if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: SunCode-macOS
-          path: |
             release/*.dmg
-
-      - name: Upload Linux artifacts
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: SunCode-Linux
-          path: |
             release/*.AppImage
             release/*.deb
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
 
-  release:
-    name: Create Release
+  # ===== Stage 2: 验证并创建 Draft Release =====
+  stage-release:
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      actions: read
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: release-assets
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: Validate artifacts
+        run: |
+          set -euo pipefail
+          cd release-assets
+          echo "=== Artifacts ==="
+          ls -la
+
+          # At least one binary per platform must exist
+          found_win=$(find . -maxdepth 1 -name "*.exe" | wc -l)
+          found_mac=$(find . -maxdepth 1 -name "*.dmg" | wc -l)
+          found_linux=$(find . -maxdepth 1 -name "*.AppImage" -o -name "*.deb" | wc -l)
+
+          echo "Windows: ${found_win} files"
+          echo "macOS:   ${found_mac} files"
+          echo "Linux:   ${found_linux} files"
+
+          if [ "${found_win}" -eq 0 ]; then echo "::error::Missing Windows binaries"; exit 1; fi
+          if [ "${found_mac}" -eq 0 ]; then echo "::error::Missing macOS binaries"; exit 1; fi
+          if [ "${found_linux}" -eq 0 ]; then echo "::error::Missing Linux binaries"; exit 1; fi
+
+      - name: Generate release notes
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          {
+            echo "## SunCode ${RELEASE_TAG}"
+            echo
+            echo "### 变更"
+            echo
+            # Extract changes since previous tag
+            PREV_TAG=$(git tag --sort=-v:refname | grep -A1 "${RELEASE_TAG}" | tail -1)
+            if [ -n "${PREV_TAG}" ]; then
+              git log "${PREV_TAG}..${RELEASE_TAG}" --pretty=format:"- %s" --no-merges
+            else
+              git log --pretty=format:"- %s" --no-merges
+            fi
+            echo
+            echo
+            echo "### 下载"
+            echo
+            echo "| 平台 | 文件 |"
+            echo "|------|------|"
+            cd release-assets
+            for f in *.exe *.dmg *.AppImage *.deb; do
+              [ -f "$f" ] || continue
+              echo "| $(echo "$f" | sed 's/\..*//') | $f |"
+            done
+          } > /tmp/release-notes.md
+          cat /tmp/release-notes.md
+
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: SunCode ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: SunCode ${{ env.RELEASE_TAG }}
           draft: true
-          generate_release_notes: true
+          body_path: /tmp/release-notes.md
           files: |
-            artifacts/*
+            release-assets/*
+
+  # ===== Stage 3: 发布 Draft Release =====
+  publish-release:
+    runs-on: ubuntu-latest
+    needs: stage-release
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # 检查 draft 是否存在
+          IS_DRAFT=$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft 2>/dev/null || echo "")
+          if [ "${IS_DRAFT}" == "" ]; then
+            echo "::error::Draft Release ${RELEASE_TAG} 不存在"
+            exit 1
+          fi
+          if [ "${IS_DRAFT}" == "false" ]; then
+            echo "::warning::Release ${RELEASE_TAG} 已经是公开状态"
+            exit 0
+          fi
+
+          gh release edit "${RELEASE_TAG}" --draft=false
+          echo "✅ 发布成功: ${RELEASE_TAG}"
+
+  # ===== 失败清理：删除 Draft Release =====
+  cleanup-draft:
+    runs-on: ubuntu-latest
+    needs: [build, stage-release, publish-release]
+    if: ${{ always() && needs.stage-release.result != 'skipped' && needs.stage-release.result == 'success' && needs.publish-release.result != 'success' }}
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Delete draft after failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          IS_DRAFT=$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft 2>/dev/null || echo "")
+          if [ "${IS_DRAFT}" == "true" ]; then
+            gh release delete "${RELEASE_TAG}" --yes
+            echo "🧹 已清理失败的 Draft Release: ${RELEASE_TAG}"
+          fi
