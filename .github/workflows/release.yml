@@ -50,29 +50,28 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npx electron-builder --config electron-builder.yml --publish never
 
-      - name: Generate SHA256 checksums
+      - name: Prepare artifacts
         shell: bash
-        if: matrix.os != 'windows-latest'
         run: |
-          cd release
-          sha256sum *.{exe,dmg,AppImage,deb} 2>/dev/null > SHA256SUMS || true
+          mkdir -p artifacts-upload
+          cp release/*.{exe,dmg,AppImage,deb} artifacts-upload/ 2>/dev/null || true
+          cd artifacts-upload
+          sha256sum * 2>/dev/null > SHA256SUMS || true
 
-      - name: Generate SHA256 checksums (Windows)
+      - name: Prepare artifacts (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          cd release
-          Get-FileHash -Algorithm SHA256 *.exe | ForEach-Object { "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)" } | Out-File -Encoding ASCII SHA256SUMS
+          New-Item -ItemType Directory -Force artifacts-upload | Out-Null
+          Copy-Item release\*.exe artifacts-upload\ -ErrorAction SilentlyContinue
+          cd artifacts-upload
+          Get-FileHash -Algorithm SHA256 * | ForEach-Object { "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)" } | Out-File -Encoding ASCII SHA256SUMS
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.os }}
-          path: |
-            release/*.exe
-            release/*.dmg
-            release/*.AppImage
-            release/*.deb
-            release/SHA256SUMS
+          path: artifacts-upload/*
           if-no-files-found: error
           retention-days: 14
 
@@ -97,14 +96,13 @@ jobs:
       - name: Validate artifacts
         run: |
           set -euo pipefail
-          cd release-assets
           echo "=== Artifacts ==="
-          ls -la
+          ls -la release-assets/
 
           # At least one binary per platform must exist
-          found_win=$(find . -maxdepth 1 -name "*.exe" | wc -l)
-          found_mac=$(find . -maxdepth 1 -name "*.dmg" | wc -l)
-          found_linux=$(find . -maxdepth 1 -name "*.AppImage" -o -name "*.deb" | wc -l)
+          found_win=$(find release-assets/ -maxdepth 1 -name "*.exe" | wc -l)
+          found_mac=$(find release-assets/ -maxdepth 1 -name "*.dmg" | wc -l)
+          found_linux=$(find release-assets/ -maxdepth 1 \( -name "*.AppImage" -o -name "*.deb" \) | wc -l)
 
           echo "Windows: ${found_win} files"
           echo "macOS:   ${found_mac} files"
@@ -135,10 +133,10 @@ jobs:
             echo
             echo "| 平台 | 文件 |"
             echo "|------|------|"
-            cd release-assets
-            for f in *.exe *.dmg *.AppImage *.deb; do
+            for f in release-assets/*.exe release-assets/*.dmg release-assets/*.AppImage release-assets/*.deb; do
               [ -f "$f" ] || continue
-              echo "| $(echo "$f" | sed 's/\..*//') | $f |"
+              name=$(basename "$f")
+              echo "| $(echo "$name" | sed 's/\..*//') | $name |"
             done
           } > /tmp/release-notes.md
           cat /tmp/release-notes.md
