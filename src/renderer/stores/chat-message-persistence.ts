@@ -4,6 +4,7 @@ interface PersistedAssistantInput {
   visibleContent: string;
   thinking?: string;
   toolCalls?: ToolCallContent[];
+  systemPrompt?: string;
   finalMessage?: Message;
 }
 
@@ -14,7 +15,7 @@ export function buildPersistedAssistantMessage(input: PersistedAssistantInput): 
       ? finalContent
       : buildContentBlocks(input.visibleContent, input.thinking);
 
-  return {
+  const message: Message = {
     role: 'assistant',
     content,
     toolCalls: input.toolCalls?.map((tc) => ({
@@ -26,7 +27,14 @@ export function buildPersistedAssistantMessage(input: PersistedAssistantInput): 
       result: tc.result,
       thinkingOffset: tc.thinkingOffset,
     })),
+    // Persist system prompt so call trace panel works across session switches
+    systemPrompt: input.systemPrompt,
   };
+
+  // Deep-clone to strip Vue reactivity proxies before IPC.
+  // Vue reactive objects contain internal Proxies and Symbol metadata
+  // that Electron's structured clone cannot serialize.
+  return JSON.parse(JSON.stringify(message)) as Message;
 }
 
 function buildContentBlocks(visibleContent: string, thinking?: string): Message['content'] {

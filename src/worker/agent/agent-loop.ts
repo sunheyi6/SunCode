@@ -154,6 +154,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // Prepend system message
   contextMessages.unshift({ role: 'system', content: systemPrompt });
 
+  // Emit system prompt for call trace panel
+  onStream({ type: 'system_prompt', systemPrompt });
+
   console.log(
     `[AgentLoop] Starting with model=${settings.activeProvider}/${settings.activeModel}, tools=${tools.length}`,
   );

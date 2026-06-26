@@ -24,6 +24,8 @@ export interface ChatMessage {
   turnCount?: number;
   /** Max turns for this session. */
   maxTurns?: number;
+  /** System prompt for the current run (for call trace panel). */
+  systemPrompt?: string;
 }
 
 let msgCounter = 0;
@@ -34,9 +36,17 @@ function nextId(): string {
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([]);
   const isStreaming = ref(false);
+  const showCallTrace = ref(false);
   let currentAssistantMsg: ChatMessage | null = null;
   let currentText = '';
   let currentThinking = '';
+
+  /** ID of the renderer's currently visible session. */
+  let activeSessionId: string | null = null;
+  /** ID of the session that originated the current agent run. */
+  let streamingSessionId: string | null = null;
+  /** In-progress assistant messages for sessions the user left mid-stream. */
+  const pendingAssistantMessages = new Map<string, ChatMessage>();
 
   function addUserMessage(text: string): void {
     messages.value.push({
@@ -64,13 +74,94 @@ export const useChatStore = defineStore('chat', () => {
     // instance so stream mutations update the rendered message.
     currentAssistantMsg = messages.value[messages.value.length - 1];
     isStreaming.value = true;
+    streamingSessionId = activeSessionId;
+  }
+
+  /** Return the assistant message that should receive stream/tool events.
+   *  If the user switched to another session mid-stream, updates are applied
+   *  to the pending snapshot for the originating session so nothing is lost. */
+  function activeAssistantMessage(): ChatMessage | null {
+    if (currentAssistantMsg) return currentAssistantMsg;
+    if (!streamingSessionId) return null;
+    return pendingAssistantMessages.get(streamingSessionId) ?? null;
   }
 
   function handleStreamEvent(event: StreamEvent): void {
-    const msg = currentAssistantMsg;
+    // 'done' must be processed even when currentAssistantMsg is null
+    // (user switched sessions mid-run). It triggers saveMessage which
+    // persists the response to the correct session via promptSessionId.
+    if (event.type === 'done') {
+      const msg = activeAssistantMessage();
+      console.log(
+        `[ChatStore] done event: msg=${!!msg} fromPending=${!!(!currentAssistantMsg && msg)} streamingSid=${streamingSessionId?.slice(-8) ?? 'null'} curSid=${activeSessionId?.slice(-8) ?? 'null'}`,
+      );
+      if (msg) {
+        if (event.message) {
+          const finalContent = event.message.content;
+          if (typeof finalContent === 'string') {
+            if (!msg.content) msg.content = finalContent;
+          } else {
+            const finalText = finalContent
+              .filter((block) => block.type === 'text')
+              .map((block) => ('text' in block ? block.text : ''))
+              .join('');
+            const finalThinking = finalContent
+              .filter((block) => block.type === 'thinking')
+              .map((block) => ('text' in block ? block.text : ''))
+              .join('');
+            if (finalText && (!msg.content || isIncompleteProgressText(msg.content))) {
+              msg.content = finalText;
+            } else if (!msg.content && finalThinking) {
+              msg.content = finalThinking;
+            } else if (
+              finalText &&
+              msg.content &&
+              msg.content.length < 60 &&
+              finalText.length > msg.content.length
+            ) {
+              msg.content = finalText;
+            }
+            if (finalThinking && !msg.thinking) {
+              msg.thinking = finalThinking;
+            }
+          }
+        }
+        msg.isStreaming = false;
+        isStreaming.value = false;
+        void bridge.saveMessage(
+          buildPersistedAssistantMessage({
+            visibleContent: msg.content,
+            thinking: msg.thinking,
+            toolCalls: msg.toolCalls,
+            systemPrompt: msg.systemPrompt,
+            finalMessage: event.message,
+          }),
+        );
+        currentAssistantMsg = null;
+        currentText = '';
+        currentThinking = '';
+        if (streamingSessionId) {
+          pendingAssistantMessages.delete(streamingSessionId);
+          streamingSessionId = null;
+        }
+      } else if (event.message) {
+        // Session was switched mid-stream and we have no snapshot.
+        // Still persist the final message using the raw event data.
+        console.log('[ChatStore] done FALLBACK: saving raw event.message (toolCalls/systemPrompt lost)');
+        isStreaming.value = false;
+        void bridge.saveMessage(event.message);
+        streamingSessionId = null;
+      }
+      return;
+    }
+
+    const msg = activeAssistantMessage();
     if (!msg) return;
 
     switch (event.type) {
+      case 'system_prompt':
+        msg.systemPrompt = event.systemPrompt || '';
+        break;
       case 'turn_start':
         msg.turnCount = event.turnCount ?? 0;
         msg.maxTurns = event.maxTurns ?? 0;
@@ -112,66 +203,6 @@ export const useChatStore = defineStore('chat', () => {
       case 'toolcall_end':
         // Tool call completed
         break;
-      case 'done':
-        if (event.message) {
-          const finalContent = event.message.content;
-          if (typeof finalContent === 'string') {
-            if (!msg.content) msg.content = finalContent;
-          } else {
-            // Extract text and thinking blocks from the final message.
-            // The agent loop may have merged thinking into text when the model
-            // produced reasoning-heavy but text-light output (common with
-            // DeepSeek-like reasoning models).
-            const finalText = finalContent
-              .filter((block) => block.type === 'text')
-              .map((block) => ('text' in block ? block.text : ''))
-              .join('');
-            const finalThinking = finalContent
-              .filter((block) => block.type === 'thinking')
-              .map((block) => ('text' in block ? block.text : ''))
-              .join('');
-
-            // Use final text if we didn't receive any streaming text deltas
-            if (finalText && (!msg.content || isIncompleteProgressText(msg.content))) {
-              msg.content = finalText;
-            } else if (!msg.content && finalThinking) {
-              // No text at all — use thinking as the visible answer
-              msg.content = finalThinking;
-            } else {
-              // Content was already streamed (text_delta). But if the
-              // streamed content is trivially short and the final message
-              // has merged thinking into text, prefer the merged version.
-              if (
-                finalText &&
-                msg.content &&
-                msg.content.length < 60 &&
-                finalText.length > msg.content.length
-              ) {
-                msg.content = finalText;
-              }
-            }
-
-            // Update thinking if the final message has thinking blocks we
-            // didn't receive during streaming (e.g. from task_complete path)
-            if (finalThinking && !msg.thinking) {
-              msg.thinking = finalThinking;
-            }
-          }
-        }
-        msg.isStreaming = false;
-        isStreaming.value = false;
-        void bridge.saveMessage(
-          buildPersistedAssistantMessage({
-            visibleContent: msg.content,
-            thinking: msg.thinking,
-            toolCalls: msg.toolCalls,
-            finalMessage: event.message,
-          }),
-        );
-        currentAssistantMsg = null;
-        currentText = '';
-        currentThinking = '';
-        break;
       case 'error':
         msg.content += `\n\n❌ Error: ${event.error || 'Unknown error'}`;
         msg.isStreaming = false;
@@ -179,13 +210,17 @@ export const useChatStore = defineStore('chat', () => {
         currentAssistantMsg = null;
         currentText = '';
         currentThinking = '';
+        if (streamingSessionId) {
+          pendingAssistantMessages.delete(streamingSessionId);
+          streamingSessionId = null;
+        }
         break;
     }
   }
 
   /** Wire up tool execution start from worker — sets the tool call to running. */
   function startToolExecution(toolCall: ToolCallContent): void {
-    const msg = currentAssistantMsg;
+    const msg = activeAssistantMessage();
     if (!msg) return;
     if (!msg.toolCalls) msg.toolCalls = [];
     let target = msg.toolCalls.find((t) => t.id === toolCall.id);
@@ -235,7 +270,7 @@ export const useChatStore = defineStore('chat', () => {
 
   /** Wire up tool execution result from worker — attaches output/error to the tool call. */
   function endToolExecution(result: ToolResult): void {
-    const msg = currentAssistantMsg;
+    const msg = activeAssistantMessage();
     if (!msg?.toolCalls) return;
     const tc = msg.toolCalls.find((t) => t.id === result.toolCallId);
     if (tc) {
@@ -260,7 +295,7 @@ export const useChatStore = defineStore('chat', () => {
     _agent: string,
     delta: SubagentProgressDelta,
   ): void {
-    const msg = currentAssistantMsg;
+    const msg = activeAssistantMessage();
     if (!msg?.toolCalls) return;
     // Find the subagent tool call (there should be only one running at a time)
     const subTc = msg.toolCalls.find((t) => t.name === 'subagent' && t.status === 'running');
@@ -304,6 +339,19 @@ export const useChatStore = defineStore('chat', () => {
     currentText = '';
     currentThinking = '';
     isStreaming.value = false;
+    if (streamingSessionId) {
+      pendingAssistantMessages.delete(streamingSessionId);
+      streamingSessionId = null;
+    }
+  }
+
+  function setActiveSessionId(id: string | null): void {
+    activeSessionId = id;
+  }
+
+  function snapshotStreamingAssistant(): void {
+    if (!activeSessionId || !currentAssistantMsg) return;
+    pendingAssistantMessages.set(activeSessionId, currentAssistantMsg);
   }
 
   function clearMessages(): void {
@@ -314,8 +362,16 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming.value = false;
   }
 
-  function loadMessages(sessionMessages: Message[]): void {
+  function loadMessages(sessionId: string, sessionMessages: Message[]): void {
+    // If we are leaving a session with a streaming assistant message,
+    // keep the partial message so it can be restored when the user comes back.
+    console.log(
+      `[ChatStore] loadMessages id=${sessionId.slice(-8)} count=${sessionMessages?.length ?? 0} roles=${sessionMessages?.map(m => m.role).join(',') || '(none)'}`,
+    );
+    snapshotStreamingAssistant();
     clearMessages();
+
+    activeSessionId = sessionId;
     messages.value = sessionMessages
       .filter((message) => message.role === 'user' || message.role === 'assistant')
       .map((message) => {
@@ -340,13 +396,33 @@ export const useChatStore = defineStore('chat', () => {
           toolCalls: message.toolCalls,
           timestamp: Date.now(),
           isStreaming: false,
+          systemPrompt: message.systemPrompt,
         };
       });
+
+    // Restoring an in-progress assistant message for this session lets the user
+    // see ongoing streaming / tool calls (or the completed answer waiting for
+    // the final done event) immediately after switching back.
+    const pending = pendingAssistantMessages.get(sessionId);
+    if (pending) {
+      messages.value.push(pending);
+      currentAssistantMsg = pending;
+      currentText = pending.content;
+      currentThinking = pending.thinking || '';
+      isStreaming.value = pending.isStreaming;
+    }
+  }
+
+  function toggleCallTrace(): void {
+    showCallTrace.value = !showCallTrace.value;
   }
 
   return {
     messages,
     isStreaming,
+    showCallTrace,
+    toggleCallTrace,
+    setActiveSessionId,
     addUserMessage,
     startAssistantMessage,
     handleStreamEvent,

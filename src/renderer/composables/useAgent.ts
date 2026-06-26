@@ -25,6 +25,7 @@ export function useAgent() {
 
   function dispatch(text: string): void {
     chatStore.addUserMessage(text);
+    chatStore.setActiveSessionId(sessionsStore.activeSessionId ?? '');
     chatStore.startAssistantMessage();
     void bridge
       .saveMessage({
@@ -47,12 +48,6 @@ export function useAgent() {
   function setupListeners(): void {
     cleanups.push(
       bridge.onStreamEvent((event) => {
-        if (event.type === 'text_start' || event.type === 'text_delta') {
-          // Start assistant message on first text
-          if (!chatStore.isStreaming && event.type === 'text_start') {
-            chatStore.startAssistantMessage();
-          }
-        }
         chatStore.handleStreamEvent(event);
       }),
     );
@@ -167,6 +162,8 @@ export function useAgent() {
   }
 
   function continueAgent(): void {
+    chatStore.setActiveSessionId(sessionsStore.activeSessionId ?? '');
+    chatStore.startAssistantMessage();
     bridge.continue();
   }
 

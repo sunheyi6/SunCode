@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useSessionsStore } from '../../stores/sessions';
+import { useChatStore } from '../../stores/chat';
 import { bridge } from '../../api/bridge';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
 
 const sessionsStore = useSessionsStore();
+const chatStore = useChatStore();
 const gitBranch = ref<string | null>(null);
 const gitError = ref(false);
 
@@ -172,6 +174,31 @@ onMounted(() => {
 
 .header-git.no-repo {
   opacity: 0.3;
+}
+
+.trace-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--border-radius-sm, 4px);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.trace-btn:hover {
+  background: var(--color-surface-hover, #eaeaea);
+  color: var(--color-text);
+}
+
+.trace-btn.active {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
 }
 
 .more-btn {

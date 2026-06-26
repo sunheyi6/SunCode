@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { useChatStore } from '../../stores/chat';
 import ChatPanel from '../chat/ChatPanel.vue';
+import CallTracePanel from '../chat/CallTracePanel.vue';
 import ConversationSidebar from './ConversationSidebar.vue';
 import GitPanel from './GitPanel.vue';
 import StatusBar from './StatusBar.vue';
 import SettingsPanel from '../settings/SettingsPanel.vue';
 
+const chatStore = useChatStore();
+
 const sidebarWidth = ref(260);
+const tracePanelWidth = ref(380);
 const isResizing = ref(false);
+const isResizingTrace = ref(false);
 const showSettings = ref(false);
 
 function startResize(e: MouseEvent): void {
@@ -29,6 +35,35 @@ function startResize(e: MouseEvent): void {
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
+
+function startTraceResize(e: MouseEvent): void {
+  isResizingTrace.value = true;
+  const startX = e.clientX;
+  const startWidth = tracePanelWidth.value;
+
+  function onMove(moveEvent: MouseEvent): void {
+    const delta = startX - moveEvent.clientX;
+    tracePanelWidth.value = Math.max(280, Math.min(700, startWidth + delta));
+  }
+
+  function onUp(): void {
+    isResizingTrace.value = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+/** System prompt from the last assistant message. */
+const traceSystemPrompt = computed(() => {
+  const msgs = chatStore.messages;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i]?.systemPrompt) return msgs[i]!.systemPrompt!;
+  }
+  return '';
+});
 </script>
 
 <template>
@@ -53,7 +88,32 @@ function startResize(e: MouseEvent): void {
       <main class="main-content">
         <GitPanel />
         <ChatPanel />
+
+        <!-- 调用轨迹 右侧边缘竖条标签 -->
+        <div
+          class="trace-edge-tab"
+          :class="{ active: chatStore.showCallTrace }"
+          :title="chatStore.showCallTrace ? '关闭调用轨迹' : '打开调用轨迹'"
+          @click="chatStore.toggleCallTrace()"
+        >
+          {{ chatStore.showCallTrace ? '◀' : '调用轨迹' }}
+        </div>
       </main>
+
+      <!-- Call Trace Panel (right side) -->
+      <template v-if="chatStore.showCallTrace">
+        <div
+          class="resize-handle trace-resize"
+          :class="{ active: isResizingTrace }"
+          @mousedown="startTraceResize"
+        />
+        <CallTracePanel
+          :messages="chatStore.messages"
+          :system-prompt="traceSystemPrompt"
+          :style="{ width: tracePanelWidth + 'px' }"
+          @close="chatStore.toggleCallTrace()"
+        />
+      </template>
     </div>
 
     <!-- Status Bar -->
@@ -146,5 +206,41 @@ function startResize(e: MouseEvent): void {
   overflow: hidden;
   background: var(--color-bg);
   position: relative;
+}
+
+/* ── 调用轨迹 右侧边缘标签 ── */
+.trace-edge-tab {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  padding: 10px 3px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--border-color);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  writing-mode: vertical-rl;
+  letter-spacing: 2px;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+
+.trace-edge-tab:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.trace-edge-tab.active {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 </style>

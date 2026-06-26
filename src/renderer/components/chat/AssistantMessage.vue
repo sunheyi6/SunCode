@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
+import CompactToolBar from '../tools/CompactToolBar.vue';
 import ToolOperationList from '../tools/ToolOperationList.vue';
 import StreamingText from './StreamingText.vue';
+
+// Note: The "调用轨迹" toggle has moved to ChatHeader (global right-side panel).
+// CompactToolBar remains here as the default collapsed view of tool calls during streaming.
 
 const props = defineProps<{
   message: ChatMessage;
@@ -27,6 +31,56 @@ const autoExpandThinking = computed(() => {
 
 const copied = ref(false);
 const thinkingBodyRef = ref<HTMLElement | null>(null);
+
+// ── Elapsed time tracking ──
+const elapsedSeconds = ref(0);
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+
+function startElapsedTimer(): void {
+  stopElapsedTimer();
+  elapsedSeconds.value = Math.round((Date.now() - props.message.timestamp) / 1000);
+  elapsedTimer = setInterval(() => {
+    elapsedSeconds.value = Math.round((Date.now() - props.message.timestamp) / 1000);
+  }, 1000);
+}
+
+function stopElapsedTimer(): void {
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
+}
+
+watch(
+  () => props.message.isStreaming,
+  (streaming) => {
+    if (streaming) {
+      startElapsedTimer();
+    } else {
+      // Final snapshot when streaming ends
+      elapsedSeconds.value = Math.round((Date.now() - props.message.timestamp) / 1000);
+      stopElapsedTimer();
+    }
+  },
+  { immediate: true },
+);
+
+onMounted(() => {
+  if (props.message.isStreaming) startElapsedTimer();
+});
+
+onBeforeUnmount(() => {
+  stopElapsedTimer();
+});
+
+/** Format elapsed seconds as a human-readable string. */
+const formattedElapsed = computed(() => {
+  const s = elapsedSeconds.value;
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const remain = s % 60;
+  return remain > 0 ? `${m}m${remain}s` : `${m}m`;
+});
 
 // Auto-scroll thinking body to bottom as new text streams in
 watch(
@@ -100,37 +154,48 @@ const thinkingTimeline = computed(() => {
 });
 
 /** Rich summary line for the thinking section.
- *  - Streaming: shows live progress (current tool, completion count).
- *  - Collapsed: shows a compact list of tools that ran. */
+ *
+ *  Design intent:
+ *  - Live streaming: show what's happening NOW (tool name, completion count) + elapsed time.
+ *    We intentionally omit the raw agent-level turn counter here — it's an internal metric
+ *    that reads as "X rounds of thinking" to users, when it's really "X API calls to get
+ *    the job done." Each tool call triggers another LLM round, so a 5-tool task shows "第6轮"
+ *    and feels like the AI is struggling, not efficiently working.
+ *  - Collapsed (done): show request count + elapsed + tool list. The request count gives
+ *    the user a sense of how much work was done without the "still going?" anxiety of the
+ *    live counter. */
 const thinkingSummary = computed(() => {
   const calls = props.message.toolCalls ?? [];
   const running = calls.find((t) => t.status === 'running');
   const done = calls.filter((t) => t.status === 'done' || t.status === 'error').length;
   const hasAnyDone = done > 0;
   const hasThinkingText = Boolean(props.message.thinking);
-  const turn = props.message.turnCount ?? 0;
-  const max = props.message.maxTurns ?? 0;
-  const turnLabel = turn > 0 ? `第${turn}轮` : '';
+  const timeLabel = `⏱ ${formattedElapsed.value}`;
 
   // --- Streaming / working ---
   if (props.message.isStreaming) {
-    // A tool is currently executing
+    // A tool is currently executing — show what's running
     if (running) {
-      return `🧠 ${turnLabel} ${running.name} ${running.arguments ? running.arguments.slice(0, 60) : ''}...`;
+      const shortArgs = running.arguments ? running.arguments.slice(0, 50) : '';
+      return `🧠 ${running.name}${shortArgs ? ` ${shortArgs}` : ''}... ${timeLabel}`;
     }
-    // Tools have completed, waiting for next round of thinking
+    // Tools have completed, waiting for next round of thinking — show completion progress
     if (hasAnyDone) {
-      return `🧠 ${turnLabel} 分析结果... (${done}/${calls.length} 完成)`;
+      return `🧠 分析结果 · ${done}/${calls.length} 完成 ${timeLabel}`;
     }
     // Pure thinking / waiting for first tool
-    if (hasThinkingText) return `🧠 ${turnLabel} 正在思考...`.trim();
-    return `🧠 ${turnLabel} 等待模型响应...`.trim();
+    if (hasThinkingText) return `🧠 正在思考... ${timeLabel}`;
+    return `🧠 等待模型响应... ${timeLabel}`;
   }
 
   // --- Collapsed (done) ---
   const parts: string[] = ['🧠 思考过程'];
-  if (turn > 0 && max > 0) {
-    parts.push(` (${turn} 轮)`);
+  const turn = props.message.turnCount ?? 0;
+  if (turn > 0) {
+    parts.push(`${turn}次请求`);
+  }
+  if (elapsedSeconds.value > 0) {
+    parts.push(timeLabel);
   }
   if (calls.length > 0) {
     const names = calls
@@ -140,7 +205,7 @@ const thinkingSummary = computed(() => {
     const more = calls.length > 3 ? ` 等${calls.length}项` : '';
     parts.push(`· ${names}${more}`);
   }
-  return parts.join(' ');
+  return parts.join(' · ');
 });
 
 async function copyContent() {
@@ -170,28 +235,31 @@ async function copyContent() {
 <template>
   <div class="assistant-message">
     <div class="message-body">
-      <!-- 流式进行中：思考过程内联展示，无折叠，如正文一样可见 -->
+      <!-- 流式进行中：只显示关键步骤（工具折叠 + 文件读取合并） -->
+      <!-- 完整调用轨迹见右侧 CallTracePanel（顶部 📋 按钮打开） -->
       <div v-if="hasThinking && message.isStreaming" class="thinking-live">
         <div class="thinking-live-header">
           <span class="thinking-live-dot" />
           <span>{{ thinkingSummary }}</span>
         </div>
-        <div ref="thinkingBodyRef" class="thinking-live-body">
-          <template v-for="(entry, i) in thinkingTimeline" :key="i">
-            <StreamingText
-              v-if="entry.type === 'thinking'"
-              :text="entry.text"
-              :is-streaming="true"
-            />
-            <ToolOperationList
-              v-else-if="entry.type === 'tool'"
-              :calls="entry.calls"
-            />
-          </template>
+
+        <!-- No tool calls yet: pure thinking — show thinking text directly -->
+        <div
+          v-if="(message.toolCalls?.length ?? 0) === 0 && message.thinking"
+          ref="thinkingBodyRef"
+          class="thinking-live-body"
+        >
+          <StreamingText :text="message.thinking" :is-streaming="true" />
         </div>
+
+        <!-- Has tool calls: compact one-line summaries (full detail in right panel) -->
+        <CompactToolBar
+          v-if="(message.toolCalls?.length ?? 0) > 0"
+          :calls="message.toolCalls ?? []"
+        />
       </div>
 
-      <!-- 完成后：思考过程折叠（文本过短时自动展开） -->
+      <!-- 完成后：思考过程折叠（文本过短时自动展开），包含完整调用轨迹 -->
       <details v-else-if="hasThinking" class="thinking-section" :open="autoExpandThinking">
         <summary class="thinking-summary">{{ thinkingSummary }}</summary>
         <div class="thinking-content">

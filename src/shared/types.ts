@@ -44,6 +44,8 @@ export interface Message {
   toolCallId?: string;
   /** Only on assistant messages with tool calls */
   toolCalls?: ToolCallContent[];
+  /** System prompt for this run (persisted for call trace panel). */
+  systemPrompt?: string;
 }
 
 // ===== Tool Types =====
@@ -368,7 +370,8 @@ export type StreamEventType =
   | 'turn_end'
   | 'start'
   | 'done'
-  | 'error';
+  | 'error'
+  | 'system_prompt';
 
 /** A streaming event from the LLM */
 export interface StreamEvent {
@@ -386,6 +389,8 @@ export interface StreamEvent {
   message?: Message; // final message on 'done'
   /** Unique identifier for the current agent run (LLM invocation chain). */
   runId?: string;
+  /** System prompt text (emitted once at the start of each agent run). */
+  systemPrompt?: string;
 }
 
 // ===== Run Event Types =====

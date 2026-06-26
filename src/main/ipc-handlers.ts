@@ -1,6 +1,5 @@
-import { watch as fsWatch } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, watch as fsWatch, readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,18 +17,18 @@ import type {
   WorkerOutMessage,
 } from '@shared/types';
 import { app, dialog, ipcMain } from 'electron';
-import type { WindowManager } from './window-manager';
 import { getGitInfo } from './git-info';
+import { recoverInterruptedSessions } from './recovery';
+import { appendEvent, getEvents, listRuns, startRun } from './run-store';
 import {
+  deleteSession,
+  deleteSessions,
   initSessionStore,
   loadAllSessions,
   loadSession,
   saveSession,
-  deleteSession,
-  deleteSessions,
 } from './session-store';
-import { appendEvent, startRun, endRun, listRuns, getEvents } from './run-store';
-import { recoverInterruptedSessions } from './recovery';
+import type { WindowManager } from './window-manager';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -78,6 +77,11 @@ for (const [provider, key] of Object.entries(currentSettings.envApiKeys)) {
 const sessions: Map<string, SessionMeta> = new Map();
 const sessionMessages: Map<string, Message[]> = new Map();
 let currentSessionId: string | null = null;
+/** The session that originated the current agent prompt (may differ from
+ *  currentSessionId if the user switched sessions mid-run). Used by
+ *  saveMessage to ensure assistant responses land in the correct session.
+ *  User messages ignore this and always use currentSessionId. */
+let promptSessionId: string | null = null;
 
 // ===== Agent Worker Management =====
 
@@ -256,6 +260,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.on('agent:prompt', (_event, text: string) => {
     try {
       console.log('[Main] agent:prompt received:', text.slice(0, 80));
+      promptSessionId = currentSessionId; // Snap the owning session
       sendToWorker({ type: 'prompt', text });
     } catch (err) {
       console.error('[Main] agent:prompt failed:', (err as Error).message);
@@ -383,19 +388,30 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.handle('session:load', async (_event, id: string) => {
     try {
       currentSessionId = id;
+      // DO NOT clear promptSessionId here — a running agent may still need it
+      // to save its response to the correct session.
       let messages = sessionMessages.get(id);
       let meta = sessions.get(id);
 
-      if (!messages || messages.length === 0) {
-        const disk = await loadSession(id);
-        if (disk) {
+      const memCount = messages?.length ?? -1;
+      const disk = await loadSession(id);
+      const diskCount = disk?.messages.length ?? -1;
+
+      if (disk) {
+        // Prefer disk when it has more persisted messages than memory.
+        // This guards against stale in-memory copies after mid-run switches.
+        if (!messages || disk.messages.length > messages.length) {
           messages = disk.messages;
-          meta = disk.meta;
-          sessions.set(id, meta);
-          sessionMessages.set(id, messages);
         }
+        meta = disk.meta;
+        sessions.set(id, meta);
+        sessionMessages.set(id, messages);
       }
 
+      const resultCount = messages?.length ?? 0;
+      console.log(
+        `[Main] session:load id=${id.slice(-8)} mem=${memCount} disk=${diskCount} result=${resultCount} diskExists=${!!disk}`,
+      );
       messages = messages || [];
       sendToWorker({ type: 'setMessages', messages });
       if (meta) {
@@ -410,16 +426,29 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.handle('session:saveMessage', async (_event, message: Message) => {
     try {
-      if (!currentSessionId) {
-        console.log('[Main] saveMessage: SKIP (no currentSessionId)');
+      // Role-based session targeting:
+      // - User messages always go to currentSessionId (the session the user is viewing).
+      // - Assistant/system messages use promptSessionId (the session that originated
+      //   the agent prompt, which survives session switches mid-run).
+      // This prevents user messages from being routed to a stale promptSessionId
+      // when the user switches sessions and sends a new message.
+      const targetSession =
+        message.role === 'user'
+          ? currentSessionId
+          : promptSessionId || currentSessionId;
+      if (!targetSession) {
+        console.log('[Main] saveMessage: SKIP (no session)');
         return;
       }
-      const msgs = sessionMessages.get(currentSessionId) || [];
+      const msgs = sessionMessages.get(targetSession) || [];
+      console.log(
+        `[Main] saveMessage role=${message.role} target=${targetSession.slice(-8)} cur=${currentSessionId?.slice(-8) ?? 'null'} prompt=${promptSessionId?.slice(-8) ?? 'null'} before=${msgs.length}`,
+      );
       const isFirstMessage = msgs.length === 0;
       msgs.push(message);
-      sessionMessages.set(currentSessionId, msgs);
+      sessionMessages.set(targetSession, msgs);
 
-      const meta = sessions.get(currentSessionId);
+      const meta = sessions.get(targetSession);
       if (meta) {
         meta.updated = new Date().toISOString();
         meta.messageCount = msgs.length;
@@ -840,7 +869,7 @@ function extractTitle(message: Message): string | null {
     .replace(/^[#>*-]+/, '') // strip leading markdown markers
     .replace(/`{1,3}[^`]*`{1,3}/g, '') // strip inline code
     .replace(/[*_~]{1,2}/g, '') // strip bold/italic/strikethrough markers
-    .replace(/[\[\]\(\)]/g, '') // strip link brackets
+    .replace(/[[\]()]/g, '') // strip link brackets
     .replace(/["「」『』"']/g, '') // strip quotes
     .replace(/[.。,，!！?？;；:：、]+$/, '') // strip trailing punctuation
     .replace(/\s+/g, ' ') // collapse whitespace

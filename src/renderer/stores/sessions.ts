@@ -28,14 +28,16 @@ export const useSessionsStore = defineStore('sessions', () => {
     const session = await bridge.createSession(name, workingDirectory);
     sessions.value.unshift(session);
     activeSessionId.value = session.id;
-    useChatStore().clearMessages();
+    useChatStore().loadMessages(session.id, []);
   }
 
   async function selectSession(id: string): Promise<void> {
     if (id === activeSessionId.value) return;
+    console.log(`[Sessions] selectSession id=${id.slice(-8)}`);
     const messages = await bridge.loadSession(id);
+    console.log(`[Sessions] selectSession loaded ${messages?.length ?? 0} messages`);
     activeSessionId.value = id;
-    useChatStore().loadMessages(messages);
+    useChatStore().loadMessages(id, messages);
   }
 
   async function init(): Promise<void> {
@@ -57,6 +59,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         await selectSession(sortedSessions.value[0].id);
       } else {
         activeSessionId.value = null;
+        useChatStore().setActiveSessionId(null);
         useChatStore().clearMessages();
       }
     }
@@ -70,6 +73,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         await selectSession(sortedSessions.value[0].id);
       } else {
         activeSessionId.value = null;
+        useChatStore().setActiveSessionId(null);
         useChatStore().clearMessages();
       }
     }
