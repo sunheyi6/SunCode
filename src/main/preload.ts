@@ -297,6 +297,13 @@ const suncodeAPI = {
   respondConfirm(toolCallId: string, confirmed: boolean): void {
     ipcRenderer.send('agent:confirm-response', toolCallId, confirmed);
   },
+
+  /** Listen for session metadata updates (e.g. AI-generated title) */
+  onSessionUpdated(callback: (meta: SessionMeta) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, meta: SessionMeta): void => callback(meta);
+    ipcRenderer.on('session:updated', handler);
+    return () => ipcRenderer.removeListener('session:updated', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('suncode', suncodeAPI);

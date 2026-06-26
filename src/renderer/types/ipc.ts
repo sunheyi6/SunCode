@@ -100,6 +100,9 @@ declare global {
       // Permission confirmation
       onConfirmRequest(callback: (request: { toolCallId: string; toolName: string; description: string }) => void): () => void;
       respondConfirm(toolCallId: string, confirmed: boolean): void;
+
+      // Session updates (e.g. AI-generated title)
+      onSessionUpdated(callback: (meta: SessionMeta) => void): () => void;
     };
   }
 }

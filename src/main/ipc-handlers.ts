@@ -470,8 +470,11 @@ export function registerIpcHandlers(wm: WindowManager): void {
         meta.updated = new Date().toISOString();
         meta.messageCount = msgs.length;
         if (isFirstMessage && message.role === 'user') {
+          // Quick fallback title from the first message text
           const title = extractTitle(message);
           if (title) meta.name = title;
+          // Fire-and-forget: AI-generated title in the background
+          void generateTitleWithAI(targetSession, message);
         }
         await saveSession(meta, msgs);
       }
@@ -913,6 +916,114 @@ function extractTitle(message: Message): string | null {
   }
 
   return cleaned || null;
+}
+
+/**
+ * Generate a session title using AI via the configured model.
+ * Runs asynchronously and updates the session name when complete.
+ */
+async function generateTitleWithAI(
+  targetSession: string,
+  userMessage: Message,
+): Promise<void> {
+  const text = extractText(userMessage);
+  if (!text) return;
+
+  try {
+    const provider = currentSettings.activeProvider || 'deepseek';
+    const modelId = currentSettings.activeModel || 'deepseek-v4-flash';
+
+    const pi = await import('@earendil-works/pi-ai');
+    const model = (pi as unknown as Record<string, unknown>).getModel
+      ? ((pi as unknown as { getModel: (p: string, m: string) => unknown }).getModel(
+          provider,
+          modelId,
+        ))
+      : null;
+
+    if (!model) {
+      console.log('[Main] Title AI: model not available');
+      return;
+    }
+
+    const stream = (
+      pi as unknown as {
+        streamSimple: (
+          m: unknown,
+          ctx: Record<string, unknown>,
+          opts?: Record<string, unknown>,
+        ) => AsyncIterable<{ type: string; delta?: string }>;
+      }
+    ).streamSimple(
+      model,
+      {
+        systemPrompt: TITLE_GENERATION_PROMPT,
+        messages: [{ role: 'user', content: text }],
+        tools: [],
+      },
+      { reasoning: 'minimal' },
+    );
+
+    let raw = '';
+    for await (const event of stream) {
+      if (event.type === 'text_delta' && event.delta) {
+        raw += event.delta;
+      }
+    }
+
+    raw = raw.trim();
+    // Parse JSON from the response (model may wrap in markdown code fences)
+    const jsonMatch = raw.match(/\{[\s\S]*"title"[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.log('[Main] Title AI: no JSON found in response:', raw.slice(0, 80));
+      return;
+    }
+
+    let title: string;
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as { title?: string };
+      title = (parsed.title || '').trim();
+    } catch {
+      console.log('[Main] Title AI: JSON parse failed:', jsonMatch[0].slice(0, 80));
+      return;
+    }
+
+    if (!title) {
+      console.log('[Main] Title AI: empty title');
+      return;
+    }
+
+    // Clean up: remove markdown, quotes, trailing punctuation
+    title = title.replace(/^["']|["']$/g, '').replace(/[.。,，!！?？;；:：]+$/, '').trim();
+    const maxLen = 50;
+    if (title.length > maxLen) {
+      title = title.slice(0, maxLen).replace(/\s+\S*$/, '');
+    }
+
+    // Update session meta
+    const meta = sessions.get(targetSession);
+    if (meta) {
+      meta.name = title;
+      await saveSession(meta, sessionMessages.get(targetSession) || []);
+
+      // Notify renderer
+      const mainWindow = windowManager?.getMainWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('session:updated', meta);
+      }
+    }
+    console.log(`[Main] AI title generated: "${title}"`);
+  } catch (err) {
+    console.error('[Main] Title generation failed:', (err as Error).message);
+  }
+}
+
+function extractText(message: Message): string {
+  if (typeof message.content === 'string') return message.content;
+  return message.content
+    .filter((block) => block.type === 'text')
+    .map((block) => ('text' in block ? block.text : ''))
+    .join(' ');
 }
 
 function getProviderEnvKey(provider: string): string | undefined {

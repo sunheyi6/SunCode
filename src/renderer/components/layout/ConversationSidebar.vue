@@ -12,6 +12,16 @@ const selectedIds = ref<Set<string>>(new Set());
 
 onMounted(() => {
   void sessionsStore.init();
+
+  // Listen for AI-generated title updates
+  bridge.onSessionUpdated((meta) => {
+    const idx = sessionsStore.sessions.findIndex((s) => s.id === meta.id);
+    if (idx !== -1) {
+      sessionsStore.sessions[idx] = meta;
+      // Trigger reactivity
+      sessionsStore.sessions = [...sessionsStore.sessions];
+    }
+  });
 });
 
 async function handleCreateSession(): Promise<void> {

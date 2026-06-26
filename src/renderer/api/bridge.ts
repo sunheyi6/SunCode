@@ -201,6 +201,11 @@ export const bridge = {
     api().respondConfirm(toolCallId, confirmed);
   },
 
+  // ===== Session Updates =====
+  onSessionUpdated(callback: (meta: SessionMeta) => void): () => void {
+    return api().onSessionUpdated(callback);
+  },
+
   // ===== Window =====
   setTitleBarOverlayText(text: string): void {
     api().setTitleBarOverlayText(text);
