@@ -395,6 +395,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       await saveSession(meta, []);
       currentSessionId = id;
       sendToWorker({ type: 'setMessages', messages: [] });
+      sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
       return meta;
     } catch (err) {
       console.error('[Main] session:create failed:', (err as Error).message);
