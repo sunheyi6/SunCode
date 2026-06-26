@@ -284,6 +284,19 @@ const suncodeAPI = {
     ipcRenderer.on('agent:goal-event', handler);
     return () => ipcRenderer.removeListener('agent:goal-event', handler);
   },
+
+  /** Listen for tool confirmation requests (confirm_changes mode) */
+  onConfirmRequest(callback: (request: { toolCallId: string; toolName: string; description: string }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, request: { toolCallId: string; toolName: string; description: string }): void =>
+      callback(request);
+    ipcRenderer.on('agent:confirm-request', handler);
+    return () => ipcRenderer.removeListener('agent:confirm-request', handler);
+  },
+
+  /** Respond to a tool confirmation request */
+  respondConfirm(toolCallId: string, confirmed: boolean): void {
+    ipcRenderer.send('agent:confirm-response', toolCallId, confirmed);
+  },
 };
 
 contextBridge.exposeInMainWorld('suncode', suncodeAPI);

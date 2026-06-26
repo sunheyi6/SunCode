@@ -3,10 +3,12 @@ import { computed, ref } from 'vue';
 import { useChatStore } from '../../stores/chat';
 import ChatPanel from '../chat/ChatPanel.vue';
 import CallTracePanel from '../chat/CallTracePanel.vue';
+import ConfirmDialog from '../chat/ConfirmDialog.vue';
 import ConversationSidebar from './ConversationSidebar.vue';
 import GitPanel from './GitPanel.vue';
 import StatusBar from './StatusBar.vue';
 import SettingsPanel from '../settings/SettingsPanel.vue';
+import { useConfirmDialog } from '../../composables/useConfirmDialog';
 
 const chatStore = useChatStore();
 
@@ -15,6 +17,9 @@ const tracePanelWidth = ref(380);
 const isResizing = ref(false);
 const isResizingTrace = ref(false);
 const showSettings = ref(false);
+
+// Tool confirmation dialog (confirm_changes permission mode)
+const { confirmState, handleConfirm, handleDeny } = useConfirmDialog();
 
 function startResize(e: MouseEvent): void {
   isResizing.value = true;
@@ -121,6 +126,15 @@ const traceSystemPrompt = computed(() => {
 
     <!-- Settings Modal -->
     <SettingsPanel v-if="showSettings" @close="showSettings = false" />
+
+    <!-- Tool Confirmation Dialog -->
+    <ConfirmDialog
+      :tool-name="confirmState.toolName"
+      :description="confirmState.description"
+      :visible="confirmState.visible"
+      @confirm="handleConfirm"
+      @deny="handleDeny"
+    />
   </div>
 </template>
 

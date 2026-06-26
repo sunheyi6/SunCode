@@ -96,6 +96,10 @@ declare global {
       ): () => void;
       // Goal
       onGoalEvent(callback: (event: GoalEvent) => void): () => void;
+
+      // Permission confirmation
+      onConfirmRequest(callback: (request: { toolCallId: string; toolName: string; description: string }) => void): () => void;
+      respondConfirm(toolCallId: string, confirmed: boolean): void;
     };
   }
 }

@@ -190,6 +190,17 @@ export const bridge = {
     return api().onSubagentProgress(callback);
   },
 
+  // ===== Permission Confirmation =====
+  onConfirmRequest(
+    callback: (request: { toolCallId: string; toolName: string; description: string }) => void,
+  ): () => void {
+    return api().onConfirmRequest(callback);
+  },
+
+  respondConfirm(toolCallId: string, confirmed: boolean): void {
+    api().respondConfirm(toolCallId, confirmed);
+  },
+
   // ===== Window =====
   setTitleBarOverlayText(text: string): void {
     api().setTitleBarOverlayText(text);

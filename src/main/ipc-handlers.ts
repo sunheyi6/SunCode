@@ -149,51 +149,14 @@ function getAgentWorker(): Worker {
         case 'goalEvent':
           mainWindow.webContents.send('agent:goal-event', msg.event);
           break;
-        case 'confirmRequest': {
-          const tc = msg.toolCall;
-          const description =
-            tc.arguments
-              ? (() => {
-                  try {
-                    const parsed = JSON.parse(tc.arguments) as Record<string, unknown>;
-                    const cmd =
-                      (parsed.command as string) ||
-                      (parsed.old_string as string)?.slice(0, 60) ||
-                      (parsed.content as string)?.slice(0, 60) ||
-                      '';
-                    return cmd.replace(/\n/g, ' ');
-                  } catch {
-                    return tc.arguments.slice(0, 80);
-                  }
-                })()
-              : '';
-          const toolLabel =
-            tc.name === 'bash'
-              ? '终端命令'
-              : tc.name === 'write'
-                ? '写入文件'
-                : tc.name === 'edit'
-                  ? '编辑文件'
-                  : tc.name === 'subagent'
-                    ? '子代理'
-                    : tc.name;
-          const { response } = await dialog.showMessageBox(mainWindow, {
-            type: 'question',
-            title: '确认执行操作',
-            message: `Agent 想要执行 ${toolLabel}`,
-            detail: description ? `详情: ${description}` : '（无额外信息）',
-            buttons: ['允许执行', '取消'],
-            defaultId: 0,
-            cancelId: 1,
+        case 'confirmRequest':
+          // Forward to renderer for in-app Vue confirmation dialog
+          mainWindow.webContents.send('agent:confirm-request', {
+            toolCallId: msg.toolCall.id,
+            toolName: msg.toolCall.name,
+            description: msg.toolCall.arguments || '',
           });
-          const confirmed = response === 0;
-          agentWorker!.postMessage({
-            type: 'confirmResponse',
-            toolCallId: tc.id,
-            confirmed,
-          } as WorkerInMessage);
           break;
-        }
       }
     });
 
@@ -325,6 +288,15 @@ export function registerIpcHandlers(wm: WindowManager): void {
       sendToWorker({ type: 'continue' });
     } catch (err) {
       console.error('[Main] agent:continue failed:', (err as Error).message);
+    }
+  });
+
+  // Tool confirmation response from renderer → worker
+  ipcMain.on('agent:confirm-response', (_event, toolCallId: string, confirmed: boolean) => {
+    try {
+      sendToWorker({ type: 'confirmResponse', toolCallId, confirmed });
+    } catch (err) {
+      console.error('[Main] agent:confirm-response failed:', (err as Error).message);
     }
   });
 
