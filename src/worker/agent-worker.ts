@@ -17,6 +17,26 @@ console.log('[Worker] Started');
 let agent: Agent | null = null;
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 
+/** Pending confirmations waiting for user response. */
+const pendingConfirmations = new Map<
+  string,
+  { resolve: (confirmed: boolean) => void; timeout: ReturnType<typeof setTimeout> }
+>();
+
+/** Request user confirmation before executing a destructive tool.
+ *  Sends a message to the main process and waits for the response. */
+function requestConfirmation(toolCall: import('@shared/types').ToolCallContent): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingConfirmations.delete(toolCall.id);
+      resolve(false); // Timeout: deny by default
+    }, 120_000); // 2 minutes
+
+    pendingConfirmations.set(toolCall.id, { resolve, timeout });
+    post({ type: 'confirmRequest', toolCall });
+  });
+}
+
 function post(msg: WorkerOutMessage): void {
   workerPort.postMessage(msg);
 }
@@ -121,6 +141,7 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
               ...(data as Record<string, unknown>),
             } as WorkerOutMessage),
           (event) => post({ type: 'goalEvent', event }),
+          requestConfirmation,
         );
         console.log('[Worker] Agent created');
       }
@@ -130,6 +151,16 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
     case 'setMessages': {
       agent?.setMessages(msg.messages);
       console.log('[Worker] Conversation context replaced:', msg.messages.length, 'messages');
+      break;
+    }
+
+    case 'confirmResponse': {
+      const pending = pendingConfirmations.get(msg.toolCallId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingConfirmations.delete(msg.toolCallId);
+        pending.resolve(msg.confirmed);
+      }
       break;
     }
 

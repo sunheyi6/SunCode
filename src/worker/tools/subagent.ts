@@ -41,6 +41,7 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
 
   return {
     name: 'subagent',
+    isReadonly: false,
     description: `委托任务给专项子 Agent（可用: ${agentList.join(', ')}）。将独立的探索、审查或实现任务交给专项 Agent 并行执行，避免主对话上下文污染。调用方式：单个调用传 agent+prompt，并行调用传 calls 数组。`,
 
     parameters: {

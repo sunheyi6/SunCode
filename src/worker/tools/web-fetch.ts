@@ -263,6 +263,7 @@ async function cloneGithubRepo(
 export function createWebFetchTool(workingDir: string): Tool {
   const tool: Tool = {
     name: 'web_fetch',
+    isReadonly: true,
     description:
       '获取指定 URL 的网页内容，返回清理后的文本。自动识别 GitHub 仓库并克隆到本地。支持 HTML、纯文本、JSON、XML 格式。包含 SSRF 防护。',
 

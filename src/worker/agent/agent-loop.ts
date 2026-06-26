@@ -64,6 +64,9 @@ export interface AgentLoopInput {
   stopHooks?: StopHookRegistry;
   /** Whether there is pending user input that was queued while the agent was running. */
   hasPendingInput?: boolean;
+  /** Callback to request user confirmation before executing a destructive tool.
+   *  Only called when permissionMode is 'confirm_changes'. */
+  requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>;
 }
 
 export interface PrepareNextTurnResult {
@@ -112,6 +115,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     prepareNextTurn,
     stopHooks,
     hasPendingInput: inputHasPending,
+    requestConfirmation,
   } = input;
 
   if (!model) {
@@ -574,6 +578,35 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             };
             toolResults.push(e);
             onToolEnd(e);
+            onRunEvent({
+              type: 'tool_completed',
+              runId,
+              toolCallId: tc.id,
+              toolName: tc.name,
+              success: false,
+              timestamp: '',
+            });
+            continue;
+          }
+        }
+
+        // -- Permission: confirm destructive tools --
+        if (
+          settings.permissionMode === 'confirm_changes' &&
+          !tool.isReadonly &&
+          requestConfirmation
+        ) {
+          const confirmed = await requestConfirmation(tc);
+          if (!confirmed) {
+            const skipped: ToolResult = {
+              toolCallId: tc.id,
+              name: tc.name,
+              success: false,
+              error: '用户取消了此操作',
+              output: '',
+            };
+            toolResults.push(skipped);
+            onToolEnd(skipped);
             onRunEvent({
               type: 'tool_completed',
               runId,

@@ -45,6 +45,7 @@ export async function createSDKMcpClient(config: McpServerConfig): Promise<McpCl
 
         const tools: Tool[] = mcpTools.map((mcpTool) => ({
           name: `mcp__${config.name}__${mcpTool.name}`,
+          isReadonly: false,
           description: mcpTool.description || `MCP tool: ${mcpTool.name} from ${config.name}`,
           parameters: {
             type: 'object',

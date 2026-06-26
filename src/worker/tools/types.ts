@@ -7,6 +7,8 @@ export interface Tool {
   readonly name: string;
   readonly description: string;
   readonly parameters: ToolDefinition['parameters'];
+  /** Whether this tool is read-only (does not modify files or run commands). */
+  readonly isReadonly: boolean;
   execute(params: Record<string, unknown>): Promise<ToolResult>;
   getDefinition(): ToolDefinition;
 }
@@ -18,6 +20,7 @@ export abstract class BaseTool implements Tool {
   abstract readonly name: string;
   abstract readonly description: string;
   abstract readonly parameters: ToolDefinition['parameters'];
+  readonly isReadonly: boolean = false;
 
   abstract execute(params: Record<string, unknown>): Promise<ToolResult>;
 

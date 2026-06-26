@@ -336,7 +336,8 @@ export type WorkerInMessage =
   | { type: 'continue' }
   | { type: 'config'; settings: AppSettings }
   | { type: 'setWorkingDir'; path: string }
-  | { type: 'setMessages'; messages: Message[] };
+  | { type: 'setMessages'; messages: Message[] }
+  | { type: 'confirmResponse'; toolCallId: string; confirmed: boolean };
 
 /** Messages sent from agent worker to main process */
 export type WorkerOutMessage =
@@ -353,7 +354,8 @@ export type WorkerOutMessage =
   | { type: 'subagentStart'; execution: SubagentExecution }
   | { type: 'subagentEnd'; id: string; result: SubagentResult }
   | { type: 'subagentProgress'; executionId: string; agent: string; delta: SubagentProgressDelta }
-  | { type: 'goalEvent'; event: GoalEvent };
+  | { type: 'goalEvent'; event: GoalEvent }
+  | { type: 'confirmRequest'; toolCall: ToolCallContent };
 
 /** Streaming event types from the LLM */
 export type StreamEventType =

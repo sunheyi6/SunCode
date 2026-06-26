@@ -5,6 +5,7 @@ import { BaseTool, p, obj } from './types';
 export function createGrepTool(workingDir: string) {
   return new (class GrepTool extends BaseTool {
     readonly name = 'grep';
+    isReadonly = true;
     readonly description =
       'Searches for a regular expression pattern in file contents. Uses ripgrep syntax (not grep). Supports full regex, file type filtering, context lines, and more. Prefer this over running `grep` or `rg` via bash.\n\nFor multiline patterns, set multiline: true. For case-insensitive search, set ignoreCase: true.';
     readonly parameters = obj(

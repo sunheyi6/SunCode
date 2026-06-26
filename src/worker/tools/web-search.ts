@@ -152,6 +152,7 @@ function formatResults(results: SearchResult[], provider: string): string {
 export function createWebSearchTool(settings?: AppSettings): Tool {
   const tool: Tool = {
     name: 'web_search',
+    isReadonly: true,
     description:
       '搜索互联网获取最新信息。默认使用 DuckDuckGo（免费，无需配置）。配置 TAVILY_API_KEY 后自动使用 Tavily AI 搜索。',
 

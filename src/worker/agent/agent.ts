@@ -56,6 +56,7 @@ export class Agent {
   private onRunEvent: (event: RunEvent) => void;
   private onSubagentEvent: (type: string, data: unknown) => void;
   private onGoalEvent: (event: GoalEvent) => void;
+  private requestConfirmation: ((toolCall: ToolCallContent) => Promise<boolean>) | undefined;
 
   constructor(
     workingDir: string,
@@ -71,6 +72,7 @@ export class Agent {
     onRunEvent: (event: RunEvent) => void,
     onSubagentEvent: (type: string, data: unknown) => void,
     onGoalEvent: (event: GoalEvent) => void,
+    requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>,
   ) {
     this.workingDir = workingDir;
     this.settings = settings;
@@ -85,6 +87,7 @@ export class Agent {
     this.onRunEvent = onRunEvent;
     this.onSubagentEvent = onSubagentEvent;
     this.onGoalEvent = onGoalEvent;
+    this.requestConfirmation = requestConfirmation;
     this.sessionId = randomUUID();
 
     void this.initialize();
@@ -145,6 +148,14 @@ export class Agent {
     } catch (error) {
       console.error('Agent initialization error:', error);
     }
+  }
+
+  /** Return tools filtered by the current permission mode. */
+  private getEffectiveTools(): Tool[] {
+    if (this.settings.permissionMode === 'plan') {
+      return this.tools.filter((t) => t.isReadonly);
+    }
+    return this.tools;
   }
 
   updateSettings(settings: AppSettings): void {
@@ -336,7 +347,7 @@ export class Agent {
     const result = await runAgentLoop({
       model,
       messages: this.messages,
-      tools: this.tools,
+      tools: this.getEffectiveTools(),
       settings: this.settings,
       workingDir: this.workingDir,
       skillsContent,
@@ -386,6 +397,7 @@ export class Agent {
           }
         : undefined,
       stopHooks: createDefaultStopHookRegistry(),
+      requestConfirmation: this.requestConfirmation,
     });
 
     this.turnCount = result.turnCount;
@@ -444,7 +456,7 @@ export class Agent {
     // Build the loop config (shared across goal attempts)
     const loopConfig = {
       model,
-      tools: this.tools,
+      tools: this.getEffectiveTools(),
       settings: this.settings,
       workingDir: this.workingDir,
       skillsContent,

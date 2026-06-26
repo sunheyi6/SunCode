@@ -5,6 +5,7 @@ import { BaseTool, p, obj } from './types';
 export function createReadTool(workingDir: string) {
   return new (class ReadTool extends BaseTool {
     readonly name = 'read';
+    isReadonly = true;
     readonly description =
       'Reads a file or directory. For files: returns contents with line numbers. For directories: lists entries. Supports reading images (PNG, JPG, GIF, WEBP) as base64. Specify offset/limit for large files.';
     readonly parameters = obj(

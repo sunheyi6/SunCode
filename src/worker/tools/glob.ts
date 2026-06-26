@@ -5,6 +5,7 @@ import { BaseTool, p, obj } from './types';
 export function createGlobTool(workingDir: string) {
   return new (class GlobTool extends BaseTool {
     readonly name = 'glob';
+    isReadonly = true;
     readonly description =
       'Finds files matching a glob pattern. Supports standard glob patterns like **/*.ts, src/**/*.vue, etc. Results are sorted by modification time (newest first). Use this to discover files in the project.';
     readonly parameters = obj(
