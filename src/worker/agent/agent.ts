@@ -670,8 +670,11 @@ async function loadAgentsMd(workingDir: string): Promise<string> {
   const parts: string[] = [];
   const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
 
-  // Project-level .agents.md (also try AGENTS.md as fallback)
-  for (const name of ['.agents.md', 'AGENTS.md']) {
+  // Project-level agent instructions.
+  // Different agent ecosystems use different default file names but they serve
+  // the same purpose: provide project-level context to the coding agent.
+  // Priority: .agents.md (Codex) > CLAUDE.md (Claude Code) > AGENTS.md (legacy)
+  for (const name of ['.agents.md', 'CLAUDE.md', 'AGENTS.md']) {
     const projectPath = join(workingDir, name);
     if (existsSync(projectPath)) {
       try {

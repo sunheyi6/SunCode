@@ -102,3 +102,10 @@ Electron Main Process (ipc-handlers.ts)
 - **MCP**: @modelcontextprotocol/sdk (stdio transport)
 - **Build**: electron-builder 25 (Win NSIS/Portable, Mac DMG arm64, Linux AppImage/deb)
 - **CI**: GitHub Actions, trigger on `v*` tag push
+
+## 项目上下文文件
+
+此 `CLAUDE.md` 同时作为 SunCode Agent 的项目上下文加载。Agent 启动时会按优先级搜索：
+`.agents.md`（Codex）→ `CLAUDE.md`（Claude Code）→ `AGENTS.md`（旧格式），优先使用第一个找到的文件。
+
+也就是说，在 SunCode 中打开本项目的目录时，Agent 会自动读入此文档作为系统提示的 `<project_context>` 段落。
