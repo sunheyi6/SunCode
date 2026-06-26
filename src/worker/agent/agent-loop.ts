@@ -125,6 +125,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const contextMessages: Message[] = [...initialMessages];
   let turnCount = initialTurnCount;
   const tokenUsage = { input: 0, output: 0, total: 0 };
+  let lastToolHadError = false;
+  let taskCompleteReminderCount = 0;
+  let planForceContinueCount = 0; // circuit breaker for plan-incomplete loops
 
   const identityReply = getIdentityReply(initialMessages);
   if (identityReply) {
@@ -158,6 +161,62 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // Prepend system message
   contextMessages.unshift({ role: 'system', content: systemPrompt });
 
+  // ═══════════════════════════════════════════════════════════
+  // Planning gate: inject planning instruction into the user
+  // message the model is about to respond to.  This fires for
+  // ANY user-initiated message (fresh conversation or follow-up).
+  // Synthetic reminders (task_complete nudge, plan nudge) are
+  // excluded so we don't double-inject or create infinite loops.
+  // ═══════════════════════════════════════════════════════════
+  const lastMsg = contextMessages[contextMessages.length - 1];
+  if (lastMsg?.role === 'user') {
+    const userText =
+      typeof lastMsg.content === 'string'
+        ? lastMsg.content
+        : lastMsg.content
+            .filter((b) => b.type === 'text')
+            .map((b) => ('text' in b ? b.text : ''))
+            .join('\n');
+
+    // Skip synthetic reminders — they already have planning baked in
+    const isSynthetic =
+      userText.includes('请调用 task_complete') ||
+      userText.includes('你跳过了规划步骤');
+
+    if (!isSynthetic) {
+      console.log('[AgentLoop] Injecting planning gate into user message');
+      const planningPrefix = `你必须按以下流程执行：
+
+**第一步（本轮）**：在正文开头先分类再列计划
+  [执行]
+  📋 执行计划：
+  - [ ] Step 1: <具体行动>
+  - [ ] Step 2: <具体行动>
+  禁止在列完计划之前调用任何工具。
+
+**第二步（每完成一步后）**：更新计划+输出结构化结果
+  📋 进度更新：
+  - [x] Step 1: 已完成 — 结果摘要
+  - [ ] Step 2: <进行中...>
+
+  然后紧接输出该步的详细结果：
+  ---
+  ## ✅ Step 1 完成：<步骤标题>
+  <结果详情，代码块、表格等结构化展示>
+  ---
+
+**格式要求**：
+- 严格使用 "- [ ] " 和 "- [x] " 前缀，注意空格
+- Step N 用英文冒号，编号连续
+- 每步结果用 "## ✅ Step N 完成：标题" 开头
+- 不要用代码块包裹计划，直接写纯文本
+---
+用户消息：${userText}`;
+
+      lastMsg.content = [{ type: 'text', text: planningPrefix }];
+    }
+  }
+
   // Emit system prompt for call trace panel
   onStream({ type: 'system_prompt', systemPrompt });
 
@@ -174,6 +233,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     turnCount++;
+    lastToolHadError = false;
     console.log(`[AgentLoop] Turn ${turnCount}/${settings.maxTurns}`);
     onStream({ type: 'turn_start', turnCount, maxTurns: settings.maxTurns || MAX_TURNS });
     onRunEvent({ type: 'turn_started', runId, turnNumber: turnCount, timestamp: '' });
@@ -335,8 +395,48 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         hasTaskComplete,
       });
 
-      // task_complete → explicit signal, extract summary and return.
+      // task_complete → explicit signal, but first check if plan is incomplete.
       if (hasTaskComplete) {
+        // ═══════════════════════════════════════════════════════════
+        // Plan gate: if there's a plan embedded in the text, ALL
+        // plan steps must be [x] done before task_complete is accepted.
+        // Otherwise reject it and force the model to finish the plan.
+        // ═══════════════════════════════════════════════════════════
+        const planResult = checkPlanCompletion(assistantText);
+        if (planResult.hasPlan && planResult.pendingCount > 0 && planForceContinueCount < 3) {
+          planForceContinueCount++;
+          const pendingList = planResult.pendingSteps.length > 0
+            ? planResult.pendingSteps.map((s) => `  - [ ] ${s}`).join('\n')
+            : '';
+          console.log(
+            `[AgentLoop] Plan incomplete (attempt ${planForceContinueCount}/3): ${planResult.doneCount} done, ${planResult.pendingCount} pending — rejecting task_complete`,
+          );
+          // Push the current assistant message and inject a plan reminder
+          const blocks: ContentBlock[] = [];
+          if (thinkingText) blocks.push({ type: 'thinking', text: thinkingText });
+          if (assistantText) blocks.push({ type: 'text', text: assistantText });
+          else blocks.push({ type: 'text', text: '处理中...' });
+          contextMessages.push({ role: 'assistant', content: blocks, toolCalls });
+
+          // Add tool results for this turn (task_complete + any others)
+          for (const tc of toolCalls) {
+            const tr: ToolResult = tc.name === TASK_COMPLETE_TOOL_NAME
+              ? { toolCallId: tc.id, name: tc.name, success: false, output: '', error: '计划未完成，已拒绝' }
+              : { toolCallId: tc.id, name: tc.name, success: true, output: '' };
+            contextMessages.push({ role: 'tool', content: tr.success ? tr.output : `错误: ${tr.error}`, toolCallId: tr.toolCallId });
+          }
+
+          contextMessages.push({
+            role: 'user',
+            content: `你的执行计划还有 ${planResult.pendingCount} 个步骤未完成（${planResult.doneCount}/${planResult.totalCount}）。请立即执行：\n${pendingList}\n每完成一步后输出 📋 进度更新：。全部 [x] 后才能调用 task_complete。`,
+          });
+
+            onStream({ type: 'turn_end', turnCount, hasToolCalls: true });
+            onRunEvent({ type: 'turn_completed', runId, turnNumber: turnCount, hasToolCalls: true, timestamp: '' });
+            continue;
+          }
+
+        // If circuit breaker tripped, fall through to normal task_complete handling
         const taskCompleteTC = findTaskCompleteCall(toolCalls);
         let summary = '';
         if (taskCompleteTC) {
@@ -383,8 +483,69 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // Non-task_complete tool calls → execute them and continue
       if (turnDecision.decision === 'continue' && toolCalls.length > 0) {
         // Fall through to tool execution below
-      } else if (turnDecision.decision === 'stop') {
-        // Stop decision: run stop hooks before finalizing
+      } else if (turnDecision.decision === 'continue' && toolCalls.length === 0) {
+        // Model stopped without calling task_complete. Require it.
+        taskCompleteReminderCount++;
+        if (taskCompleteReminderCount <= 3) {
+          console.log(`[AgentLoop] Missing task_complete, reminder ${taskCompleteReminderCount}/3`);
+          const interimBlocks: ContentBlock[] = [];
+          if (thinkingText) interimBlocks.push({ type: 'thinking', text: thinkingText });
+          if (assistantText) interimBlocks.push({ type: 'text', text: assistantText });
+          else interimBlocks.push({ type: 'text', text: '处理中...' });
+          contextMessages.push({ role: 'assistant', content: interimBlocks });
+          contextMessages.push({
+            role: 'user',
+            content:
+              '请调用 task_complete 工具来标记任务完成。在 summary 参数中描述你完成了什么。如果你还需要继续工作（比如运行测试、修改代码），请直接继续，但完成所有工作后务必调用 task_complete。',
+          });
+          onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
+          onRunEvent({
+            type: 'turn_completed',
+            runId,
+            turnNumber: turnCount,
+            hasToolCalls: false,
+            timestamp: '',
+          });
+          continue;
+        }
+        // After 3 reminders, check if plan is incomplete before giving up
+        console.log('[AgentLoop] task_complete reminder limit reached, checking plan...');
+        const planCheck = checkPlanCompletion(assistantText);
+        if (planCheck.hasPlan && planCheck.pendingCount > 0 && planForceContinueCount < 2) {
+          planForceContinueCount++;
+          // Plan is incomplete — inject a targeted reminder instead of stopping
+          const pendingList = planCheck.pendingSteps.length > 0
+            ? planCheck.pendingSteps.map((s) => `  - [ ] ${s}`).join('\n')
+            : '';
+          console.log(`[AgentLoop] Plan incomplete (attempt ${planForceContinueCount}/2): ${planCheck.doneCount} done, ${planCheck.pendingCount} pending — forcing continue`);
+          contextMessages.push({
+            role: 'user',
+            content: `你的执行计划还有 ${planCheck.pendingCount} 个步骤未完成（${planCheck.doneCount}/${planCheck.totalCount} 已完成）。请立即执行以下步骤：\n${pendingList}\n每完成一步后用 📋 进度更新：来更新计划。全部 Step 标记为 [x] 后才能调用 task_complete 结束。`,
+          });
+          onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
+          onRunEvent({ type: 'turn_completed', runId, turnNumber: turnCount, hasToolCalls: false, timestamp: '' });
+          continue;
+        }
+        if (planCheck.hasPlan && planCheck.pendingCount > 0) {
+          console.log(`[AgentLoop] Plan force-continue limit reached (${planForceContinueCount} attempts), accepting as final`);
+        }
+        // Fall through to the stop path below by re-routing
+        // (set a flag and handle via the normal stop logic)
+      }
+
+      // After fall-through from missing_task_complete (reminder limit exceeded),
+      // or direct stop decision — stop the loop.
+      if (turnDecision.decision === 'stop' || taskCompleteReminderCount > 3) {
+        // If we fell through from missing_task_complete, we need to push
+        // the current message first
+        if (taskCompleteReminderCount > 3 && turnDecision.decision !== 'stop') {
+          const interimBlocks: ContentBlock[] = [];
+          if (thinkingText) interimBlocks.push({ type: 'thinking', text: thinkingText });
+          if (assistantText) interimBlocks.push({ type: 'text', text: assistantText });
+          else interimBlocks.push({ type: 'text', text: '处理中...' });
+          contextMessages.push({ role: 'assistant', content: interimBlocks });
+        }
+        // Run stop hooks before finalizing (safety, completion check)
         if (stopHooks) {
           const hookResult = await stopHooks.runAll({
             assistantText,
@@ -706,12 +867,34 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       };
       contextMessages.push(assistantMsg2);
 
+      lastToolHadError = toolResults.some((tr) => !tr.success);
+
       for (const tr of toolResults) {
         contextMessages.push({
           role: 'tool',
           content: tr.success ? tr.output : `错误: ${tr.error}`,
           toolCallId: tr.toolCallId,
         });
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // Plan check: on turn 1, if the model used non-readonly tools
+      // without outputting a plan (📋 marker), inject a strong reminder.
+      // This is the LAST LINE OF DEFENSE when the primary injection
+      // (user message prefix) somehow fails.
+      // ═══════════════════════════════════════════════════════════
+      if (turnCount <= 2 && !assistantText.includes('📋')) {
+        const nonReadonlyTools = toolCalls.filter(
+          (tc) => !['read', 'grep', 'glob', 'web_fetch', 'web_search', 'task_complete'].includes(tc.name),
+        );
+        if (nonReadonlyTools.length > 0) {
+          console.log('[AgentLoop] Turn 1 without plan, injecting reminder');
+          contextMessages.push({
+            role: 'user',
+            content:
+              '你跳过了规划步骤。请立即在正文开头输出 [执行] 分类标记和 📋 执行计划（用 - [ ] Step N: 格式列出每一步）。然后继续执行。',
+          });
+        }
       }
 
       // Emit turn_end for intermediate (tool-use) turns
@@ -876,11 +1059,25 @@ function mergeThinkingIntoAnswer(assistantText: string, thinkingText: string): s
     return assistantText || '已完成。';
   }
 
-  // Text is empty or too short, but thinking is available.
-  // Reasoning models typically conclude their thinking with a summary —
-  // extract the tail portion as the visible answer.
   const cleanThinking = thinkingText.trim();
   const thinkingLen = cleanThinking.length;
+
+  // When the visible answer is almost empty (≤2 words), and thinking is substantial,
+  // the model output is likely an intermediate thought ("Let me check..."), not a
+  // summary. Don't expose all the internal reasoning — just extract a brief tail.
+  // The full thinking remains accessible in the collapsed <details> section.
+  const TAIL_EXTRACT_CHARS = 500;
+
+  if (textLen <= 30 && thinkingLen > 100) {
+    const tail = cleanThinking.slice(-TAIL_EXTRACT_CHARS);
+    const boundary = findNaturalBoundary(tail);
+    const excerpt = tail.slice(boundary).trim();
+    if (excerpt) {
+      return assistantText
+        ? `${assistantText}\n\n---\n\n${excerpt}`
+        : `思考结论：\n\n${excerpt}`;
+    }
+  }
 
   // If thinking is short enough to show entirely, just use it
   if (thinkingLen <= 2000) {
@@ -933,6 +1130,43 @@ function findNaturalBoundary(text: string): number {
  * Extract the model's context window size (in tokens) from the pi-ai model object.
  * Falls back to a conservative default if unavailable.
  */
+/**
+ * Quick check whether the accumulated assistant text contains a plan
+ * and how many steps are pending vs done. Used as a gate before
+ * accepting task_complete or stop decisions.
+ */
+function checkPlanCompletion(text: string): {
+  hasPlan: boolean;
+  pendingCount: number;
+  doneCount: number;
+  totalCount: number;
+  pendingSteps: string[];
+} {
+  const hasPlan = text.includes('📋');
+  if (!hasPlan) {
+    return { hasPlan: false, pendingCount: 0, doneCount: 0, totalCount: 0, pendingSteps: [] };
+  }
+  const pendingRegex = /^\s*[-*+]\s+\[ \]\s+Step\s+\d+:\s*(.+)$/gm;
+  const doneRegex = /^\s*[-*+]\s+\[[xX]\]\s+/gm;
+  const pendingMatches = text.match(pendingRegex);
+  const doneMatches = text.match(doneRegex);
+  const pendingCount = pendingMatches ? pendingMatches.length : 0;
+  const doneCount = doneMatches ? doneMatches.length : 0;
+
+  // Extract pending step descriptions
+  const pendingSteps: string[] = [];
+  if (pendingMatches) {
+    // Re-run regex to get capture groups
+    const extractRegex = /^\s*[-*+]\s+\[ \]\s+Step\s+\d+:\s*(.+)$/gm;
+    let m: RegExpExecArray | null;
+    while ((m = extractRegex.exec(text)) !== null) {
+      pendingSteps.push(m[1]!.trim());
+    }
+  }
+
+  return { hasPlan: true, pendingCount, doneCount, totalCount: pendingCount + doneCount, pendingSteps };
+}
+
 function extractContextWindow(model: unknown): number {
   const m = model as Record<string, unknown> | null | undefined;
   if (!m) return 128_000;

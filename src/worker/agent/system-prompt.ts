@@ -132,11 +132,45 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     parts.push('</available_skills>');
   }
 
-  // Final instruction (stable, kept at end for readability)
+  // Final instruction
   parts.push('');
-  parts.push(
-    "Begin by analyzing the user's request carefully. Use tools to gather information before proposing or making changes.",
-  );
+  parts.push('## CRITICAL: Output Format — Two Fields');
+  parts.push('');
+  parts.push('You have TWO output fields. Use them correctly:');
+  parts.push('');
+  parts.push('1. **Thinking field** (thinking/reasoning block):');
+  parts.push('   - Put ALL intermediate working narration here: "Let me read the file...", "I need to check...", "The edit failed so I will..."');
+  parts.push('   - Internal reasoning, planning, analysis, and debugging logic belongs here.');
+  parts.push('   - This field is COLLAPSED by default — the user does NOT see it as your answer.');
+  parts.push('');
+  parts.push('2. **Text field** (visible content block — the ONLY thing the user sees during execution):');
+  parts.push('   - **First turn of execution task: output a plan checklist first!** Format:');
+  parts.push('     📋 执行计划：');
+  parts.push('     - [ ] Step 1: ...');
+  parts.push('     - [ ] Step 2: ...');
+  parts.push('   - **Every subsequent turn: update the plan** — mark done with [x] ✅.');
+  parts.push('   - When complete: output the full final result (code, output, conclusions).');
+  parts.push('   - NEVER leave the text field empty — that means the user is staring at nothing.');
+  parts.push('   - The text field IS your only visible communication channel during execution.');
+  parts.push('');
+  parts.push('When you are done, call the `task_complete` tool with a summary.');
+  parts.push('The conversation will NOT end until you call `task_complete`.');
+  parts.push('');
+  parts.push('──────────────────────────────────────────');
+  parts.push('⚠️  PLANNING GATE — DO NOT SKIP ⚠️');
+  parts.push('──────────────────────────────────────────');
+  parts.push('');
+  parts.push('Every response MUST start with a task classification in the text field:');
+  parts.push('  [查询] — for read-only questions ("what is X", "explain Y")');
+  parts.push('  [执行] — for tasks that modify code, run commands, or produce deliverables');
+  parts.push('');
+  parts.push('If [执行], your text field MUST also include a plan BEFORE calling tools:');
+  parts.push('  📋 执行计划：');
+  parts.push('  - [ ] Step 1: <specific action>');
+  parts.push('  - [ ] Step 2: <specific action>');
+  parts.push('');
+  parts.push('The plan MUST appear in your FIRST response. Do NOT call tools before the plan.');
+  parts.push('──────────────────────────────────────────');
 
   return parts.join('\n');
 }

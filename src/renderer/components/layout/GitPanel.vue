@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { GitInfo } from '@shared/types';
+import type { GitInfo, TaskPlan, TaskStep } from '@shared/types';
 import { useSessionsStore } from '../../stores/sessions';
+import { useChatStore } from '../../stores/chat';
 import { bridge } from '../../api/bridge';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
 import { formatElapsedTime, latestProcess } from '../../composables/background-process-state';
 
 const sessionsStore = useSessionsStore();
+const chatStore = useChatStore();
 
 const gitStatus = ref<GitInfo>({
   isRepo: false,
@@ -23,6 +25,8 @@ const committing = ref(false);
 const commitFeedback = ref('');
 const now = ref(Date.now());
 const panelRef = ref<HTMLElement | null>(null);
+const showAllPlan = ref(false);
+const planStartTime = ref(0);
 const { processes } = useBackgroundProcesses();
 
 const activeSession = computed(() =>
@@ -36,6 +40,58 @@ const runningCount = computed(
 const hasChanges = computed(
   () => gitStatus.value.changedFiles > 0 || gitStatus.value.stagedFiles > 0,
 );
+
+// ── Task Plan ──
+
+const latestPlan = computed<TaskPlan | null>(() => {
+  const msgs = chatStore.messages;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i]?.role === 'assistant' && msgs[i]?.taskPlan) {
+      return msgs[i]!.taskPlan!;
+    }
+  }
+  return null;
+});
+
+const hasPlan = computed(() => latestPlan.value !== null);
+const planSteps = computed<TaskStep[]>(() => latestPlan.value?.steps ?? []);
+const planDone = computed(() => planSteps.value.filter((s) => s.status === 'done').length);
+const planTotal = computed(() => planSteps.value.length);
+const planAllDone = computed(() => planDone.value === planTotal.value && planTotal.value > 0);
+
+const visiblePlanSteps = computed(() => {
+  if (showAllPlan.value || planSteps.value.length <= 5) return planSteps.value;
+  return planSteps.value.slice(0, 5);
+});
+
+const hiddenPlanCount = computed(() => Math.max(0, planSteps.value.length - 5));
+
+function planStepIcon(status: string): string {
+  if (status === 'done') return '✓';
+  if (status === 'in_progress') return '◉';
+  return '○';
+}
+
+const showPanel = computed(() => gitStatus.value.isRepo || hasPlan.value);
+
+// Track plan elapsed time
+const planElapsed = computed(() => {
+  if (!planStartTime.value) return '';
+  const sec = Math.round((now.value - planStartTime.value) / 1000);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m${s}s`;
+});
+
+// Track plan start time
+watch(hasPlan, (val) => {
+  if (val && !planStartTime.value) {
+    planStartTime.value = Date.now();
+  } else if (!val) {
+    planStartTime.value = 0;
+  }
+});
 const elapsedText = computed(() => {
   const process = latest.value;
   if (!process) return '未运行';
@@ -202,72 +258,101 @@ watch(collapsed, (isCollapsed) => {
 </script>
 
 <template>
-  <div v-if="gitStatus.isRepo" ref="panelRef" class="git-float">
+  <div v-if="showPanel" ref="panelRef" class="git-float">
     <button
       class="git-pill"
       type="button"
       :aria-expanded="!collapsed"
-      :aria-label="collapsed ? '展开 Git 和进程信息' : '收起 Git 和进程信息'"
       @click="togglePanel"
     >
-      <span class="branch-icon" aria-hidden="true">⑂</span>
-      <span class="pill-branch">{{ gitStatus.branch || 'HEAD' }}</span>
-      <span v-if="hasChanges" class="pill-dot" aria-label="存在未提交更改" />
-      <span v-if="hasChanges" class="pill-count">
-        +{{ gitStatus.addedLines }} −{{ gitStatus.deletedLines }}
-      </span>
+      <!-- Plan summary in pill -->
+      <template v-if="hasPlan">
+        <span class="pill-icon">{{ chatStore.isStreaming ? '🔄' : planAllDone ? '✅' : '📋' }}</span>
+        <span class="pill-label">计划</span>
+        <span class="pill-progress">{{ planDone }}/{{ planTotal }}</span>
+      </template>
+      <!-- Git summary in pill -->
+      <template v-if="gitStatus.isRepo">
+        <span class="pill-sep" v-if="hasPlan">·</span>
+        <span class="branch-icon" aria-hidden="true">⑂</span>
+        <span class="pill-branch">{{ gitStatus.branch || 'HEAD' }}</span>
+        <span v-if="hasChanges" class="pill-dot" />
+        <span v-if="hasChanges" class="pill-count">+{{ gitStatus.addedLines }} −{{ gitStatus.deletedLines }}</span>
+      </template>
       <span aria-hidden="true">{{ collapsed ? '⌄' : '⌃' }}</span>
     </button>
 
-    <section v-if="!collapsed" class="git-card" aria-label="Git 和后台进程信息">
-      <header class="card-header">
-        <span>Git 工具</span>
-        <button type="button" class="icon-button" aria-label="刷新 Git 信息" @click="refreshGit">
-          ↻
-        </button>
-      </header>
+    <section v-if="!collapsed" class="git-card">
+      <!-- ═══ Plan Section ═══ -->
+      <template v-if="hasPlan">
+        <header class="card-header">
+          <span>📋 执行计划</span>
+          <span class="card-progress">
+            <template v-if="planElapsed">⏱ {{ planElapsed }} · </template>
+            {{ planAllDone && !chatStore.isStreaming ? '全部完成 ✅' : `${planDone}/${planTotal} 完成` }}
+          </span>
+        </header>
 
-      <div class="info-row">
-        <span>▣　更改</span>
-        <span class="line-stats">
-          <strong class="added">+{{ gitStatus.addedLines }}</strong>
-          <strong class="deleted">-{{ gitStatus.deletedLines }}</strong>
-        </span>
-      </div>
-      <div class="info-row"><span>⑂　{{ gitStatus.branch || 'HEAD' }}</span></div>
-      <button type="button" class="commit-row" title="创建提交" @click="toggleCommitForm">
-        <span>─　提交</span><span>{{ showCommitForm ? '收起' : '•••' }}</span>
-      </button>
-
-      <div v-if="showCommitForm" class="commit-form">
-        <textarea
-          v-model="commitMessage"
-          class="commit-textarea"
-          placeholder="输入提交信息（留空可点 AI 生成）"
-          rows="3"
-        />
-        <div class="commit-actions">
-          <button
-            type="button"
-            class="ai-gen-btn"
-            :disabled="generatingCommitMsg"
-            @click="generateCommitMessage"
+        <div class="step-list">
+          <div
+            v-for="step in visiblePlanSteps"
+            :key="step.id"
+            class="step-row"
+            :class="`step-${step.status}`"
           >
-            {{ generatingCommitMsg ? '⚡ 生成中...' : '🤖 AI 生成' }}
-          </button>
-          <button
-            type="button"
-            class="commit-submit-btn"
-            :disabled="committing"
-            @click="doCommit"
-          >
-            {{ committing ? '⏳ 提交中...' : '提交' }}
-          </button>
+            <span class="step-icon" :class="`icon-${step.status}`">{{ planStepIcon(step.status) }}</span>
+            <span class="step-desc">{{ step.description }}</span>
+            <span v-if="step.result" class="step-result">{{ step.result }}</span>
+          </div>
         </div>
-        <div v-if="commitFeedback" class="commit-feedback">{{ commitFeedback }}</div>
-      </div>
 
-      <div class="section-divider" />
+        <button
+          v-if="hiddenPlanCount > 0"
+          class="show-more-btn"
+          @click="showAllPlan = !showAllPlan"
+        >
+          {{ showAllPlan ? '收起' : `展开全部 (还有 ${hiddenPlanCount} 项)` }}
+        </button>
+
+        <div v-if="gitStatus.isRepo" class="section-divider" />
+      </template>
+
+      <!-- ═══ Git Section ═══ -->
+      <template v-if="gitStatus.isRepo">
+        <header class="card-header">
+          <span>Git 工具</span>
+          <button type="button" class="icon-button" aria-label="刷新 Git 信息" @click="refreshGit">↻</button>
+        </header>
+
+        <div class="info-row">
+          <span>▣　更改</span>
+          <span class="line-stats">
+            <strong class="added">+{{ gitStatus.addedLines }}</strong>
+            <strong class="deleted">-{{ gitStatus.deletedLines }}</strong>
+          </span>
+        </div>
+        <div class="info-row"><span>⑂　{{ gitStatus.branch || 'HEAD' }}</span></div>
+        <button type="button" class="commit-row" title="创建提交" @click="toggleCommitForm">
+          <span>─　提交</span><span>{{ showCommitForm ? '收起' : '•••' }}</span>
+        </button>
+
+        <div v-if="showCommitForm" class="commit-form">
+          <textarea v-model="commitMessage" class="commit-textarea" placeholder="输入提交信息（留空可点 AI 生成）" rows="3" />
+          <div class="commit-actions">
+            <button type="button" class="ai-gen-btn" :disabled="generatingCommitMsg" @click="generateCommitMessage">
+              {{ generatingCommitMsg ? '⚡ 生成中...' : '🤖 AI 生成' }}
+            </button>
+            <button type="button" class="commit-submit-btn" :disabled="committing" @click="doCommit">
+              {{ committing ? '⏳ 提交中...' : '提交' }}
+            </button>
+          </div>
+          <div v-if="commitFeedback" class="commit-feedback">{{ commitFeedback }}</div>
+        </div>
+
+        <div class="section-divider" />
+      </template>
+
+      <!-- ═══ Process Section ═══ -->
       <section class="process-section">
         <div class="section-heading">
           <span>进程</span><span>{{ latest ? '1/1' : '0/0' }}</span>
@@ -542,5 +627,112 @@ watch(collapsed, (isCollapsed) => {
   font-size: 12px;
   color: var(--color-text-secondary);
   text-align: center;
+}
+
+/* ── Plan section ── */
+
+.pill-icon { font-size: 14px; }
+.pill-label { font-weight: 600; }
+.pill-progress {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.pill-sep {
+  color: var(--border-color-strong);
+  font-size: 11px;
+}
+
+.card-progress {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.step-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.step-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  transition: background 0.15s;
+}
+
+.step-in_progress {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.step-icon {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 11px;
+}
+
+.icon-pending {
+  color: var(--color-text-muted);
+  opacity: 0.4;
+}
+
+.icon-in_progress {
+  color: var(--color-accent);
+  animation: plan-pulse-right 1.4s ease-in-out infinite;
+}
+
+.icon-done {
+  color: var(--color-green);
+}
+
+@keyframes plan-pulse-right {
+  0%, 100% { opacity: 0.5; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.step-desc {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+.step-done .step-desc {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-green) 40%, transparent);
+}
+
+.step-in_progress .step-desc {
+  color: var(--color-text);
+}
+
+.step-result {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.show-more-btn {
+  width: 100%;
+  padding: 6px 14px;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.show-more-btn:hover {
+  color: var(--color-accent);
 }
 </style>

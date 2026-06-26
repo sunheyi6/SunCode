@@ -4,6 +4,7 @@ import type {
   StreamEvent,
   SubagentProgressDelta,
   SubagentResult,
+  TaskPlan,
   ToolCallContent,
   ToolResult,
 } from '@shared/types';
@@ -11,6 +12,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';
 import { buildPersistedAssistantMessage } from './chat-message-persistence';
+import { parseTaskPlan, stripPlanFromContent } from '../utils/task-plan-parser';
 
 export interface ChatMessage {
   id: string;
@@ -26,6 +28,8 @@ export interface ChatMessage {
   maxTurns?: number;
   /** System prompt for the current run (for call trace panel). */
   systemPrompt?: string;
+  /** Structured task plan parsed from the model's text output. */
+  taskPlan?: TaskPlan;
 }
 
 let msgCounter = 0;
@@ -40,6 +44,7 @@ export const useChatStore = defineStore('chat', () => {
   let currentAssistantMsg: ChatMessage | null = null;
   let currentText = '';
   let currentThinking = '';
+  let lastParsedPlanLength = 0;
 
   /** ID of the renderer's currently visible session. */
   let activeSessionId: string | null = null;
@@ -69,6 +74,7 @@ export const useChatStore = defineStore('chat', () => {
     };
     currentText = '';
     currentThinking = '';
+    lastParsedPlanLength = 0;
     messages.value.push(assistantMessage);
     // Vue wraps objects inserted into a reactive array. Keep the wrapped
     // instance so stream mutations update the rendered message.
@@ -173,6 +179,12 @@ export const useChatStore = defineStore('chat', () => {
       case 'text_delta':
         currentText += event.text || '';
         msg.content = currentText;
+        // Parse task plan from content (throttled: every 30 chars or when plan marker appears)
+        if (currentText.length - lastParsedPlanLength >= 30 || currentText.includes('📋')) {
+          const plan = parseTaskPlan(currentText, true);
+          if (plan) msg.taskPlan = plan;
+          lastParsedPlanLength = currentText.length;
+        }
         break;
       case 'thinking_delta':
         currentThinking += event.text || '';
@@ -388,15 +400,19 @@ export const useChatStore = defineStore('chat', () => {
           .map((block) => ('text' in block ? block.text : ''))
           .join('');
 
+        const taskPlan = parseTaskPlan(content, false) ?? undefined;
+        const displayContent = taskPlan ? stripPlanFromContent(content) : content;
+
         return {
           id: nextId(),
           role: message.role as 'user' | 'assistant',
-          content,
+          content: displayContent,
           thinking: thinking || undefined,
           toolCalls: message.toolCalls,
           timestamp: Date.now(),
           isStreaming: false,
           systemPrompt: message.systemPrompt,
+          taskPlan,
         };
       });
 

@@ -5,6 +5,7 @@ import ToolOperationList from '../tools/ToolOperationList.vue';
 import StreamingText from '../chat/StreamingText.vue';
 
 const SYSTEM_PROMPT_PREVIEW_LEN = 500;
+const ANSWER_COLLAPSE_LEN = 400;
 const showFullSystemPrompt = ref(false);
 
 const props = defineProps<{
@@ -112,20 +113,33 @@ function formatTime(ts: number): string {
           <span class="trace-msg-time">{{ formatTime(msg.timestamp) }}</span>
         </div>
 
-        <!-- Timeline: thinking + tool calls interleaved -->
+        <!-- Timeline: thinking + tool calls interleaved, thinking collapsed by default -->
         <template v-for="(entry, ei) in messageTimeline(msg)" :key="`${msg.id}-${ei}`">
-          <div v-if="entry.type === 'thinking' && entry.text" class="trace-thinking">
-            <StreamingText :text="entry.text" :is-streaming="false" />
-          </div>
+          <details v-if="entry.type === 'thinking' && entry.text" class="trace-thinking-details">
+            <summary class="trace-thinking-summary">
+              <span>🧠 思考过程</span>
+              <span class="trace-section-meta">{{ entry.text.length }} 字符</span>
+            </summary>
+            <div class="trace-thinking">
+              <StreamingText :text="entry.text" :is-streaming="false" />
+            </div>
+          </details>
           <ToolOperationList
             v-else-if="entry.type === 'tool'"
             :calls="entry.calls"
           />
         </template>
 
-        <!-- Final text answer -->
+        <!-- Final text answer (collapsed when long) -->
         <div v-if="msg.content && !msg.isStreaming" class="trace-answer">
-          <StreamingText :text="msg.content" :is-streaming="false" />
+          <details v-if="msg.content.length > ANSWER_COLLAPSE_LEN" class="trace-answer-details">
+            <summary class="trace-answer-summary">
+              <span>📝 回复内容</span>
+              <span class="trace-section-meta">{{ msg.content.length }} 字符</span>
+            </summary>
+            <StreamingText :text="msg.content" :is-streaming="false" />
+          </details>
+          <StreamingText v-else :text="msg.content" :is-streaming="false" />
         </div>
       </div>
     </div>
@@ -288,18 +302,6 @@ function formatTime(ts: number): string {
   margin-left: 8px;
 }
 
-.trace-thinking {
-  padding: 4px 8px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--color-text-muted);
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: break-word;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
 .trace-answer {
   padding: 6px 8px;
   font-size: 12px;
@@ -308,6 +310,117 @@ function formatTime(ts: number): string {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: break-word;
+}
+
+/* Tighten markdown spacing inside trace panel (override StreamingText defaults) */
+.trace-answer :deep(.markdown-content p) {
+  margin: 0 0 3px 0;
+}
+
+.trace-answer :deep(.markdown-content pre) {
+  margin: 4px 0;
+}
+
+.trace-answer :deep(.markdown-content ul),
+.trace-answer :deep(.markdown-content ol) {
+  margin: 2px 0;
+}
+
+.trace-answer :deep(.markdown-content li) {
+  margin: 0;
+}
+
+.trace-answer :deep(.markdown-content h1),
+.trace-answer :deep(.markdown-content h2),
+.trace-answer :deep(.markdown-content h3) {
+  margin: 6px 0 4px 0;
+}
+
+.trace-answer :deep(.markdown-content blockquote) {
+  margin: 4px 0;
+}
+
+.trace-answer :deep(.markdown-content table) {
+  margin: 4px 0 6px 0;
+}
+
+.trace-answer :deep(.streaming-text) {
+  line-height: 1.35;
+}
+
+/* Collapsible answer details */
+.trace-answer-details {
+  overflow: hidden;
+}
+
+.trace-answer-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.trace-answer-summary::-webkit-details-marker {
+  display: none;
+}
+
+.trace-answer-summary:hover {
+  color: var(--color-text-secondary);
+}
+
+/* Collapsible thinking details (default collapsed in call trace) */
+.trace-thinking-details {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.trace-thinking-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  background: var(--color-surface);
+  user-select: none;
+  list-style: none;
+}
+
+.trace-thinking-summary::-webkit-details-marker {
+  display: none;
+}
+
+.trace-thinking-summary:hover {
+  color: var(--color-text-secondary);
+}
+
+/* Also tighten thinking text spacing */
+.trace-thinking {
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.trace-thinking :deep(.markdown-content p) {
+  margin: 0 0 2px 0;
+}
+
+.trace-thinking :deep(.streaming-text) {
+  line-height: 1.3;
 }
 
 .trace-empty {

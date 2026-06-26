@@ -86,10 +86,12 @@ export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
     };
   }
 
-  // Natural completion: model produced text, no more tools, no pending input
+  // Model produced text but did NOT call task_complete — this is NOT
+  // a final answer. Require an explicit task_complete signal to stop,
+  // otherwise the model's output is just intermediate narration.
   return {
-    needsFollowUp: false,
-    decision: { decision: 'stop', reason: 'no_follow_up', taxonomy: 'completed' },
+    needsFollowUp: true,
+    decision: { decision: 'continue', reason: 'missing_task_complete' },
   };
 }
 

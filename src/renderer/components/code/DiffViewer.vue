@@ -157,12 +157,12 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
   border-radius: 3px;
 }
 .diff-stat.added {
-  color: #2da44e;
-  background: color-mix(in srgb, #2da44e 12%, transparent);
+  color: var(--color-green);
+  background: color-mix(in srgb, var(--color-green) 12%, transparent);
 }
 .diff-stat.removed {
-  color: #e5534b;
-  background: color-mix(in srgb, #e5534b 12%, transparent);
+  color: var(--color-red);
+  background: color-mix(in srgb, var(--color-red) 12%, transparent);
 }
 
 .diff-body {
@@ -179,10 +179,10 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
   background: transparent;
 }
 .diff-row.added {
-  background: color-mix(in srgb, #2da44e 10%, transparent);
+  background: color-mix(in srgb, var(--color-green) 10%, transparent);
 }
 .diff-row.removed {
-  background: color-mix(in srgb, #e5534b 10%, transparent);
+  background: color-mix(in srgb, var(--color-red) 10%, transparent);
 }
 
 .line-num {
@@ -207,17 +207,17 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
 }
 
 .diff-row.added .line-sign {
-  color: #2da44e;
+  color: var(--color-green);
 }
 .diff-row.removed .line-sign {
-  color: #e5534b;
+  color: var(--color-red);
 }
 
 .diff-row.added .line-num {
-  border-color: color-mix(in srgb, #2da44e 20%, transparent);
+  border-color: color-mix(in srgb, var(--color-green) 20%, transparent);
 }
 .diff-row.removed .line-num {
-  border-color: color-mix(in srgb, #e5534b 20%, transparent);
+  border-color: color-mix(in srgb, var(--color-red) 20%, transparent);
 }
 
 .line-content {

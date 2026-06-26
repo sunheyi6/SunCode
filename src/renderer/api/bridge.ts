@@ -17,7 +17,12 @@ import type {
   TokenUsageSummary,
 } from '@shared/types';
 
-const api = (): Window['suncode'] => window.suncode;
+const api = (): NonNullable<Window['suncode']> => {
+  if (!window.suncode) {
+    throw new Error('window.suncode API not available — ensure preload script has loaded');
+  }
+  return window.suncode;
+};
 
 export const bridge = {
   // ===== Agent =====

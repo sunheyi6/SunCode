@@ -60,11 +60,11 @@ export class CompletionStopHook implements StopHook {
     // the model may have given up prematurely. Inject a prompt to
     // encourage a real response.
     const textLen = ctx.assistantText.trim().length;
-    if (textLen < 20 && ctx.toolCalls.length === 0 && ctx.toolResults.length === 0) {
+    if (textLen < 50 && ctx.toolCalls.length === 0 && ctx.toolResults.length === 0) {
       return {
         shouldBlock: true,
         shouldStop: false,
-        reason: 'response too short, likely incomplete',
+        reason: `response too short (${textLen} chars), likely incomplete`,
         continuationPrompt:
           '你的回复太短了，看起来可能没有完成用户的任务。请检查你是否已经完成了所有必要的步骤，然后给出完整的最终回答。如果已完成，请明确说明完成的内容。',
       };

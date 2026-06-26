@@ -128,8 +128,8 @@ watch(
 }
 
 .subagent-card.running { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
-.subagent-card.done { border-color: color-mix(in srgb, #2da44e 30%, transparent); }
-.subagent-card.error { border-color: color-mix(in srgb, #e5534b 30%, transparent); }
+.subagent-card.done { border-color: color-mix(in srgb, var(--color-green) 30%, transparent); }
+.subagent-card.error { border-color: color-mix(in srgb, var(--color-red) 30%, transparent); }
 
 .card-header {
   display: flex; align-items: center; gap: 8px;
@@ -144,16 +144,16 @@ watch(
   background: var(--color-overlay);
 }
 .running .status-dot { background: var(--color-accent); animation: pulse 1.2s infinite; }
-.done .status-dot { background: #2da44e; }
-.error .status-dot { background: #e5534b; }
+.done .status-dot { background: var(--color-green); }
+.error .status-dot { background: var(--color-red); }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
 .agent-icon { font-size: 13px; }
 .agent-label { font-size: 13px; font-weight: 550; color: var(--color-text); flex: 1; }
 .status-badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 600; }
 .running-badge { background: color-mix(in srgb, var(--color-accent) 15%, transparent); color: var(--color-accent); }
-.done-badge { background: color-mix(in srgb, #2da44e 15%, transparent); color: #2da44e; }
-.error-badge { background: color-mix(in srgb, #e5534b 15%, transparent); color: #e5534b; }
+.done-badge { background: color-mix(in srgb, var(--color-green) 15%, transparent); color: var(--color-green); }
+.error-badge { background: color-mix(in srgb, var(--color-red) 15%, transparent); color: var(--color-red); }
 .expand-icon { font-size: 11px; color: var(--color-text-muted); }
 
 .card-body {
@@ -210,8 +210,8 @@ watch(
 }
 
 .result-error {
-  font-size: 11px; color: #e5534b;
-  background: color-mix(in srgb, #e5534b 8%, transparent);
+  font-size: 11px; color: var(--color-red);
+  background: color-mix(in srgb, var(--color-red) 8%, transparent);
   padding: 4px 6px; border-radius: 3px;
 }
 

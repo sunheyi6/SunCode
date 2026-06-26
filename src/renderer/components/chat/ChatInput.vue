@@ -520,20 +520,24 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 .composer {
   position: relative;
   width: 100%;
-  padding: 12px 14px 12px 16px;
+  padding: 14px 16px;
   overflow: visible;
-  border: 1px solid var(--border-color-strong);
-  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
   background: var(--color-bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 16px rgba(0, 0, 0, 0.06);
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
 }
 
 .composer:has(.goal-indicator) {
-  border-color: color-mix(in srgb, #f59e0b 50%, var(--border-color-strong));
-  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.15);
+  border-color: color-mix(in srgb, var(--color-orange) 35%, var(--border-color-strong));
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 16px color-mix(in srgb, var(--color-orange) 12%, transparent);
 }
 
 .goal-indicator {
@@ -542,9 +546,9 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   gap: 8px;
   padding: 6px 12px;
   margin: -6px 0 8px 0;
-  border-radius: 10px;
-  background: color-mix(in srgb, #f59e0b 12%, var(--color-bg));
-  border: 1px solid color-mix(in srgb, #f59e0b 25%, transparent);
+  border-radius: var(--border-radius-sm);
+  background: color-mix(in srgb, var(--color-orange) 10%, var(--color-bg));
+  border: 1px solid color-mix(in srgb, var(--color-orange) 20%, transparent);
   font-size: 13px;
 }
 
@@ -555,7 +559,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 
 .goal-label {
   font-weight: 700;
-  color: #d97706;
+  color: var(--color-orange);
 }
 
 .goal-hint {
@@ -760,16 +764,16 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #e5534b;
+  background: var(--color-red);
   color: #fff;
   border: none;
   border-radius: 50%;
   cursor: pointer;
   font-size: 14px;
-  transition: background 0.15s;
+  transition: background 0.15s, opacity 0.15s;
 }
 .stop-btn:hover {
-  background: #c94038;
+  opacity: 0.85;
 }
 
 .dropdown-menu {

@@ -7,6 +7,8 @@
 | [系统提示词设计](system-prompt-design.md) | System Prompt 构建：角色定义、Tool Discipline 反循环规则、一行式工具摘要、XML 结构化上下文、Token 优化 |
 | [工具调用设计](tool-calling-design.md) | 工具架构：回合事件 (turn_start/end)、参数验证、前端工具卡片 (Command/File/Inspect)、数据流 |
 | [上下文压缩设计](context-compaction-design.md) | 通过 `prepareNextTurn` 钩子自动压缩：触发策略、消息保留、与 Agent Loop 集成 |
+| [任务规划系统](task-planning-system.md) | 强制执行规划：三道防线、Plan Gate、Plan Parser、右侧面板统一、断路器机制 |
+| [任务结束判断机制](task-completion-mechanism.md) | `needs_follow_up` 决策、Goal 自主循环、Stop Hooks、双字段输出模型 |
 
 ## 2026-06 架构变更摘要
 
@@ -19,6 +21,9 @@
 | `turn_start` / `turn_end` 事件 | 回合边界感知，前端展示进度（第N轮）|
 | 工具参数运行时验证 | 必填参数检查 + 类型强制转换 |
 | 前端工具卡片优化 | FileInspectCard (read/glob/grep)、思考区自动折叠、输入历史导航 |
+| 任务规划系统 | 三道防线（用户消息注入 + System Prompt + 首轮检查）、Plan Gate 强制步骤完成、断路器防死循环 |
+| Plan Parser | 宽松解析模型输出中的 📋 checklist，支持多种编号格式，自动去重 |
+| 右侧面板统一 | Git + Plan + Process 三合一右侧悬浮面板，计划 5 条默认折叠，显示执行时间 |
 
 ## 相关源码
 

@@ -10,6 +10,19 @@ const searchQuery = ref('');
 const selectMode = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
 
+/** Track which folder groups are collapsed. */
+const collapsedGroups = ref<Set<string>>(new Set());
+
+function toggleGroup(path: string) {
+  const next = new Set(collapsedGroups.value);
+  if (next.has(path)) {
+    next.delete(path);
+  } else {
+    next.add(path);
+  }
+  collapsedGroups.value = next;
+}
+
 onMounted(() => {
   void sessionsStore.init();
 
@@ -211,53 +224,59 @@ function formatTime(value: string): string {
       </label>
 
       <section v-for="group in groupedSessions" :key="group.path" class="project-group">
-        <div class="project-heading" :title="group.path">
+        <div
+          class="project-heading"
+          :class="{ collapsed: collapsedGroups.has(group.path) }"
+          :title="group.path"
+          @click="toggleGroup(group.path)"
+        >
+          <span class="project-chevron">{{ collapsedGroups.has(group.path) ? '▶' : '▼' }}</span>
           <span class="project-icon">◇</span>
           <span class="project-name">{{ projectName(group.path) }}</span>
           <span class="project-count">{{ group.sessions.length }}</span>
         </div>
 
-        <div
-          v-for="session in group.sessions"
-          :key="session.id"
-          class="conversation-row"
-          :class="{
-            active: session.id === sessionsStore.activeSessionId,
-            selected: selectedIds.has(session.id),
-          }"
-        >
-          <!-- Checkbox in select mode -->
-          <label v-if="selectMode" class="select-checkbox">
-            <input
-              type="checkbox"
-              :checked="selectedIds.has(session.id)"
-              @change="toggleSelect(session.id)"
-            />
-          </label>
-
-          <button
-            class="conversation-item"
-            @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
+        <template v-if="!collapsedGroups.has(group.path)">
+          <div
+            v-for="session in group.sessions"
+            :key="session.id"
+            class="conversation-row"
+            :class="{
+              active: session.id === sessionsStore.activeSessionId,
+              selected: selectedIds.has(session.id),
+            }"
           >
-            <span class="conversation-mark" />
-            <span class="conversation-copy">
-              <span class="conversation-name">{{ session.name }}</span>
-              <span class="conversation-meta">
-                {{ session.messageCount }} 条消息 · {{ formatTime(session.updated) }}
+            <!-- Checkbox in select mode -->
+            <label v-if="selectMode" class="select-checkbox">
+              <input
+                type="checkbox"
+                :checked="selectedIds.has(session.id)"
+                @change="toggleSelect(session.id)"
+              />
+            </label>
+
+            <button
+              class="conversation-item"
+              @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
+            >
+              <span class="conversation-mark" />
+              <span class="conversation-copy">
+                <span class="conversation-name">{{ session.name }}</span>
+                <span class="conversation-time">{{ formatTime(session.updated) }}</span>
               </span>
-            </span>
-          </button>
+            </button>
 
-          <!-- Delete button on hover (hidden in select mode) -->
-          <button
-            v-if="!selectMode"
-            class="delete-btn"
-            title="删除对话"
-            @click.stop="deleteSingle(session.id)"
-          >
-            ×
-          </button>
-        </div>
+            <!-- Delete button on hover (hidden in select mode) -->
+            <button
+              v-if="!selectMode"
+              class="delete-btn"
+              title="删除对话"
+              @click.stop="deleteSingle(session.id)"
+            >
+              ×
+            </button>
+          </div>
+        </template>
       </section>
 
       <div v-if="groupedSessions.length === 0" class="empty-conversations">
@@ -419,6 +438,22 @@ function formatTime(value: string): string {
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--border-radius-sm);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.project-heading:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-secondary);
+}
+
+.project-chevron {
+  font-size: 8px;
+  flex-shrink: 0;
+  width: 10px;
+  text-align: center;
 }
 
 .project-icon { color: var(--color-accent); }
@@ -462,7 +497,7 @@ function formatTime(value: string): string {
 }
 
 .conversation-row .delete-btn:hover {
-  color: #e5534b;
+  color: var(--color-red);
 }
 
 .select-checkbox {
@@ -531,9 +566,11 @@ function formatTime(value: string): string {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.conversation-meta {
+.conversation-time {
   color: var(--color-text-muted);
   font-size: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .empty-conversations {
@@ -552,15 +589,15 @@ function formatTime(value: string): string {
 .batch-delete-btn {
   width: 100%;
   height: 36px;
-  border: 1px solid #e5534b;
+  border: 1px solid var(--color-red);
   background: transparent;
-  color: #e5534b;
+  color: var(--color-red);
   font-size: 13px;
   font-weight: 600;
 }
 
 .batch-delete-btn:hover:not(:disabled) {
-  background: #e5534b;
+  background: var(--color-red);
   color: #fff;
 }
 

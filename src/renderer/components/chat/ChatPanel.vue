@@ -57,9 +57,14 @@ onUnmounted(() => {
     <template v-else>
       <div class="welcome-empty">
         <div class="welcome-content">
-          <div class="welcome-icon">☀️</div>
-          <h2>欢迎使用 SunCode</h2>
-          <p>你的 AI 智能编程助手</p>
+          <div class="welcome-logo" aria-hidden="true">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="8" stroke="currentColor" stroke-width="1.5" />
+              <path d="M24 2v6M24 40v6M2 24h6M40 24h6M10.3 10.3l4.2 4.2M33.5 33.5l4.2 4.2M10.3 37.7l4.2-4.2M33.5 14.5l4.2-4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </div>
+          <h2>SunCode</h2>
+          <p>AI 编程助手</p>
         </div>
         <div class="welcome-input-area">
           <PendingPromptQueue @send-now="interruptAndSend" />
@@ -95,30 +100,31 @@ onUnmounted(() => {
 
 .welcome-content {
   text-align: center;
-  max-width: 560px;
-  margin-bottom: 32px;
+  max-width: 480px;
+  margin-bottom: 24px;
 }
 
-.welcome-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
+.welcome-logo {
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
 }
 
 .welcome-content h2 {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 500;
   color: var(--color-text);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
+  letter-spacing: 0.02em;
 }
 
 .welcome-content > p {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
 }
 
 .welcome-input-area {
   width: 100%;
-  max-width: 720px;
+  max-width: 640px;
 }
 </style>

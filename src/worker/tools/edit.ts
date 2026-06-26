@@ -54,8 +54,52 @@ export function createEditTool(workingDir: string) {
         const count = content.split(oldString).length - 1;
 
         if (count === 0) {
+          const SNIPPET_MAX = 3000;
+          const PREVIEW_LINES = 30;
+          const lines = content.split('\n');
+          const fileSnippet =
+            content.length <= SNIPPET_MAX
+              ? content
+              : [
+                  `[文件共 ${lines.length} 行，显示前 ${PREVIEW_LINES} 行]`,
+                  ...lines.slice(0, PREVIEW_LINES),
+                  `... 省略 ${lines.length - PREVIEW_LINES} 行`,
+                ].join('\n');
+
+          // Find the best-matching line for each non-empty line in old_string
+          const oldLines = oldString.split('\n').filter((l) => l.trim());
+          let bestMatchHint = '';
+          for (const needle of oldLines) {
+            const trimmed = needle.trim();
+            if (trimmed.length < 5) continue;
+            for (let i = 0; i < lines.length; i++) {
+              const hay = lines[i].trim();
+              if (hay === trimmed || (hay.length > 10 && hay.includes(trimmed))) {
+                const ctxStart = Math.max(0, i - 2);
+                const ctxEnd = Math.min(lines.length, i + 3);
+                bestMatchHint = [
+                  `\n[第 ${i + 1} 行附近找到相似内容:]`,
+                  ...lines.slice(ctxStart, ctxEnd).map((l, j) => `  ${ctxStart + j + 1}: ${l}`),
+                ].join('\n');
+                break;
+              }
+            }
+            if (bestMatchHint) break;
+          }
+
           return failForTarget(
-            'old_string not found in file. Make sure the string matches exactly, including whitespace and indentation. Do not keep guessing old_string; use read to inspect the exact current file content, or use write to replace the full file when a precise edit is unreliable.',
+            [
+              'old_string not found in file. The file may have been modified since you last read it.',
+              '',
+              '当前文件内容:',
+              '```',
+              fileSnippet,
+              '```',
+              bestMatchHint,
+              '请基于上面的实际文件内容重新构造 old_string，或使用 write 替换整个文件。',
+            ]
+              .filter(Boolean)
+              .join('\n'),
           );
         }
 

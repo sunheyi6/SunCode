@@ -88,24 +88,27 @@ export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
   needsFollowUp: boolean;
   decision: TurnDecision;
 } {
-  // 优先级：abort > task_complete > tool calls > pending input > max turns > natural stop
+  // 优先级：abort > task_complete > tool calls > pending input > max turns > missing_task_complete
 
   if (input.isAborted)    → { needsFollowUp: false, decision: { reason: 'aborted', taxonomy: 'aborted' } }
   if (input.hasTaskComplete) → { needsFollowUp: false, decision: { reason: 'task_complete', taxonomy: 'completed' } }
   if (toolCalls.length > 0) → { needsFollowUp: true,  decision: 'continue' }
   if (input.hasPendingInput) → { needsFollowUp: true,  decision: 'continue' }
   if (input.isMaxTurnsReached) → { needsFollowUp: false, decision: { reason: 'max_turns', taxonomy: 'max_turns_exhausted' } }
-  default                  → { needsFollowUp: false, decision: { reason: 'no_follow_up', taxonomy: 'completed' } }
+  // 模型输出文本但没调用 task_complete — 不视为完成
+  default                  → { needsFollowUp: true,  decision: { reason: 'missing_task_complete' } }
 }
 ```
+
+**关键变化（2026-06-26）**：`task_complete` 现在是唯一终止方式。模型输出文本但没有 task_complete → 注入提醒提示（最多 2 次），而非直接停止。
 
 ### 3.3 与旧逻辑的对比
 
 | 场景 | 旧逻辑 | 新逻辑 |
 |------|--------|--------|
 | 模型输出文本 + `task_complete` | 拦截 tool，提取 summary | 同，但增加 `TurnDecision` 返回值 |
-| 模型输出文本 + 无 tool call | `isIncompleteProgressText()` 正则检测 → 注入纠正提示 | `computeNeedsFollowUp()` 判定 → `no_follow_up`，自然停止 |
-| 模型输出"还需要修复…" | 正则匹配到 → 注入纠正提示 | **不再拦截**，因为模型没调 tool = 它决定停了 |
+| 模型输出文本 + 无 tool call | `isIncompleteProgressText()` 正则检测 → 注入纠正提示 | `computeNeedsFollowUp()` 判定 → `missing_task_complete`，注入 `task_complete` 提醒（≤2 次） |
+| 模型输出"还需要修复…" | 正则匹配到 → 注入纠正提示 | 不经文本判断，走 `missing_task_complete` 路径 → 提醒调用 `task_complete` |
 | 用户排队了新的 prompt | 不感知 | `hasPendingInput: true` → 继续循环 |
 | 轮次耗尽 | while 条件退出，返回错误消息 | 同，但增加 `taxonomy: 'max_turns_exhausted'` |
 
@@ -115,7 +118,14 @@ export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
 
 - Codex 的做法是让模型自然表达意图：发 tool call = 继续，不发 = 停止。不依赖文本启发式。
 - 正则匹配无法覆盖所有场景，误判修复比误判漏掉更糟糕（注入错误纠正提示会干扰模型）。
-- Stop Hooks 中的 `CompletionStopHook` 提供了更可靠的替代：检查回复是否过于简短（<20 字符），而非检查具体的"未完"文本模式。
+- Stop Hooks 中的 `CompletionStopHook` 提供了更可靠的替代：检查回复是否过于简短（<50 字符），而非检查具体的"未完"文本模式。
+
+**`task_complete` 是强制终止条件**（2026-06-26 更新）：
+
+- 模型输出文本但未调用 `task_complete` → 不视为完成，注入提醒提示（最多 2 次）
+- 3 次提醒后仍不调用 → Plan Gate 检查（见 `docs/task-planning-system.md`）→ 计划完成则接受，否则断路器触发后接受
+- 原因：推理模型（DeepSeek 等）经常输出中间过渡文本（"Let me check..."）后就 stop，被误判为完成。强制 `task_complete` 彻底解决了这个问题。
+- 此机制同时替代了 `lastToolHadError` 检测（工具错误后模型 stop → 会走 `missing_task_complete` 路径获得提醒）。
 
 ---
 
@@ -312,7 +322,7 @@ turnDecision.decision === 'stop'
 | Hook | Priority | 功能 |
 |------|----------|------|
 | `SafetyStopHook` | 20 | 检测 `rm -rf /`、`sudo rm`、`chmod 777 /`、`git push --force main` 等危险操作 |
-| `CompletionStopHook` | 30 | 检测回复长度 < 20 字符且无 tool call → 注入提示要求模型给出完整回答 |
+| `CompletionStopHook` | 30 | 检测回复长度 < 50 字符且无 tool call → 注入提示要求模型给出完整回答 |
 
 ### 5.4 注册机制
 
@@ -465,3 +475,93 @@ onRunEvent({
 3. **关注点分离**：Agent loop、Goal loop、Stop hooks 各司其职，通过接口通信。
 4. **借鉴成熟设计**：`needs_follow_up` 借鉴 Codex，验证循环借鉴 maka-agent，stop hooks 借鉴 Codex。
 5. **先实现后写文档**：所有代码已存在于 working tree 中，文档描述实际架构。
+
+---
+
+## 10. 双字段输出模型（2026-06-26）
+
+### 10.1 问题
+
+模型的 `text` 字段同时承载两种不同性质的输出：
+- **中间过程**："Let me read the file..."、"让我检查一下..."、工具执行前的过渡叙述
+- **最终结果**：任务完成后的总结回答
+
+两者混在同一字段中，系统无法区分。推理模型（DeepSeek）在中间轮次输出的短文本被误判为最终回答，导致用户看到"中间过程输出"。
+
+### 10.2 方案：Thinking / Text 双字段分离
+
+通过**系统提示词约定**而非 API 层改动，将模型的输出引导到两个字段：
+
+| 字段 | 对应渠道 | 可见性 | 用途 |
+|---|---|---|---|
+| **Thinking** | `thinking` / reasoning block | 默认折叠 | 所有中间叙述、内部推理、工具执行前的过渡语 |
+| **Text** | `text` content block | 直接显示 | **仅**最终回答，任务完全完成后再输出 |
+
+**系统提示词关键指令**（`system-prompt.ts`）：
+
+```
+1. Thinking field（思考字段）:
+   - 放所有过程中的叙述："让我读一下文件...", "我需要检查..."
+   - 默认折叠，用户不会看到
+
+2. Text field（文本字段）:
+   - 只放最终答案，任务完全完成后再输出
+   - 还在干活时不要输出 text — 全用 thinking
+
+完成后调用 task_complete，对话才会结束
+```
+
+### 10.3 生效链路
+
+```
+System Prompt 约定
+    ↓
+模型输出时:
+  ├─ 中间过程 → thinking 字段（折叠）
+  │   "Let me read the file..." → 用户看不到
+  ├─ 工具调用 → 正常执行
+  └─ 最终结果 → text 字段（显示）+ task_complete(summary)
+      "修改完成，共 3 个文件..." → 用户看到
+    ↓
+Agent Loop 强制 task_complete 终止
+    ↓
+UI 渲染:
+  中间消息 → CompactToolBar + <details> 折叠
+  最终消息 → text 直接显示
+```
+
+### 10.4 UI 渲染规则
+
+| 消息类型 | 流式阶段 | 完成后 |
+|---|---|---|
+| 有工具调用（中间） | `CompactToolBar` — 紧凑单行工具名 + 文件名 | `<details>` 折叠 — 摘要行 + 可展开工具卡片 |
+| 无工具调用（最终） | — | text 直接显示；thinking 仅在 text < 120 字符且 thinking > 200 字符时自动展开 |
+| `task_complete` | — | `summary` 提取为最终回答 |
+
+**自动展开逻辑**（`AssistantMessage.vue` `autoExpandThinking`）：
+- 仅对最终消息（无 tool calls）生效
+- 条件：`thinkingLen > 200 && textLen < 120`
+- 中间消息一律折叠，防止推理模型的思考链淹没对话
+
+### 10.5 关键实现文件
+
+| 文件 | 职责 |
+|---|---|
+| `src/worker/agent/system-prompt.ts` | 双字段输出格式指令 |
+| `src/worker/agent/agent-loop.ts` | `missing_task_complete` 处理器，`mergeThinkingIntoAnswer` |
+| `src/worker/agent/turn-decision.ts` | `computeNeedsFollowUp` 要求 `task_complete` 才 stop |
+| `src/worker/agent/stop-hooks.ts` | `CompletionStopHook` 阻止 < 50 字符的过短回答 |
+| `src/renderer/components/chat/AssistantMessage.vue` | thinking 折叠渲染，最终消息自动展开逻辑 |
+| `src/worker/tools/edit.ts` | edit 失败返回当前文件内容 + 模糊匹配提示 |
+
+### 10.6 设计取舍
+
+**为什么不新增 API 字段（如 `final_text`）？**
+- 模型 API（Anthropic、DeepSeek）不支持自定义 content block type
+- 通过系统提示词约定引导模型行为，对任意模型都有效
+- `task_complete` 的 `summary` 参数承担了"最终结果字段"的角色
+
+**为什么 `mergeThinkingIntoAnswer` 仍存在？**
+- 向后兼容：简单问答场景，模型可能不调用 `task_complete`
+- 兜底机制：2 次提醒后模型仍不调用 `task_complete`，提取 thinking 结论部分作为降级回答
+- 提取策略：text ≤ 30 字符 + thinking > 100 字符 → 只取最后 500 字符的结论部分，而非全量 dump

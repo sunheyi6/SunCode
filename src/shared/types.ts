@@ -614,3 +614,33 @@ export interface GitInfo {
   changedFiles: number;
   stagedFiles: number;
 }
+
+// ===== Task Plan Types =====
+
+/** Classification of a user request — query (只读查看) or execution (需要修改/执行). */
+export type TaskType = 'query' | 'execution';
+
+/** Status of a single step in a task plan. */
+export type StepStatus = 'pending' | 'in_progress' | 'done';
+
+/** A single step in a task execution plan. */
+export interface TaskStep {
+  /** Unique identifier, e.g. "step_1" */
+  id: string;
+  /** 1-based step number */
+  index: number;
+  /** Human-readable step description (verb-first) */
+  description: string;
+  /** Current status */
+  status: StepStatus;
+  /** Optional one-line result summary when the step is done */
+  result?: string;
+}
+
+/** Structured task plan parsed from the model's text output. */
+export interface TaskPlan {
+  /** Whether this is a query or execution task */
+  taskType: TaskType;
+  /** Ordered list of execution steps */
+  steps: TaskStep[];
+}

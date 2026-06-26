@@ -53,6 +53,10 @@ function parseDescription(toolName: string, rawArgs: string): string {
 export function useConfirmDialog() {
   if (cleanup) return { confirmState, handleConfirm, handleDeny };
 
+  if (!window.suncode?.onConfirmRequest) {
+    return { confirmState, handleConfirm, handleDeny };
+  }
+
   cleanup = window.suncode.onConfirmRequest((request) => {
     confirmState.toolCallId = request.toolCallId;
     confirmState.toolName = request.toolName;

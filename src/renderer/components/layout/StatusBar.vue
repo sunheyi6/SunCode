@@ -105,10 +105,10 @@ const tokenInfo = computed(() => {
   align-items: center;
   gap: 3px;
   padding: 1px 7px;
-  border-radius: 10px;
-  background: color-mix(in srgb, #f59e0b 15%, transparent);
-  color: #d97706;
-  font-weight: 700;
+  border-radius: var(--border-radius-sm);
+  background: color-mix(in srgb, var(--color-orange) 12%, transparent);
+  color: var(--color-orange);
+  font-weight: 600;
   font-size: 11px;
 }
 </style>

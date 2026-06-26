@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 import CompactToolBar from '../tools/CompactToolBar.vue';
 import ToolOperationList from '../tools/ToolOperationList.vue';
@@ -21,8 +21,13 @@ const hasThinking = computed(() => props.message.isStreaming || Boolean(props.me
  * inside thinking and leave only a token sentence as text — without expansion
  * the user can't find the actual results.
  */
+const isFinalMessage = computed(() => (props.message.toolCalls?.length ?? 0) === 0);
+
 const autoExpandThinking = computed(() => {
   if (props.message.isStreaming) return false; // Already inline during streaming
+  // Only auto-expand the FINAL message (no tool calls) — intermediate turns
+  // with tool calls should stay collapsed to avoid showing raw reasoning chains
+  if (!isFinalMessage.value) return false;
   const textLen = props.message.content.length;
   const thinkingLen = props.message.thinking?.length ?? 0;
   // Auto-expand when text is empty or trivially short, and thinking is substantial
@@ -30,7 +35,6 @@ const autoExpandThinking = computed(() => {
 });
 
 const copied = ref(false);
-const thinkingBodyRef = ref<HTMLElement | null>(null);
 
 // ── Elapsed time tracking ──
 const elapsedSeconds = ref(0);
@@ -82,19 +86,6 @@ const formattedElapsed = computed(() => {
   return remain > 0 ? `${m}m${remain}s` : `${m}m`;
 });
 
-// Auto-scroll thinking body to bottom as new text streams in
-watch(
-  () => props.message.thinking?.length ?? 0,
-  () => {
-    void nextTick(() => {
-      // rAF ensures browser has completed layout before we read scrollHeight
-      requestAnimationFrame(() => {
-        const el = thinkingBodyRef.value;
-        if (el) el.scrollTop = el.scrollHeight;
-      });
-    });
-  },
-);
 
 const timeLabel = computed(() => {
   const d = new Date(props.message.timestamp);
@@ -243,16 +234,7 @@ async function copyContent() {
           <span>{{ thinkingSummary }}</span>
         </div>
 
-        <!-- No tool calls yet: pure thinking — show thinking text directly -->
-        <div
-          v-if="(message.toolCalls?.length ?? 0) === 0 && message.thinking"
-          ref="thinkingBodyRef"
-          class="thinking-live-body"
-        >
-          <StreamingText :text="message.thinking" :is-streaming="true" />
-        </div>
-
-        <!-- Has tool calls: compact one-line summaries (full detail in right panel) -->
+        <!-- Compact one-line summaries (full detail in right panel) -->
         <CompactToolBar
           v-if="(message.toolCalls?.length ?? 0) > 0"
           :calls="message.toolCalls ?? []"
@@ -277,11 +259,11 @@ async function copyContent() {
         </div>
       </details>
 
-      <!-- 正文（思考完成后才显示） -->
-      <div v-if="hasContent && !message.isStreaming" class="message-content">
+      <!-- 正文（流式时显示进度节点，完成后显示完整结果） -->
+      <div v-if="hasContent" class="message-content" :class="{ streaming: message.isStreaming }">
         <StreamingText
           :text="message.content"
-          :is-streaming="false"
+          :is-streaming="message.isStreaming"
         />
       </div>
 
@@ -345,22 +327,6 @@ async function copyContent() {
   50% { opacity: 1; }
 }
 
-.thinking-live-body {
-  font-size: 12px;
-  line-height: 1.15;
-  color: var(--color-text-muted);
-  white-space: pre-wrap;
-  max-height: 600px;
-  overflow-y: auto;
-}
-
-/* Tighten paragraph gaps inside thinking (marked wraps \n\n → <p>) */
-.thinking-live-body :deep(p) {
-  margin: 0;
-}
-.thinking-live-body :deep(br) {
-  line-height: 1;
-}
 
 /* ── 完成后：折叠 ── */
 .thinking-section {
@@ -402,6 +368,17 @@ async function copyContent() {
   font-size: 14px;
   line-height: 1.6;
   color: var(--color-text);
+}
+
+/* Progress milestones during streaming — slightly muted, narrative style */
+.message-content.streaming {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 4px 0;
+  border-left: 2px solid var(--color-accent);
+  padding-left: 10px;
+  margin: 4px 0;
 }
 
 .streaming-indicator {
