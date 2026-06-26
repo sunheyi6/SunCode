@@ -63,7 +63,7 @@
     "vitest": "^4.1.9",
     "vue-tsc": "^2.2.0"
   },
-  "author": "SunCode Team <suncode@example.com>",
+  "author": "SunCode Team",
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"

@@ -33,6 +33,7 @@ linux:
     - target: deb
       arch: [x64]
   category: Development
+  maintainer: SunCode Team <suncode@users.noreply.github.com>
   # icon: resources/icon.png
 
 # ===== NSIS 安装器（Windows）=====
