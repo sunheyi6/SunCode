@@ -20,8 +20,9 @@ win:
 mac:
   target:
     - target: dmg
-      arch: [x64, arm64]
+      arch: [arm64]
   category: public.app-category.developer-tools
+  identity: null
   # icon: resources/icon.png
 
 # ===== Linux =====
