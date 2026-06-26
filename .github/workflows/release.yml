@@ -27,7 +27,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Vite + Package Electron
+      - name: Build Vite
+        run: npm run build
+
+      - name: Package Electron
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
