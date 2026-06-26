@@ -86,12 +86,12 @@ export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
     };
   }
 
-  // Model produced text but did NOT call task_complete — this is NOT
-  // a final answer. Require an explicit task_complete signal to stop,
-  // otherwise the model's output is just intermediate narration.
+  // Model produced text without calling tools — natural stop.
+  // The model has nothing more to do; its text IS the final answer.
+  // Plan Gate in agent-loop.ts will intercept if plan steps are incomplete.
   return {
-    needsFollowUp: true,
-    decision: { decision: 'continue', reason: 'missing_task_complete' },
+    needsFollowUp: false,
+    decision: { decision: 'stop', reason: 'no_follow_up', taxonomy: 'completed' },
   };
 }
 

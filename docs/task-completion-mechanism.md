@@ -100,7 +100,7 @@ export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
 }
 ```
 
-**关键变化（2026-06-26）**：`task_complete` 现在是唯一终止方式。模型输出文本但没有 task_complete → 注入提醒提示（最多 2 次），而非直接停止。
+**关键变化（2026-06-26 晚）**：回退到 Codex 原始设计——"不调工具 = 完成"。不再强制 `task_complete`，Plan Gate 替代作为安全网。`task_complete` 仍可用作显式结束信号，但不强制。
 
 ### 3.3 与旧逻辑的对比
 

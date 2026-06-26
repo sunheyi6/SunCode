@@ -27,13 +27,12 @@ agent-loop.ts: 用户消息注入（主防线）
     │       └──→ GitPanel.vue: 右侧面板展示步骤清单
     │       └──→ TaskPlanCard.vue: 聊天框展示（已移除，避免重复）
     │
-    ├── 模型调 task_complete → Plan Gate 检查
-    │   ├── 全部 [x] → 正常结束 ✅
-    │   └── 有 [ ] → 拒绝 task_complete，列出未完成步骤，强制继续（最多 3 次）
+    ├── 模型调了工具 → 继续执行
     │
-    └── 模型走神不调 task_complete → 提醒上限后 Plan Gate 检查
-        ├── 全部 [x] → 接受终止
-        └── 有 [ ] → 强制继续（最多 2 次），超出后断路器触发
+    └── 模型自然停止（无工具调用）→ Plan Gate 检查
+        ├── 无计划 → 正常终止 ✅
+        ├── 有计划 + 全部 [x] → 正常终止 ✅
+        └── 有计划 + 有 [ ] → 强制继续（最多 3 次），超出后断路器触发
 ```
 
 ## 3. 三道防线
@@ -86,49 +85,41 @@ If [执行], your text field MUST also include a plan BEFORE calling tools
 
 ## 4. Plan Gate：计划完成度强制检查
 
-### 4.1 task_complete 拦截
+### 4.1 自然停止拦截
 
-模型调用 `task_complete` 时，先检查文本中是否包含计划：
+模型不再调用工具（`turnDecision.decision === 'stop', reason: 'no_follow_up'`）时，统一在此处检查计划：
 
 ```typescript
-// agent-loop.ts: hasTaskComplete 分支
-const planResult = checkPlanCompletion(assistantText);
-if (planResult.hasPlan && planResult.pendingCount > 0 && planForceContinueCount < 3) {
-  // 拒绝 task_complete，列出未完成步骤，强制继续
+// agent-loop.ts: stop 分支
+const planCheck = checkPlanCompletion(assistantText);
+if (planCheck.hasPlan && planCheck.pendingCount > 0 && planForceContinueCount < 3) {
   planForceContinueCount++;
+  // 列出未完成步骤，强制继续
   contextMessages.push({
     role: 'user',
-    content: `你的执行计划还有 ${pendingCount} 个步骤未完成。请立即执行：
+    content: `你的执行计划还有 ${pendingCount} 个步骤未完成。请继续执行：
   - [ ] Step 2: 修改代码
-  - [ ] Step 3: 运行测试
-  全部 [x] 后才能调用 task_complete。`
+  - [ ] Step 3: 运行测试`
   });
-  continue; // 不终止，继续下一轮
-}
-```
-
-### 4.2 提醒上限拦截
-
-模型连续 3 次不调 task_complete → 在"接受终止"之前也检查计划：
-
-```typescript
-// agent-loop.ts: taskCompleteReminderCount > 3
-const planCheck = checkPlanCompletion(assistantText);
-if (planCheck.hasPlan && planCheck.pendingCount > 0 && planForceContinueCount < 2) {
-  planForceContinueCount++;
-  // 注入提醒，强制继续
   continue;
 }
 ```
 
-### 4.3 断路器
+### 4.2 断路器
 
-防止死循环：如果 plan force continue 超过阈值（task_complete 拦截 3 次 + 提醒上限 2 次），接受终止。
+防止死循环：`planForceContinueCount` 超过 3 次后接受终止。
 
 ```
-task_complete 拦截: 最多 3 次 → 断路器触发，接受
-提醒上限拦截:     最多 2 次 → 断路器触发，接受
+模型自然停止 → Plan Gate 拦截 → 最多 3 次 → 断路器触发，接受
 ```
+
+### 4.3 task_complete（可选）
+
+模型可以显式调 `task_complete` 来加速结束，但不强制要求。调了也会走相同的 Plan Gate 检查。
+
+### 4.4 设计选择：不再强制要求 task_complete
+
+之前要求模型必须调 `task_complete` 才能终止，但 DeepSeek 等推理模型经常忘记调，导致对话进入"提醒→继续→提醒→继续"循环。改为"不调工具 = 完成"（Codex 设计），Plan Gate 是唯一的安全网。
 
 ## 5. Plan Parser
 

@@ -126,7 +126,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let turnCount = initialTurnCount;
   const tokenUsage = { input: 0, output: 0, total: 0 };
   let lastToolHadError = false;
-  let taskCompleteReminderCount = 0;
   let planForceContinueCount = 0; // circuit breaker for plan-incomplete loops
 
   const identityReply = getIdentityReply(initialMessages);
@@ -480,71 +479,52 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         };
       }
 
-      // Non-task_complete tool calls → execute them and continue
+      // Tool calls present → execute them and continue
       if (turnDecision.decision === 'continue' && toolCalls.length > 0) {
         // Fall through to tool execution below
-      } else if (turnDecision.decision === 'continue' && toolCalls.length === 0) {
-        // Model stopped without calling task_complete. Require it.
-        taskCompleteReminderCount++;
-        if (taskCompleteReminderCount <= 3) {
-          console.log(`[AgentLoop] Missing task_complete, reminder ${taskCompleteReminderCount}/3`);
-          const interimBlocks: ContentBlock[] = [];
-          if (thinkingText) interimBlocks.push({ type: 'thinking', text: thinkingText });
-          if (assistantText) interimBlocks.push({ type: 'text', text: assistantText });
-          else interimBlocks.push({ type: 'text', text: '处理中...' });
-          contextMessages.push({ role: 'assistant', content: interimBlocks });
-          contextMessages.push({
-            role: 'user',
-            content:
-              '请调用 task_complete 工具来标记任务完成。在 summary 参数中描述你完成了什么。如果你还需要继续工作（比如运行测试、修改代码），请直接继续，但完成所有工作后务必调用 task_complete。',
-          });
-          onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
-          onRunEvent({
-            type: 'turn_completed',
-            runId,
-            turnNumber: turnCount,
-            hasToolCalls: false,
-            timestamp: '',
-          });
-          continue;
-        }
-        // After 3 reminders, check if plan is incomplete before giving up
-        console.log('[AgentLoop] task_complete reminder limit reached, checking plan...');
+      }
+
+      // Stop decision (natural end, no tools — model is done)
+      if (turnDecision.decision === 'stop') {
+        // ═══════════════════════════════════════════════════════════
+        // Plan Gate: if model says it's done but plan is incomplete,
+        // force continuation. Circuit breaker prevents infinite loop.
+        // ═══════════════════════════════════════════════════════════
         const planCheck = checkPlanCompletion(assistantText);
-        if (planCheck.hasPlan && planCheck.pendingCount > 0 && planForceContinueCount < 2) {
+        if (planCheck.hasPlan && planCheck.pendingCount > 0 && planForceContinueCount < 3) {
           planForceContinueCount++;
-          // Plan is incomplete — inject a targeted reminder instead of stopping
           const pendingList = planCheck.pendingSteps.length > 0
             ? planCheck.pendingSteps.map((s) => `  - [ ] ${s}`).join('\n')
             : '';
-          console.log(`[AgentLoop] Plan incomplete (attempt ${planForceContinueCount}/2): ${planCheck.doneCount} done, ${planCheck.pendingCount} pending — forcing continue`);
+          console.log(`[AgentLoop] Plan incomplete (attempt ${planForceContinueCount}/3): ${planCheck.doneCount} done, ${planCheck.pendingCount} pending — forcing continue`);
+
+          // Push current message
+          const blocks: ContentBlock[] = [];
+          if (thinkingText) blocks.push({ type: 'thinking', text: thinkingText });
+          if (assistantText) blocks.push({ type: 'text', text: assistantText });
+          else blocks.push({ type: 'text', text: '处理中...' });
+          contextMessages.push({ role: 'assistant', content: blocks, toolCalls });
+
           contextMessages.push({
             role: 'user',
-            content: `你的执行计划还有 ${planCheck.pendingCount} 个步骤未完成（${planCheck.doneCount}/${planCheck.totalCount} 已完成）。请立即执行以下步骤：\n${pendingList}\n每完成一步后用 📋 进度更新：来更新计划。全部 Step 标记为 [x] 后才能调用 task_complete 结束。`,
+            content: `你的执行计划还有 ${planCheck.pendingCount} 个步骤未完成（${planCheck.doneCount}/${planCheck.totalCount}）。请继续执行：\n${pendingList}\n每完成一步后输出 📋 进度更新：更新状态。`,
           });
+
           onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
           onRunEvent({ type: 'turn_completed', runId, turnNumber: turnCount, hasToolCalls: false, timestamp: '' });
           continue;
         }
         if (planCheck.hasPlan && planCheck.pendingCount > 0) {
-          console.log(`[AgentLoop] Plan force-continue limit reached (${planForceContinueCount} attempts), accepting as final`);
+          console.log(`[AgentLoop] Plan force-continue limit reached (${planForceContinueCount} attempts), accepting stop with incomplete plan`);
         }
-        // Fall through to the stop path below by re-routing
-        // (set a flag and handle via the normal stop logic)
-      }
 
-      // After fall-through from missing_task_complete (reminder limit exceeded),
-      // or direct stop decision — stop the loop.
-      if (turnDecision.decision === 'stop' || taskCompleteReminderCount > 3) {
-        // If we fell through from missing_task_complete, we need to push
-        // the current message first
-        if (taskCompleteReminderCount > 3 && turnDecision.decision !== 'stop') {
-          const interimBlocks: ContentBlock[] = [];
-          if (thinkingText) interimBlocks.push({ type: 'thinking', text: thinkingText });
-          if (assistantText) interimBlocks.push({ type: 'text', text: assistantText });
-          else interimBlocks.push({ type: 'text', text: '处理中...' });
-          contextMessages.push({ role: 'assistant', content: interimBlocks });
-        }
+        // Push current message before finalizing
+        const interimBlocks: ContentBlock[] = [];
+        if (thinkingText) interimBlocks.push({ type: 'thinking', text: thinkingText });
+        if (assistantText) interimBlocks.push({ type: 'text', text: assistantText });
+        else interimBlocks.push({ type: 'text', text: '处理中...' });
+        contextMessages.push({ role: 'assistant', content: interimBlocks, toolCalls });
+
         // Run stop hooks before finalizing (safety, completion check)
         if (stopHooks) {
           const hookResult = await stopHooks.runAll({
