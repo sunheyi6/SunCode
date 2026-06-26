@@ -151,14 +151,24 @@ jobs:
           cat /tmp/release-notes.md
 
       - name: Create draft GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: SunCode ${{ env.RELEASE_TAG }}
-          draft: true
-          body_path: /tmp/release-notes.md
-          files: |
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Delete existing draft if present
+          IS_DRAFT=$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft 2>/dev/null || echo "")
+          if [ "${IS_DRAFT}" == "true" ]; then
+            gh release delete "${RELEASE_TAG}" --yes
+          fi
+
+          gh release create "${RELEASE_TAG}" \
+            --draft \
+            --title "SunCode ${RELEASE_TAG}" \
+            --notes-file /tmp/release-notes.md \
             release-assets/*
+
+          echo "✅ Draft Release 已创建: ${RELEASE_TAG}"
 
   # ===== Stage 3: 发布 Draft Release =====
   publish-release:
