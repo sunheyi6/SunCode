@@ -149,9 +149,14 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   parts.push('     - [ ] Step 1: ...');
   parts.push('     - [ ] Step 2: ...');
   parts.push('   - **Every subsequent turn: update the plan** — mark done with [x] ✅.');
-  parts.push('   - When complete: output the full final result (code, output, conclusions).');
-  parts.push('   - NEVER leave the text field empty — that means the user is staring at nothing.');
-  parts.push('   - The text field IS your only visible communication channel during execution.');
+  parts.push('   - **When all steps complete: output the COMPLETE FINAL RESULT in the text field.**');
+  parts.push('');
+  parts.push('   ⚠️ CRITICAL — THE TEXT FIELD IS YOUR ONLY DELIVERABLE:');
+  parts.push('   - The text field MUST contain the full answer: code, verification output, file paths, conclusions.');
+  parts.push('   - The user can ONLY see the text field. Thinking is hidden. If you put the answer in thinking, the user sees nothing.');
+  parts.push('   - Minimum: 3-5 sentences with concrete results. "已完成。" is a FAILURE.');
+  parts.push('   - If you wrote code, show the code. If you ran tests, show the output. If you fixed a bug, explain root cause + fix.');
+  parts.push('   - Write the text field as if you are handing a document to your boss — complete, self-contained, copy-paste ready.');
   parts.push('');
   parts.push('When you are done, call the `task_complete` tool with a summary.');
   parts.push('The conversation will NOT end until you call `task_complete`.');

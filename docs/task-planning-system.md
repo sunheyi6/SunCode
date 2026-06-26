@@ -261,7 +261,19 @@ export interface ChatMessage {
 - 右侧面板是"进度仪表盘"，看一眼就知道执行到哪了
 - 减少文本框的视觉噪音
 
-## 10. 经验教训
+## 10. 正文字段严格要求
+
+不再强制 `task_complete` 后，text 字段是模型**唯一能被用户看到**的输出。系统在三个地方严格声明：
+
+| 位置 | 指令 |
+|------|------|
+| `constants.ts` DEFAULT_SYSTEM_PROMPT | "正文是你唯一的交付物。Thinking 字段用户看不到。把答案放 thinking = 用户什么都没收到。" |
+| `system-prompt.ts` 动态部分 | "Write the text field as if you are handing a document to your boss — complete, self-contained, copy-paste ready." |
+| `agent-loop.ts` 注入指令 | "这是你唯一能被用户看到的内容！必须包含所有代码、运行输出、文件路径、结论。≥ 3 句实质性内容。" |
+
+绝对禁止：`"已完成。"`、`"处理中..."` 等空话。
+
+## 11. 经验教训
 
 ### 10.1 DeepSeek 推理模型倾向
 推理模型天然把分析输出到 thinking 字段，text 字段极短。即使注入规划指令，模型也可能在 thinking 中规划而不在 text 中输出。这导致：
