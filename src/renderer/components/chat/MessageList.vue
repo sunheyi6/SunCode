@@ -44,7 +44,6 @@ function lastMessageContentKey(): string {
 }
 
 function onUserScroll(): void {
-  if (!chatStore.isStreaming) return;
   userScrolledUp.value = !isAtBottom();
 }
 
@@ -110,6 +109,18 @@ onUnmounted(() => {
       <UserMessage v-if="msg.role === 'user'" :message="msg" />
       <AssistantMessage v-else-if="msg.role === 'assistant'" :message="msg" />
     </template>
+
+    <!-- 滚动到底部按钮 -->
+    <Transition name="scroll-btn">
+      <button
+        v-if="userScrolledUp"
+        class="scroll-to-bottom-btn"
+        title="跳转到最新内容"
+        @click="scrollToBottom(true)"
+      >
+        <span class="scroll-btn-icon">↓</span>
+      </button>
+    </Transition>
   </div>
 </template>
 
@@ -118,5 +129,50 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-md) 0;
+  position: relative;
+}
+
+/* ---- 滚动到底部按钮 ---- */
+.scroll-to-bottom-btn {
+  position: sticky;
+  bottom: 12px;
+  left: calc(100% - 52px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  z-index: 10;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.scroll-to-bottom-btn:hover {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.scroll-btn-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* Transition */
+.scroll-btn-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.scroll-btn-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.scroll-btn-enter-from,
+.scroll-btn-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 </style>
