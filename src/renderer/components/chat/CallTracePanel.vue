@@ -24,8 +24,8 @@ defineEmits<{
 }>();
 
 const traceDirPath = computed(() => {
-  if (!props.workingDir || !props.sessionId) return '';
-  return `${props.workingDir}/.suncode/sessions/${props.sessionId}`.replace(/\\/g, '/');
+  if (!props.workingDir) return '';
+  return `${props.workingDir}/.suncode/sessions`.replace(/\\/g, '/');
 });
 
 async function openTraceDir(): Promise<void> {
