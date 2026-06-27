@@ -473,6 +473,17 @@ export const useChatStore = defineStore('chat', () => {
     showCallTrace.value = !showCallTrace.value;
   }
 
+  // ── Model switch notice ─────────────────────────────────────────────
+  const modelSwitchNotice = ref<string | null>(null);
+
+  function setModelSwitchNotice(text: string): void {
+    modelSwitchNotice.value = text;
+  }
+
+  function dismissModelSwitchNotice(): void {
+    modelSwitchNotice.value = null;
+  }
+
   return {
     messages,
     isStreaming,
@@ -491,5 +502,8 @@ export const useChatStore = defineStore('chat', () => {
     loadMessages,
     /** Set of session IDs with an active agent run (for sidebar breathing indicator). */
     streamingSessionIds,
+    modelSwitchNotice,
+    setModelSwitchNotice,
+    dismissModelSwitchNotice,
   };
 });

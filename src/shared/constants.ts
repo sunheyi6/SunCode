@@ -19,6 +19,26 @@ export const DEFAULT_SETTINGS = {
   goalMaxWallTimeMs: 600000, // 10 minutes
 };
 
+/** Curated list of recommended models for coding tasks. */
+export const RECOMMENDED_MODELS: Array<{ provider: string; model: string; label: string }> = [
+  { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+  { provider: 'anthropic', model: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
+  { provider: 'anthropic', model: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+  { provider: 'openai', model: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
+  { provider: 'openai', model: 'gpt-5-codex', label: 'GPT-5 Codex' },
+  { provider: 'openai', model: 'o4-mini', label: 'o4 Mini' },
+  { provider: 'google', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
+  { provider: 'google', model: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite' },
+  { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+  { provider: 'deepseek', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+  { provider: 'xai', model: 'grok-code-fast-1', label: 'Grok Code Fast' },
+  { provider: 'xai', model: 'grok-4.3', label: 'Grok 4.3' },
+  { provider: 'mistral', model: 'mistral.mistral-large-3-675b-instruct', label: 'Mistral Large 3' },
+  { provider: 'groq', model: 'meta-llama/llama-4-maverick-17b-128e-instruct', label: 'Llama 4 Maverick' },
+  { provider: 'openrouter', model: 'openai/gpt-5.1-codex', label: 'GPT-5.1 Codex (OpenRouter)' },
+  { provider: 'openrouter', model: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (OpenRouter)' },
+];
+
 /**
  * Lightweight/cheap model to use for short auxiliary tasks like session title
  * generation. Kept on the active provider so the user's API key is reused.

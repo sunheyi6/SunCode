@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted, watch, ref } from 'vue';
 import { useAgent } from '../../composables/useAgent';
 import { useChatStore } from '../../stores/chat';
 import { useSettingsStore } from '../../stores/settings';
@@ -15,6 +15,21 @@ const settingsStore = useSettingsStore();
 const hasMessages = computed(() => chatStore.messages.length > 0);
 
 const chatZoom = computed(() => settingsStore.settings.fontSize / 14);
+
+// Auto-dismiss model switch notice after 5 seconds
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+watch(
+  () => chatStore.modelSwitchNotice,
+  (text) => {
+    if (noticeTimer) clearTimeout(noticeTimer);
+    if (text) {
+      noticeTimer = setTimeout(() => {
+        chatStore.dismissModelSwitchNotice();
+        noticeTimer = null;
+      }, 5000);
+    }
+  },
+);
 
 function handleSend(text: string): void {
   send(text);
@@ -46,6 +61,16 @@ onUnmounted(() => {
 
     <!-- Messages (with welcome when empty) -->
     <template v-if="hasMessages">
+      <!-- Model switch notice -->
+      <div
+        v-if="chatStore.modelSwitchNotice"
+        class="model-switch-notice"
+      >
+        <span class="notice-icon">🔄</span>
+        <span class="notice-text">{{ chatStore.modelSwitchNotice }}</span>
+        <button class="notice-dismiss" @click="chatStore.dismissModelSwitchNotice()">✕</button>
+      </div>
+
       <MessageList />
       <PendingPromptQueue @send-now="interruptAndSend" />
       <div class="input-area">
@@ -126,5 +151,66 @@ onUnmounted(() => {
 .welcome-input-area {
   width: 100%;
   max-width: 640px;
+}
+
+/* Model switch notice banner */
+.model-switch-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  margin: 8px 16px 0;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 10%, transparent) 0%, color-mix(in srgb, var(--color-accent) 4%, transparent) 100%);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, var(--border-color));
+  border-radius: var(--border-radius);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+  animation: noticeSlideIn 0.2s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+@keyframes noticeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.notice-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.notice-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.notice-dismiss {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+
+.notice-dismiss:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 </style>

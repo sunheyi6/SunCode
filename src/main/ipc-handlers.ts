@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { DEFAULT_SETTINGS, LITE_MODELS, TITLE_GENERATION_PROMPT } from '@shared/constants';
+import { DEFAULT_SETTINGS, LITE_MODELS, RECOMMENDED_MODELS, TITLE_GENERATION_PROMPT } from '@shared/constants';
 import type {
   AppSettings,
   DayStats,
@@ -757,25 +757,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
   });
 
   ipcMain.handle('models:getRecommended', async () => {
-    return [
-      { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-      { provider: 'anthropic', model: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
-      { provider: 'openai', model: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
-      { provider: 'openai', model: 'gpt-5-codex', label: 'GPT-5 Codex' },
-      { provider: 'google', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
-      { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-      { provider: 'xai', model: 'grok-code-fast-1', label: 'Grok Code Fast' },
-      {
-        provider: 'openrouter',
-        model: 'openai/gpt-5.1-codex',
-        label: 'GPT-5.1 Codex (OpenRouter)',
-      },
-      {
-        provider: 'openrouter',
-        model: 'anthropic/claude-sonnet-4-5',
-        label: 'Claude Sonnet 4.5 (OpenRouter)',
-      },
-    ];
+    return RECOMMENDED_MODELS;
   });
 
   // ===== API Keys =====

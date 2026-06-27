@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
 import { useSessionsStore } from '../../stores/sessions';
+import { useChatStore } from '../../stores/chat';
 import { getComposerTextareaHeight } from './chat-input';
 import { bridge } from '../../api/bridge';
 import type { GitInfo } from '@shared/types';
@@ -26,6 +27,7 @@ const inputRef = ref<HTMLElement | null>(null);
 const modelOpen = ref(false);
 const thinkingOpen = ref(false);
 const permOpen = ref(false);
+const folderOpen = ref(false);
 
 // Workspace / Git info
 const gitInfo = ref<GitInfo>({
@@ -78,16 +80,54 @@ async function refreshGitInfo() {
 
 watch(() => activeSession.value?.workingDirectory, refreshGitInfo, { immediate: true });
 
+/** Unique working directories from all sessions, sorted by recency. */
+const recentFolders = computed(() => {
+  const seen = new Map<string, { path: string; sessionId: string; updated: number }>();
+  for (const s of sessionsStore.sessions) {
+    const dir = s.workingDirectory;
+    if (!dir) continue;
+    const ts = new Date(s.updated).getTime();
+    const entry = seen.get(dir);
+    if (!entry || ts > entry.updated) {
+      seen.set(dir, { path: dir, sessionId: s.id, updated: ts });
+    }
+  }
+  return Array.from(seen.values())
+    .sort((a, b) => b.updated - a.updated)
+    .slice(0, 20); // Cap at 20 entries
+});
+
 async function selectFolder() {
+  folderOpen.value = false;
   const dir = await bridge.selectDirectory();
   if (dir) {
     await sessionsStore.createSession(dir);
   }
 }
 
+function switchToFolder(item: { path: string; sessionId: string }) {
+  folderOpen.value = false;
+  // Find the active session for this directory (prefer the most recent one)
+  const session = sessionsStore.sessions.find(
+    (s) => s.workingDirectory === item.path,
+  );
+  if (session && session.id !== sessionsStore.activeSessionId) {
+    sessionsStore.selectSession(session.id);
+  }
+}
+
+function toggleFolder(): void {
+  const nextState = !folderOpen.value;
+  closeAll();
+  folderOpen.value = nextState;
+}
+
 const hasInput = computed(() => inputText.value.trim().length > 0);
 const isGoalInput = computed(() => inputText.value.trim().startsWith('/goal'));
-const availableModels = computed(() => modelsStore.recommendedModels);
+/** Only show models for providers that have an API key configured. */
+const availableModels = computed(() =>
+  modelsStore.recommendedModels.filter((m) => modelsStore.hasKey(m.provider)),
+);
 const currentModelLabel = computed(() => {
   const model = availableModels.value.find(
     (option) =>
@@ -128,6 +168,7 @@ function closeAll(): void {
   modelOpen.value = false;
   thinkingOpen.value = false;
   permOpen.value = false;
+  folderOpen.value = false;
 }
 
 function onDocumentClick(event: MouseEvent): void {
@@ -137,6 +178,7 @@ function onDocumentClick(event: MouseEvent): void {
 }
 
 function toggleModel(): void {
+  if (props.isStreaming) return; // 回答中禁止切换模型
   const nextState = !modelOpen.value;
   closeAll();
   modelOpen.value = nextState;
@@ -154,9 +196,24 @@ function togglePerm(): void {
   permOpen.value = nextState;
 }
 
-function selectModel(option: { provider: string; model: string }): void {
+async function selectModel(option: { provider: string; model: string }): Promise<void> {
+  // 如果当前会话已有对话历史，切换模型会重新发送全部上下文
+  const chatStore = useChatStore();
+  const msgCount = chatStore.messages.length;
+  if (msgCount > 0) {
+    modelOpen.value = false;
+    const confirmed = await bridge.confirm(
+      '切换模型',
+      `当前对话已有 ${msgCount} 条消息，切换模型会将全部上下文重新导入新模型，可能产生额外 Token 费用。确认切换到 ${option.model}？`,
+    );
+    if (!confirmed) return;
+  }
   modelsStore.selectModel(option.provider, option.model);
   modelOpen.value = false;
+  // 在聊天框中显示切换提示
+  if (msgCount > 0) {
+    chatStore.setModelSwitchNotice(`已切换至 ${option.model}，后续对话将使用新模型。`);
+  }
 }
 
 function selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
@@ -290,11 +347,48 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   <div ref="inputRef" class="chat-input">
     <!-- Workspace info bar -->
     <div class="workspace-bar">
-      <button class="workspace-folder" type="button" @click="selectFolder">
-        <span class="folder-icon" aria-hidden="true">📁</span>
-        <span class="workspace-name">{{ workspaceName }}</span>
-        <span class="chevron" aria-hidden="true">⌄</span>
-      </button>
+      <div class="control-dropdown folder-dropdown" :class="{ open: folderOpen }">
+        <button
+          class="workspace-folder"
+          type="button"
+          :aria-expanded="folderOpen"
+          aria-haspopup="menu"
+          @click="toggleFolder"
+        >
+          <span class="folder-icon" aria-hidden="true">📁</span>
+          <span class="workspace-name">{{ workspaceName }}</span>
+          <span class="chevron" aria-hidden="true">⌄</span>
+        </button>
+        <div v-if="folderOpen" class="dropdown-menu folder-menu" role="menu">
+          <button
+            v-for="item in recentFolders"
+            :key="item.path"
+            class="dropdown-item"
+            :class="{ active: item.path === workspacePath }"
+            type="button"
+            role="menuitem"
+            @click="switchToFolder(item)"
+          >
+            <span class="item-folder-icon">📁</span>
+            <span class="item-info">
+              <span class="item-label">{{ item.path.split(/[\\/]/).filter(Boolean).pop() || item.path }}</span>
+              <span class="item-desc">{{ item.path }}</span>
+            </span>
+          </button>
+          <div v-if="recentFolders.length > 0" class="dropdown-divider" />
+          <button
+            class="dropdown-item pick-folder-item"
+            type="button"
+            role="menuitem"
+            @click="selectFolder"
+          >
+            <span class="item-icon-pick">＋</span>
+            <span class="item-info">
+              <span class="item-label">选择其他文件夹...</span>
+            </span>
+          </button>
+        </div>
+      </div>
       <div v-if="gitBranch" class="git-branch">
         <span class="branch-icon" aria-hidden="true">⑂</span>
         <span class="branch-name">{{ gitBranch }}</span>
@@ -367,8 +461,10 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
             <button
               class="toolbar-btn model-btn"
               type="button"
+              :class="{ 'model-btn-disabled': props.isStreaming }"
               :aria-expanded="modelOpen"
               aria-haspopup="menu"
+              :title="props.isStreaming ? '回答中无法切换模型' : '切换模型'"
               @click="toggleModel"
             >
               <span class="btn-label">{{ currentModelLabel }}</span>
@@ -707,6 +803,15 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
   color: var(--color-text);
 }
 
+.model-btn-disabled {
+  opacity: 0.45;
+  cursor: not-allowed !important;
+}
+
+.model-btn-disabled:hover {
+  background: transparent !important;
+}
+
 .thinking-btn .btn-label {
   max-width: 54px;
   color: var(--color-text);
@@ -812,6 +917,42 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 
 .permission-menu {
   min-width: 220px;
+}
+
+.folder-menu {
+  min-width: 320px;
+  max-width: 500px;
+}
+
+.folder-menu .item-folder-icon {
+  width: 18px;
+  flex-shrink: 0;
+  font-size: 14px;
+  text-align: center;
+}
+
+.folder-menu .item-desc {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 380px;
+}
+
+.dropdown-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border-color);
+}
+
+.pick-folder-item .item-icon-pick {
+  width: 18px;
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 300;
+  text-align: center;
+  color: var(--color-accent);
 }
 
 .dropdown-item {
