@@ -131,7 +131,23 @@ export const useChatStore = defineStore('chat', () => {
 
         target.content = data.text || '';
         target.thinking = data.thinking || '';
-        target.toolCalls = data.toolCalls || [];
+        // Accumulate tool calls across turns — the model reports only the current
+        // turn's calls in each message_update, so we merge by ID to avoid duplicates.
+        const incoming = data.toolCalls || [];
+        if (incoming.length > 0) {
+          const existing = target.toolCalls ?? [];
+          const existingIds = new Set(existing.map((t) => t.id));
+          const merged = [...existing];
+          for (const tc of incoming) {
+            const idx = existing.findIndex((t) => t.id === tc.id);
+            if (idx >= 0) {
+              merged[idx] = tc; // update in place (status/result may have changed)
+            } else if (!existingIds.has(tc.id)) {
+              merged.push(tc);
+            }
+          }
+          target.toolCalls = merged;
+        }
         target.isStreaming = event.type === 'message_update';
         isStreaming.value = event.type === 'message_update';
 

@@ -392,13 +392,76 @@ ToolOperationList → FileOperationCard / CommandOperationCard / FileInspectCard
 3. **忽略时效性**：bash 命令超时设太长，用户等得不耐烦
 4. **安全只是前端检查**：黑名单可被绕过，应配合沙箱（V2）
 
-### 📊 工具调用频率（典型 session）
+---
 
-| 工具 | 调用频率 | 占比 |
-|------|---------|------|
-| read | 12 | 40% |
-| grep | 6 | 20% |
-| edit | 4 | 13% |
-| bash | 4 | 13% |
-| glob | 3 | 10% |
-| write | 1 | 3% |
+## 9. 聊天框渲染策略
+
+### 9.1 流式阶段与完成阶段
+
+| 阶段 | 思考区域 | 正文区域 | 说明 |
+|------|---------|---------|------|
+| 流式中 | `CompactToolBar` — 工具调用紧凑摘要 | `StreamingText` — 纯文本（不解析 Markdown） | Markdown 解析在流式阶段做 O(n²)，卡死 UI |
+| 完成后（有工具） | `<details>` 折叠 → `ToolOperationList` — 完整工具卡片 | `StreamingText` — 完整 Markdown 渲染 | 不展示原始思考文本，思考内容走 CallTracePanel |
+| 完成后（无工具） | 无 | `StreamingText` — 完整 Markdown 渲染 | |
+
+### 9.2 CompactToolBar 紧凑工具条
+
+流式阶段每个工具一行，完成后 bash 显示 stdout 尾 3 行、文件编辑显示 `+N -M` diff 统计。
+
+```
+> 运行  npm run build  完成
+  Build successful in 2.3s
++ 编辑  utils.ts  完成
+  +12 -5
+$ 读取  utils.ts, config.ts  3 完成
+```
+
+### 9.3 工具调用跨轮累积
+
+`chat.ts` `handleStreamEvent` 中工具调用**按 ID 合并**而非覆盖：
+- `data.toolCalls` 只含当前轮的工具调用
+- 跨轮时合并到 `target.toolCalls`，已存在的更新状态
+- 避免最后一轮空 toolCalls 覆盖全部记录
+
+### 9.4 思考文本不进入聊天框
+
+- `mergeThinkingIntoAnswer()` 简化为直接返回 `assistantText`，不再合并思考内容
+- 思考过程统一走右侧 `CallTracePanel` 查看
+- 聊天框只展示工具调用摘要（流式中）和完整工具卡片（折叠展开）
+
+### 9.5 CallTracePanel 调用轨迹面板
+
+按时间线平铺展示，每条标注身份：
+
+```
+[用户]
+  "帮我重构 src/utils.ts"
+---┼---
+[模型] 第1次调用  deepseek/v4-pro  2.1s  ↑1.2k ↓456  end_turn
+  输入 · 3条消息  system≈3200
+  思考 · 450字符 (可折叠)
+  [调用工具] 2个
+     bash "npm run build" → stdout, stderr, exit code
+     read src/utils.ts → 文件内容
+---┼---
+[模型] 第2次调用  1.2s  ↑0.8k ↓234  stop
+  [回复]
+     已完成重构...
+```
+
+设计特点：
+- 纯文本标签，无 emoji（解析友好）
+- 可展开区域有 `>` 旋转箭头 + 悬停高亮
+- 输入消息、思考过程、工具调用均可独立折叠
+- 专用工具卡片复用 `CommandOperationCard` / `FileOperationCard` 等
+
+---
+
+## 10. 跨平台路径兼容
+
+Windows 上 `node:path.resolve()` 返回反斜杠，而 LLM 传入的路径可能用正斜杠。`startsWith()` 比较会误判。
+
+修复：所有工具在路径验证前统一 normalize：
+- `ls.ts`: 自定义 `normalizePath()` 统一转正斜杠
+- `glob.ts`, `find.ts`: 使用 `node:path.normalize()` 
+- `read.ts`, `write.ts`, `edit.ts`, `grep.ts`: 已使用 `normalize()`，无需修改
