@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 import type { ToolCallContent, TurnDetail } from '@shared/types';
+import { bridge } from '../../api/bridge';
 import CommandOperationCard from '../tools/CommandOperationCard.vue';
 import FileOperationCard from '../tools/FileOperationCard.vue';
 import FileInspectCard from '../tools/FileInspectCard.vue';
@@ -14,11 +15,23 @@ const showFullSystemPrompt = ref(false);
 const props = defineProps<{
   messages: ChatMessage[];
   systemPrompt: string;
+  sessionId?: string;
+  workingDir?: string;
 }>();
 
 defineEmits<{
   close: [];
 }>();
+
+const traceDirPath = computed(() => {
+  if (!props.workingDir || !props.sessionId) return '';
+  return `${props.workingDir}/.suncode/sessions/${props.sessionId}/runs`.replace(/\\/g, '/');
+});
+
+async function openTraceDir(): Promise<void> {
+  if (!traceDirPath.value) return;
+  await bridge.openPath(traceDirPath.value);
+}
 
 // ── Identity-tagged timeline entry ──
 type TimelineEntry =
@@ -149,6 +162,11 @@ function toolSummary(tc: ToolCallContent): string {
     <div class="trace-header">
       <span class="trace-title">调用轨迹</span>
       <button class="trace-close" @click="$emit('close')" title="关闭">×</button>
+    </div>
+
+    <div v-if="traceDirPath" class="trace-path-bar" @click="openTraceDir" title="点击打开所在文件夹">
+      <span class="trace-path-label">Trace</span>
+      <span class="trace-path-value">{{ traceDirPath }}</span>
     </div>
 
     <div class="trace-body">
@@ -308,6 +326,28 @@ function toolSummary(tc: ToolCallContent): string {
   cursor: pointer; font-size: 14px;
 }
 .trace-close:hover { background: var(--color-surface-hover); color: var(--color-text); }
+
+.trace-path-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px; min-height: 28px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--color-bg-tertiary);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.trace-path-bar:hover { background: var(--color-surface-hover); }
+
+.trace-path-label {
+  font-size: 10px; font-weight: 600; color: var(--color-text-muted);
+  background: var(--color-surface); padding: 1px 6px; border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.trace-path-value {
+  font-size: 10px; font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .trace-body {
   flex: 1; min-height: 0;

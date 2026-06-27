@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useChatStore } from '../../stores/chat';
+import { useSessionsStore } from '../../stores/sessions';
 import ChatPanel from '../chat/ChatPanel.vue';
 import CallTracePanel from '../chat/CallTracePanel.vue';
 import ConfirmDialog from '../chat/ConfirmDialog.vue';
@@ -11,6 +12,11 @@ import SettingsPanel from '../settings/SettingsPanel.vue';
 import { useConfirmDialog } from '../../composables/useConfirmDialog';
 
 const chatStore = useChatStore();
+const sessionsStore = useSessionsStore();
+
+const activeSession = computed(() =>
+  sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
+);
 
 const sidebarWidth = ref(260);
 const tracePanelWidth = ref(380);
@@ -115,6 +121,8 @@ const traceSystemPrompt = computed(() => {
         <CallTracePanel
           :messages="chatStore.messages"
           :system-prompt="traceSystemPrompt"
+          :session-id="sessionsStore.activeSessionId ?? undefined"
+          :working-dir="activeSession?.workingDirectory"
           :style="{ width: tracePanelWidth + 'px' }"
           @close="chatStore.toggleCallTrace()"
         />
