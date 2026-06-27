@@ -17,6 +17,7 @@ export const useSettingsStore = defineStore('settings', () => {
     mcpServers: [],
     skills: [],
     envApiKeys: {},
+    maxLessons: 200,
   });
 
   const isLoaded = ref(false);
