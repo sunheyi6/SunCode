@@ -10,10 +10,13 @@ const props = defineProps<{
 }>();
 
 const hasContent = computed(() => props.message.content.length > 0);
+const hasToolCalls = computed(() =>
+  (props.message.toolCalls?.length ?? 0) > 0
+);
 const hasThinking = computed(() =>
   props.message.isStreaming ||
   Boolean(props.message.thinking) ||
-  (props.message.toolCalls?.length ?? 0) > 0
+  hasToolCalls.value
 );
 
 const copied = ref(false);
@@ -126,12 +129,12 @@ async function copyContent() {
         />
       </div>
 
-      <!-- Done: collapsed section, only tool call details (no raw thinking text) -->
-      <details v-else-if="hasThinking" class="thinking-section">
-        <summary class="thinking-summary">{{ thinkingSummary }}</summary>
+      <!-- Done: collapsed thinking with tool diffs hidden inside -->
+      <details v-if="!message.isStreaming && hasThinking" class="thinking-section">
+        <summary class="thinking-summary thinking-summary-done">{{ thinkingSummary }}</summary>
         <div class="thinking-content">
           <ToolOperationList
-            v-if="(message.toolCalls?.length ?? 0) > 0"
+            v-if="hasToolCalls"
             :calls="message.toolCalls ?? []"
           />
           <div v-else class="thinking-no-tools">无工具调用</div>
@@ -202,6 +205,23 @@ async function copyContent() {
 }
 details[open] > .thinking-summary::before { transform: rotate(90deg); }
 .thinking-summary:hover { background: var(--color-surface-hover); }
+
+.thinking-summary-done {
+  cursor: pointer;
+  opacity: 0.6;
+}
+.thinking-summary-done::before {
+  content: '✓';
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 10px;
+  color: var(--color-green);
+  transition: transform 0.15s;
+}
+details[open] > .thinking-summary-done::before {
+  content: '>'; transform: rotate(90deg);
+  color: var(--color-text-muted);
+}
 
 .thinking-content {
   padding: 6px 10px; font-size: 12px; line-height: 1.2;

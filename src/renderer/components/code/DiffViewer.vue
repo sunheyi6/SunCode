@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 const props = defineProps<{
   oldCode: string;
@@ -14,16 +14,21 @@ interface DiffLine {
   text: string;
 }
 
+const PREVIEW_LINES = 6;
+const expanded = ref(false);
+
 const diffLines = computed<DiffLine[]>(() => computeDiff(props.oldCode, props.newCode));
+
+const visibleLines = computed(() =>
+  expanded.value ? diffLines.value : diffLines.value.slice(0, PREVIEW_LINES),
+);
+
+const hiddenCount = computed(() => diffLines.value.length - PREVIEW_LINES);
 
 const stats = computed(() => {
   const added = diffLines.value.filter((d) => d.type === 'added').length;
   const removed = diffLines.value.filter((d) => d.type === 'removed').length;
   return { added, removed };
-});
-
-const showLineNumbers = computed(() => {
-  return diffLines.value.some((d) => d.oldLineNum !== undefined || d.newLineNum !== undefined);
 });
 
 // ── Diff algorithm (LCS-based, line-level) ──
@@ -104,7 +109,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
       <table class="diff-table">
         <tbody>
           <tr
-            v-for="(line, i) in diffLines"
+            v-for="(line, i) in visibleLines"
             :key="i"
             class="diff-row"
             :class="line.type"
@@ -118,6 +123,13 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
           </tr>
         </tbody>
       </table>
+      <button
+        v-if="!expanded && hiddenCount > 0"
+        class="diff-expand-btn"
+        @click="expanded = true"
+      >
+        展开全部 {{ diffLines.length }} 行
+      </button>
     </div>
   </div>
 </template>
@@ -167,6 +179,24 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
 
 .diff-body {
   overflow-x: auto;
+}
+
+.diff-expand-btn {
+  display: block;
+  width: 100%;
+  padding: 5px 0;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.diff-expand-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-accent);
 }
 
 .diff-table {

@@ -64,6 +64,8 @@ export function createWriteTool(workingDir: string) {
               filePath: normalized,
               status: 'edited',
               ...changes,
+              oldContent,
+              newContent: content,
             },
           );
         });
