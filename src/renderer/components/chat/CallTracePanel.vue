@@ -174,10 +174,10 @@ function toolSummary(tc: ToolCallContent): string {
       <div class="trace-header-actions">
         <button
           class="trace-folder-btn"
-          title="在文件管理器中显示"
+          title="在文件管理器中打开会话文件"
           @click="openTraceFolder"
         >
-          📂
+          打开文件夹
         </button>
         <button class="trace-close" @click="$emit('close')" title="关闭">×</button>
       </div>
@@ -343,12 +343,14 @@ function toolSummary(tc: ToolCallContent): string {
 
 .trace-folder-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px;
-  border: none; border-radius: 4px;
-  background: transparent; color: var(--color-text-muted);
-  cursor: pointer; font-size: 15px;
+  height: 26px; padding: 0 10px;
+  border: 1px solid var(--border-color-strong); border-radius: 4px;
+  background: var(--color-surface); color: var(--color-text-secondary);
+  cursor: pointer; font-size: 11px; font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.12s;
 }
-.trace-folder-btn:hover { background: var(--color-surface-hover); color: var(--color-accent); }
+.trace-folder-btn:hover { background: var(--color-surface-hover); color: var(--color-accent); border-color: var(--color-accent); }
 
 .trace-close {
   display: flex; align-items: center; justify-content: center;
