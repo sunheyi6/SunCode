@@ -96,6 +96,11 @@ export const CHARS_PER_TOKEN = 4;
 /** Context window safety margin (don't use more than this fraction) */
 export const CONTEXT_SAFETY_MARGIN = 0.9;
 
+// ===== Lesson Defaults =====
+
+/** 默认最大教训条数 */
+export const DEFAULT_MAX_LESSONS = 200;
+
 // ===== Context Budget Defaults =====
 
 /** Default max estimated tokens for a single tool result before pruning. */

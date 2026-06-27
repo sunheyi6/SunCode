@@ -194,6 +194,8 @@ export interface AppSettings {
   mcpServers: McpServerConfig[];
   skills: string[]; // paths to skill directories
   envApiKeys: Record<string, string>;
+  /** Max lessons to retain. Default 200. */
+  maxLessons?: number;
   /** Goal mode: max goal-level turns (each turn = one full agent run). Default 5. */
   goalMaxTurns?: number;
   /** Goal mode: max wall-clock time in milliseconds. Default 600000 (10 min). */
@@ -553,6 +555,67 @@ export interface ModelStats {
   output: number;
   total: number;
   runs: number;
+}
+
+// ===== Lesson Types =====
+
+/** 教训触发类型 */
+export type LessonTriggerType =
+  | 'tool_failure'
+  | 'user_correction'
+  | 'run_error'
+  | 'goal_repeated_failure';
+
+/** 单条教训条目 */
+export interface LessonEntry {
+  /** 文件名中的 slug */
+  slug: string;
+  /** 触发类型 */
+  type: LessonTriggerType;
+  /** 涉及的工具名（无则为空字符串） */
+  tool: string;
+  /** 关键词 */
+  keywords: string[];
+  /** 相关文件路径 */
+  files: string[];
+  /** ISO 日期 (YYYY-MM-DD) */
+  date: string;
+  /** 来源 runId */
+  runId: string;
+  /** 一句话标题（中文，≤30字） */
+  title: string;
+  /** 问题描述（≤200字） */
+  problem: string;
+  /** 根本原因（≤200字） */
+  rootCause: string;
+  /** 正确做法（≤200字） */
+  solution: string;
+}
+
+/** 教训索引（LESSONS.md 的内存表示） */
+export interface LessonIndex {
+  /** 按日期倒序排列的条目 */
+  entries: LessonEntry[];
+  /** 最后更新时间 (ISO) */
+  updatedAt: string;
+}
+
+/** 搜索结果 */
+export interface LessonSearchResult {
+  entry: LessonEntry;
+  /** 匹配打分（关键词交集计数） */
+  score: number;
+}
+
+/** 提取上下文（传入 extractLessonsIfNeeded 的原始材料） */
+export interface LessonExtractionContext {
+  triggerType: LessonTriggerType;
+  /** 最近几轮消息（含工具调用和结果） */
+  relevantMessages: Message[];
+  /** 错误详情（可选） */
+  error?: string;
+  /** 关联的 runId */
+  runId: string;
 }
 
 // ===== Subagent Types =====
