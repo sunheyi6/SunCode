@@ -13,6 +13,7 @@ import type {
   ToolResult,
   SessionMeta,
   TokenUsageSummary,
+  UpdateStatus,
 } from '@shared/types';
 
 /**
@@ -308,6 +309,16 @@ const suncodeAPI = {
     ipcRenderer.send('agent:confirm-response', toolCallId, confirmed, sessionId);
   },
 
+  /** Get the app version */
+  async getAppVersion(): Promise<string> {
+    return ipcRenderer.invoke('app:getVersion');
+  },
+
+  /** Open a file or folder in the system file explorer */
+  async openPath(targetPath: string): Promise<void> {
+    return ipcRenderer.invoke('shell:openPath', targetPath);
+  },
+
   /** Listen for run lifecycle events (for call trace panel). */
   onRunEvent(callback: (data: { sessionId: string; event: RunEvent }) => void): () => void {
     const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; event: RunEvent }): void =>
@@ -321,6 +332,41 @@ const suncodeAPI = {
     const handler = (_event: Electron.IpcRendererEvent, meta: SessionMeta): void => callback(meta);
     ipcRenderer.on('session:updated', handler);
     return () => ipcRenderer.removeListener('session:updated', handler);
+  },
+
+  // ===== Auto Update =====
+
+  /** Check for updates manually */
+  checkForUpdates(): void {
+    ipcRenderer.send('updater:check');
+  },
+
+  /** Start downloading the available update */
+  downloadUpdate(): void {
+    ipcRenderer.send('updater:download');
+  },
+
+  /** Install the downloaded update (quit and restart) */
+  installUpdate(): void {
+    ipcRenderer.send('updater:install');
+  },
+
+  /** Skip a specific version (don't notify again for this version) */
+  skipVersion(version: string): void {
+    ipcRenderer.send('updater:skip-version', version);
+  },
+
+  /** Get the current update status */
+  async getUpdateStatus(): Promise<UpdateStatus> {
+    return ipcRenderer.invoke('updater:getStatus');
+  },
+
+  /** Listen for update status changes */
+  onUpdateStatus(callback: (status: UpdateStatus) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void =>
+      callback(status);
+    ipcRenderer.on('updater:status', handler);
+    return () => ipcRenderer.removeListener('updater:status', handler);
   },
 };
 

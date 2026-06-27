@@ -685,6 +685,28 @@ export interface GitInfo {
   stagedFiles: number;
 }
 
+// ===== Auto Update Types =====
+
+export type UpdateState =
+  | 'idle'
+  | 'checking'
+  | 'update-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'no-update'
+  | 'error';
+
+export interface UpdateStatus {
+  state: UpdateState;
+  version?: string;
+  releaseDate?: string;
+  releaseNotes?: string;
+  downloadProgress?: number;
+  downloadBytesPerSecond?: number;
+  error?: string;
+  skippedVersion?: string;
+}
+
 // ===== Task Plan Types =====
 
 /** Classification of a user request — query (只读查看) or execution (需要修改/执行). */

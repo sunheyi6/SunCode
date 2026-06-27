@@ -15,6 +15,7 @@ import type {
   AppSettings,
   SessionMeta,
   TokenUsageSummary,
+  UpdateStatus,
 } from '@shared/types';
 import type {
   SessionStreamEvent,
@@ -165,6 +166,14 @@ export const bridge = {
     return api().getWorkingDir();
   },
 
+  async getAppVersion(): Promise<string> {
+    return api().getAppVersion();
+  },
+
+  async openPath(targetPath: string): Promise<void> {
+    return api().openPath(targetPath);
+  },
+
   async getTokenUsage(): Promise<TokenUsageSummary> {
     return api().getTokenUsage();
   },
@@ -236,5 +245,30 @@ export const bridge = {
   // ===== Window =====
   setTitleBarOverlayText(text: string): void {
     api().setTitleBarOverlayText(text);
+  },
+
+  // ===== Auto Update =====
+  checkForUpdates(): void {
+    api().checkForUpdates();
+  },
+
+  downloadUpdate(): void {
+    api().downloadUpdate();
+  },
+
+  installUpdate(): void {
+    api().installUpdate();
+  },
+
+  skipVersion(version: string): void {
+    api().skipVersion(version);
+  },
+
+  async getUpdateStatus(): Promise<UpdateStatus> {
+    return api().getUpdateStatus();
+  },
+
+  onUpdateStatus(callback: (status: UpdateStatus) => void): () => void {
+    return api().onUpdateStatus(callback);
   },
 };

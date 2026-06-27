@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import type { AppSettings } from '@shared/types';
 import { useSettingsStore } from '../../stores/settings';
+import { useUpdateStore } from '../../stores/update';
+import { bridge } from '../../api/bridge';
 import ModelSelector from './ModelSelector.vue';
 import TokenUsage from './TokenUsage.vue';
 
@@ -10,15 +12,26 @@ const emit = defineEmits<{
 }>();
 
 const settingsStore = useSettingsStore();
+const updateStore = useUpdateStore();
+const appVersion = ref('');
 
-type Section = 'model' | 'options' | 'usage';
+type Section = 'model' | 'options' | 'usage' | 'about';
 const activeSection = ref<Section>('model');
 
 const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'model', label: '模型配置', icon: '🧠' },
   { key: 'options', label: '选项', icon: '⚡' },
   { key: 'usage', label: '用量统计', icon: '📊' },
+  { key: 'about', label: '关于', icon: 'ℹ️' },
 ];
+
+onMounted(async () => {
+  try {
+    appVersion.value = await bridge.getAppVersion();
+  } catch {
+    appVersion.value = '0.1.0';
+  }
+});
 
 function updateThinkingLevel(level: string): void {
   settingsStore.update({
@@ -211,6 +224,59 @@ const permissionModes = [
               <div class="section-title">📊 用量统计</div>
               <p class="section-desc">按时间和模型维度查看 Token 使用情况</p>
               <TokenUsage />
+            </section>
+
+            <!-- 关于 -->
+            <section v-if="activeSection === 'about'">
+              <div class="section-title">ℹ️ 关于 SunCode</div>
+              <div class="about-info">
+                <div class="about-row">
+                  <span class="about-label">版本</span>
+                  <span class="about-value">{{ appVersion || '-' }}</span>
+                </div>
+                <div class="about-row">
+                  <span class="about-label">Electron</span>
+                  <span class="about-value">42</span>
+                </div>
+                <div class="about-row">
+                  <span class="about-label">Vite</span>
+                  <span class="about-value">6</span>
+                </div>
+              </div>
+
+              <div class="option-group" style="margin-top: 20px;">
+                <h4>更新</h4>
+                <p class="option-desc">
+                  检查是否有新版本可用。
+                  <template v-if="updateStore.status.version">
+                    当前最新：<strong>{{ updateStore.status.version }}</strong>
+                  </template>
+                </p>
+                <button
+                  class="check-update-btn"
+                  :disabled="updateStore.status.state === 'checking' || updateStore.status.state === 'downloading'"
+                  @click="updateStore.checkForUpdates()"
+                >
+                  <template v-if="updateStore.status.state === 'checking'">
+                    <span class="spinner-sm" /> 检查中...
+                  </template>
+                  <template v-else-if="updateStore.status.state === 'downloading'">
+                    下载中 {{ Math.round(updateStore.status.downloadProgress ?? 0) }}%
+                  </template>
+                  <template v-else>
+                    检查更新
+                  </template>
+                </button>
+                <p v-if="updateStore.status.state === 'no-update'" class="update-note success">
+                  ✅ 已是最新版本
+                </p>
+                <p v-else-if="updateStore.status.state === 'error'" class="update-note error">
+                  ⚠️ {{ updateStore.status.error || '检查更新失败' }}
+                </p>
+                <p v-else-if="updateStore.status.state === 'downloaded'" class="update-note success">
+                  ✅ 更新已下载，重启后安装
+                </p>
+              </div>
             </section>
           </div>
         </div>
@@ -489,4 +555,75 @@ const permissionModes = [
   color: var(--color-text-muted);
   margin-top: 1px;
 }
+
+/* About section */
+.about-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.about-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.about-row:last-child {
+  border-bottom: none;
+}
+.about-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  min-width: 70px;
+}
+.about-value {
+  font-size: 13px;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.check-update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.check-update-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+}
+.check-update-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.spinner-sm {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-color-strong);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.update-note {
+  font-size: 12px;
+  margin-top: 8px;
+}
+.update-note.success { color: var(--color-green); }
+.update-note.error { color: var(--color-red); }
 </style>

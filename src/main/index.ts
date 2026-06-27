@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, nativeTheme, shell } from 'electron';
 import { registerIpcHandlers } from './ipc-handlers';
 import { WindowManager } from './window-manager';
+import { initAutoUpdater } from './auto-updater';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -95,6 +96,9 @@ async function initApp(): Promise<void> {
 
   // All application options live in the in-app settings panel.
   Menu.setApplicationMenu(null);
+
+  // Initialize auto-updater (no-op in dev/portable mode)
+  initAutoUpdater(windowManager);
 
   // Create the main window
   const mainWindow = createMainWindow();

@@ -16,6 +16,7 @@ import type {
   AppSettings,
   SessionMeta,
   TokenUsageSummary,
+  UpdateStatus,
 } from '@shared/types';
 
 /** Wrapper types for IPC events that carry sessionId for multi-session routing. */
@@ -91,6 +92,8 @@ declare global {
 
       // App
       getWorkingDir(): Promise<string>;
+      getAppVersion(): Promise<string>;
+      openPath(targetPath: string): Promise<void>;
       getTokenUsage(): Promise<TokenUsageSummary>;
 
       // Git
@@ -127,6 +130,14 @@ declare global {
 
       // Run lifecycle events (for call trace panel)
       onRunEvent(callback: (data: SessionRunEvent) => void): () => void;
+
+      // Auto Update
+      checkForUpdates(): void;
+      downloadUpdate(): void;
+      installUpdate(): void;
+      skipVersion(version: string): void;
+      getUpdateStatus(): Promise<UpdateStatus>;
+      onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
     };
   }
 }

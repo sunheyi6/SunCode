@@ -173,3 +173,73 @@ jobs:
             "${BINARIES[@]}"
 
           echo "::notice::✅ Release ${RELEASE_TAG} 发布成功"
+
+      - name: Generate and upload update metadata
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          RELEASE_DATE=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+          cd release-assets
+
+          # ── Windows NSIS: latest.yml ──
+          # Match the NSIS installer (not portable)
+          NSIS_EXE=$(ls *.exe 2>/dev/null | grep -v -i portable | head -1 || echo "")
+          if [ -n "$NSIS_EXE" ]; then
+            SIZE=$(stat -c%s "$NSIS_EXE" 2>/dev/null || stat -f%z "$NSIS_EXE")
+            SHA512=$(sha512sum "$NSIS_EXE" | awk '{print $1}')
+            cat > latest.yml << YAMLEOF
+version: ${VERSION}
+files:
+  - url: ${NSIS_EXE}
+    sha512: ${SHA512}
+    size: ${SIZE}
+path: ${NSIS_EXE}
+sha512: ${SHA512}
+releaseDate: ${RELEASE_DATE}
+YAMLEOF
+            echo "=== latest.yml ==="
+            cat latest.yml
+            gh release upload "${RELEASE_TAG}" latest.yml --clobber
+          fi
+
+          # ── Linux AppImage: latest-linux.yml ──
+          APPIMAGE=$(ls *.AppImage 2>/dev/null | head -1 || echo "")
+          if [ -n "$APPIMAGE" ]; then
+            SIZE=$(stat -c%s "$APPIMAGE" 2>/dev/null || stat -f%z "$APPIMAGE")
+            SHA512=$(sha512sum "$APPIMAGE" | awk '{print $1}')
+            cat > latest-linux.yml << YAMLEOF
+version: ${VERSION}
+files:
+  - url: ${APPIMAGE}
+    sha512: ${SHA512}
+    size: ${SIZE}
+path: ${APPIMAGE}
+sha512: ${SHA512}
+releaseDate: ${RELEASE_DATE}
+YAMLEOF
+            echo "=== latest-linux.yml ==="
+            cat latest-linux.yml
+            gh release upload "${RELEASE_TAG}" latest-linux.yml --clobber
+          fi
+
+          # ── macOS DMG: latest-mac.yml ──
+          DMG=$(ls *.dmg 2>/dev/null | head -1 || echo "")
+          if [ -n "$DMG" ]; then
+            SIZE=$(stat -c%s "$DMG" 2>/dev/null || stat -f%z "$DMG")
+            SHA512=$(sha512sum "$DMG" | awk '{print $1}')
+            cat > latest-mac.yml << YAMLEOF
+version: ${VERSION}
+files:
+  - url: ${DMG}
+    sha512: ${SHA512}
+    size: ${SIZE}
+path: ${DMG}
+sha512: ${SHA512}
+releaseDate: ${RELEASE_DATE}
+YAMLEOF
+            echo "=== latest-mac.yml ==="
+            cat latest-mac.yml
+            gh release upload "${RELEASE_TAG}" latest-mac.yml --clobber
+          fi
+
+          echo "::notice::✅ Update metadata uploaded"

@@ -16,7 +16,7 @@ import type {
   WorkerInMessage,
   WorkerOutMessage,
 } from '@shared/types';
-import { app, dialog, ipcMain } from 'electron';
+import { app, dialog, ipcMain, shell } from 'electron';
 import { getGitInfo } from './git-info';
 import { recoverInterruptedSessions } from './recovery';
 import { appendEvent, getEvents, listRuns, startRun } from './run-store';
@@ -29,6 +29,13 @@ import {
   saveSession,
 } from './session-store';
 import type { WindowManager } from './window-manager';
+import {
+  getUpdateStatus,
+  checkForUpdates,
+  downloadUpdate,
+  installUpdate,
+  skipVersion,
+} from './auto-updater';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -593,6 +600,16 @@ export function registerIpcHandlers(wm: WindowManager): void {
     return process.cwd();
   });
 
+  ipcMain.handle('app:getVersion', async () => {
+    return app.getVersion();
+  });
+
+  // Open a path in the system file explorer
+  ipcMain.handle('shell:openPath', async (_event, targetPath: string) => {
+    const result = await shell.openPath(targetPath);
+    if (result) console.error('[Main] shell:openPath failed:', result, targetPath);
+  });
+
   // Window title bar overlay text
   ipcMain.on('window:setTitleBarOverlayText', (_event, text: string) => {
     const mainWindow = windowManager.getMainWindow();
@@ -854,6 +871,28 @@ export function registerIpcHandlers(wm: WindowManager): void {
       console.error('[Main] stats:getTokenUsage failed:', (err as Error).message);
       return { daily: [], byModel: [], totals: { input: 0, output: 0, total: 0, runs: 0 } };
     }
+  });
+
+  // ===== Auto Update =====
+
+  ipcMain.handle('updater:getStatus', () => {
+    return getUpdateStatus();
+  });
+
+  ipcMain.on('updater:check', () => {
+    checkForUpdates();
+  });
+
+  ipcMain.on('updater:download', () => {
+    downloadUpdate();
+  });
+
+  ipcMain.on('updater:install', () => {
+    installUpdate();
+  });
+
+  ipcMain.on('updater:skip-version', (_event, version: string) => {
+    skipVersion(version);
   });
 }
 
