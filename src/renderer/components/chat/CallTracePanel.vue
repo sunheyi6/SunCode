@@ -24,13 +24,23 @@ defineEmits<{
 }>();
 
 const traceFilePath = computed(() => {
-  if (!props.workingDir || !props.sessionId) return '';
-  return `${props.workingDir}/.suncode/sessions/${props.sessionId}.json`.replace(/\\/g, '/');
+  if (!props.workingDir) return '';
+  // Show the session JSON file if we have the ID, otherwise the sessions directory
+  const sessionsDir = `${props.workingDir}/.suncode/sessions`.replace(/\\/g, '/');
+  if (props.sessionId) {
+    return `${sessionsDir}/${props.sessionId}.json`;
+  }
+  return sessionsDir;
 });
 
 function openTraceFolder(): void {
   if (!traceFilePath.value) return;
-  bridge.showItemInFolder(traceFilePath.value);
+  // Use showItemInFolder for files, openPath for directories
+  if (props.sessionId) {
+    bridge.showItemInFolder(traceFilePath.value);
+  } else {
+    bridge.openPath(traceFilePath.value);
+  }
 }
 
 // ── Identity-tagged timeline entry ──
@@ -163,7 +173,6 @@ function toolSummary(tc: ToolCallContent): string {
       <span class="trace-title">调用轨迹</span>
       <div class="trace-header-actions">
         <button
-          v-if="traceFilePath"
           class="trace-folder-btn"
           title="在文件管理器中显示"
           @click="openTraceFolder"
@@ -174,9 +183,9 @@ function toolSummary(tc: ToolCallContent): string {
       </div>
     </div>
 
-    <div v-if="traceFilePath" class="trace-path-bar">
-      <span class="trace-path-label">当前会话文件</span>
-      <span class="trace-path-value">{{ traceFilePath }}</span>
+    <div class="trace-path-bar">
+      <span class="trace-path-label">会话文件</span>
+      <span class="trace-path-value">{{ traceFilePath || '—' }}</span>
     </div>
 
     <div class="trace-body">
