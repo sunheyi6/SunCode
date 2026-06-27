@@ -18,6 +18,7 @@ import type {
   ToolResult,
 } from '@shared/types';
 import { loadMemories, saveMemory, type MemoryEntry } from './memory';
+import { buildExtractionContexts, extractAndSaveLessons } from './lessons';
 import { createMcpManager } from '../mcp/manager';
 import { createModelRegistry } from '../models/registry';
 import { createToolRegistry } from '../tools/registry';
@@ -435,6 +436,27 @@ export class Agent {
 
     // Persist a memory entry so future sessions recall what we did
     this.saveSessionMemory();
+
+    // Extract failure lessons (fire-and-forget)
+    const hasFailures = this.messages.some(
+      (m) => m.role === 'tool' && typeof m.content === 'string' && m.content.startsWith('错误:'),
+    );
+    if (hasFailures) {
+      const extractionContexts = buildExtractionContexts(
+        this.messages,
+        runId,
+      );
+      if (extractionContexts.length > 0) {
+        extractAndSaveLessons(
+          extractionContexts,
+          this.workingDir,
+          this.settings.activeProvider,
+          this.settings.maxLessons,
+        ).catch(() => {
+          // Never let lesson extraction break the agent
+        });
+      }
+    }
   }
 
   /** Run a /goal autonomous loop. */
@@ -576,6 +598,34 @@ export class Agent {
     // Emit done
     this.onDone(goalResult.finalMessage);
     this.emitStatus('done');
+
+    // Extract failure lessons from goal loop (fire-and-forget)
+    const goalFailed =
+      goalResult.state.status !== 'verification_passed';
+    const goalRepeatedFailure =
+      goalResult.state.status === 'blocked' && goalResult.state.lastVerificationOutput
+        ? {
+            description: goalDef.description,
+            verificationOutput: goalResult.state.lastVerificationOutput,
+          }
+        : undefined;
+
+    const extractionContexts = buildExtractionContexts(
+      this.messages,
+      runId,
+      goalRepeatedFailure,
+    );
+    if (extractionContexts.length > 0 || goalFailed) {
+      extractAndSaveLessons(
+        extractionContexts,
+        this.workingDir,
+        this.settings.activeProvider,
+        this.settings.maxLessons,
+      ).catch(() => {
+        // Never let lesson extraction break the agent
+      });
+    }
+
     this.saveSessionMemory();
   }
 
