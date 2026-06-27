@@ -92,7 +92,7 @@ export function useAgent() {
 
     cleanups.push(
       bridge.onDone((message) => {
-        chatStore.handleStreamEvent({ type: 'done', message });
+        chatStore.handleStreamEvent({ type: 'message_end', message });
         void sessionsStore.refresh();
         agentStore.setStatus({
           state: 'done',

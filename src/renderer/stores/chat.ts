@@ -72,8 +72,6 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: Date.now(),
       isStreaming: true,
     };
-    currentText = '';
-    currentThinking = '';
     lastParsedPlanLength = 0;
     messages.value.push(assistantMessage);
     // Vue wraps objects inserted into a reactive array. Keep the wrapped
@@ -93,135 +91,89 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleStreamEvent(event: StreamEvent): void {
-    // 'done' must be processed even when currentAssistantMsg is null
-    // (user switched sessions mid-run). It triggers saveMessage which
-    // persists the response to the correct session via promptSessionId.
-    if (event.type === 'done') {
-      const msg = activeAssistantMessage();
-      console.log(
-        `[ChatStore] done event: msg=${!!msg} fromPending=${!!(!currentAssistantMsg && msg)} streamingSid=${streamingSessionId?.slice(-8) ?? 'null'} curSid=${activeSessionId?.slice(-8) ?? 'null'}`,
-      );
-      if (msg) {
-        if (event.message) {
-          const finalContent = event.message.content;
-          if (typeof finalContent === 'string') {
-            if (!msg.content) msg.content = finalContent;
-          } else {
-            const finalText = finalContent
-              .filter((block) => block.type === 'text')
-              .map((block) => ('text' in block ? block.text : ''))
-              .join('');
-            const finalThinking = finalContent
-              .filter((block) => block.type === 'thinking')
-              .map((block) => ('text' in block ? block.text : ''))
-              .join('');
-            if (finalText && (!msg.content || isIncompleteProgressText(msg.content))) {
-              msg.content = finalText;
-            } else if (!msg.content && finalThinking) {
-              msg.content = finalThinking;
-            } else if (
-              finalText &&
-              msg.content &&
-              msg.content.length < 60 &&
-              finalText.length > msg.content.length
-            ) {
-              msg.content = finalText;
-            }
-            if (finalThinking && !msg.thinking) {
-              msg.thinking = finalThinking;
-            }
-          }
-        }
-        msg.isStreaming = false;
-        isStreaming.value = false;
-        void bridge.saveMessage(
-          buildPersistedAssistantMessage({
-            visibleContent: msg.content,
-            thinking: msg.thinking,
-            toolCalls: msg.toolCalls,
-            systemPrompt: msg.systemPrompt,
-            finalMessage: event.message,
-          }),
-        );
-        currentAssistantMsg = null;
-        currentText = '';
-        currentThinking = '';
-        if (streamingSessionId) {
-          pendingAssistantMessages.delete(streamingSessionId);
-          streamingSessionId = null;
-        }
-      } else if (event.message) {
-        // Session was switched mid-stream and we have no snapshot.
-        // Still persist the final message using the raw event data.
-        console.log('[ChatStore] done FALLBACK: saving raw event.message (toolCalls/systemPrompt lost)');
-        isStreaming.value = false;
-        void bridge.saveMessage(event.message);
-        streamingSessionId = null;
-      }
-      return;
-    }
-
     const msg = activeAssistantMessage();
-    if (!msg) return;
 
     switch (event.type) {
       case 'system_prompt':
-        msg.systemPrompt = event.systemPrompt || '';
+        if (msg) msg.systemPrompt = event.systemPrompt || '';
         break;
+
       case 'turn_start':
-        msg.turnCount = event.turnCount ?? 0;
-        msg.maxTurns = event.maxTurns ?? 0;
-        break;
-      case 'turn_end':
-        // Intermediate tool turns belong to the current assistant response.
-        // Persist only after the final worker done event arrives.
-        break;
-      case 'text_delta':
-        currentText += event.text || '';
-        msg.content = currentText;
-        // Parse task plan from content (throttled: every 30 chars or when plan marker appears)
-        if (currentText.length - lastParsedPlanLength >= 30 || currentText.includes('📋')) {
-          const plan = parseTaskPlan(currentText, true);
-          if (plan) msg.taskPlan = plan;
-          lastParsedPlanLength = currentText.length;
+        if (msg) {
+          msg.turnCount = event.turnCount ?? 0;
+          msg.maxTurns = event.maxTurns ?? 0;
         }
         break;
-      case 'thinking_delta':
-        currentThinking += event.text || '';
-        msg.thinking = currentThinking;
+
+      case 'turn_end':
+        // Intermediate tool turns belong to the current assistant response.
         break;
-      case 'text_end':
-        msg.isStreaming = false;
-        isStreaming.value = false;
+
+      case 'message_start':
+        // Create streaming message context if not already present
+        if (!msg) {
+          startAssistantMessage();
+        }
         break;
-      case 'toolcall_start':
-        if (!msg.toolCalls) msg.toolCalls = [];
-        msg.toolCalls.push({
-          type: 'tool_call',
-          id: event.toolCallId || '',
-          name: event.toolName || '',
-          arguments: '',
-          // Record where in the thinking stream this tool appeared
-          thinkingOffset: currentThinking.length,
-        });
-        break;
-      case 'toolcall_delta': {
-        const tc = msg.toolCalls?.find((t) => t.id === event.toolCallId);
-        if (tc) {
-          tc.arguments += event.delta || '';
+
+      case 'message_update':
+      case 'message_end': {
+        if (!msg && event.type === 'message_update') {
+          // No streaming message yet — create one
+          startAssistantMessage();
+        }
+        const target = activeAssistantMessage();
+        if (!target) break;
+
+        const data = event.data;
+        if (!data) break;
+
+        target.content = data.text || '';
+        // Thinking is NOT stored in the chat message — it goes to CallTracePanel.
+        target.toolCalls = data.toolCalls || [];
+        target.isStreaming = event.type === 'message_update';
+        isStreaming.value = event.type === 'message_update';
+
+        // Parse task plan on message_update (throttled)
+        if (event.type === 'message_update' && data.text) {
+          if (data.text.length - lastParsedPlanLength >= 30 || data.text.includes('[PLAN]')) {
+            const plan = parseTaskPlan(data.text, true);
+            if (plan) target.taskPlan = plan;
+            lastParsedPlanLength = data.text.length;
+          }
+        }
+
+        if (event.type === 'message_end') {
+          target.isStreaming = false;
+          isStreaming.value = false;
+
+          // Persist completed message
+          void bridge.saveMessage(
+            buildPersistedAssistantMessage({
+              visibleContent: target.content,
+              thinking: target.thinking,
+              toolCalls: target.toolCalls,
+              systemPrompt: target.systemPrompt,
+              finalMessage: event.message,
+            }),
+          );
+
+          currentAssistantMsg = null;
+          if (streamingSessionId) {
+            pendingAssistantMessages.delete(streamingSessionId);
+            streamingSessionId = null;
+          }
         }
         break;
       }
-      case 'toolcall_end':
-        // Tool call completed
-        break;
+
       case 'error':
-        msg.content += `\n\n❌ Error: ${event.error || 'Unknown error'}`;
-        msg.isStreaming = false;
-        isStreaming.value = false;
+        if (msg) {
+          msg.content += `\n\n❌ Error: ${event.error || 'Unknown error'}`;
+          msg.isStreaming = false;
+          isStreaming.value = false;
+        }
         currentAssistantMsg = null;
-        currentText = '';
-        currentThinking = '';
         if (streamingSessionId) {
           pendingAssistantMessages.delete(streamingSessionId);
           streamingSessionId = null;
@@ -378,7 +330,7 @@ export const useChatStore = defineStore('chat', () => {
     // If we are leaving a session with a streaming assistant message,
     // keep the partial message so it can be restored when the user comes back.
     console.log(
-      `[ChatStore] loadMessages id=${sessionId.slice(-8)} count=${sessionMessages?.length ?? 0} roles=${sessionMessages?.map(m => m.role).join(',') || '(none)'}`,
+      `[ChatStore] loadMessages id=${sessionId.slice(-8)} count=${sessionMessages?.length ?? 0} roles=${sessionMessages?.map((m) => m.role).join(',') || '(none)'}`,
     );
     snapshotStreamingAssistant();
     clearMessages();

@@ -5,7 +5,8 @@ import { createEditTool } from './edit';
 import { createBashTool, type BashToolCallbacks } from './bash';
 import { createGrepTool } from './grep';
 import { createGlobTool } from './glob';
-import { createTaskCompleteTool } from './task-complete';
+import { createLsTool } from './ls';
+import { createFindTool } from './find';
 import { createWebFetchTool } from './web-fetch';
 import { createWebSearchTool } from './web-search';
 import type { AppSettings } from '@shared/types';
@@ -89,7 +90,8 @@ export function createToolRegistry(
   registry.register(createBashTool(workingDir, callbacks));
   registry.register(createGrepTool(workingDir));
   registry.register(createGlobTool(workingDir));
-  registry.register(createTaskCompleteTool());
+  registry.register(createLsTool(workingDir));
+  registry.register(createFindTool(workingDir));
   registry.register(createWebFetchTool(workingDir));
   registry.register(createWebSearchTool(settings));
 

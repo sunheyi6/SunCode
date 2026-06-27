@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { DEFAULT_SETTINGS, TITLE_GENERATION_PROMPT } from '@shared/constants';
+import { DEFAULT_SETTINGS, LITE_MODELS, TITLE_GENERATION_PROMPT } from '@shared/constants';
 import type {
   AppSettings,
   DayStats,
@@ -930,9 +930,15 @@ async function generateTitleWithAI(
   const text = extractText(userMessage);
   if (!text) return;
 
+  const requestStartTime = Date.now();
+  let requestError: string | undefined;
+
   try {
     const provider = currentSettings.activeProvider || 'deepseek';
-    const modelId = currentSettings.activeModel || 'deepseek-v4-flash';
+    // Use a lightweight model on the same provider for cheap title generation.
+    const modelId = LITE_MODELS[provider] || currentSettings.activeModel || 'deepseek-v4-flash';
+
+    console.log(`[Main] Title AI: using lite model ${provider}/${modelId}`);
 
     const pi = await import('@earendil-works/pi-ai');
     const model = (pi as unknown as Record<string, unknown>).getModel
@@ -953,7 +959,11 @@ async function generateTitleWithAI(
           m: unknown,
           ctx: Record<string, unknown>,
           opts?: Record<string, unknown>,
-        ) => AsyncIterable<{ type: string; delta?: string }>;
+        ) => AsyncIterable<{
+          type: string;
+          delta?: string;
+          message?: { usage?: { input?: number; output?: number; totalTokens?: number } };
+        }>;
       }
     ).streamSimple(
       model,
@@ -966,9 +976,17 @@ async function generateTitleWithAI(
     );
 
     let raw = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let totalTokens = 0;
     for await (const event of stream) {
       if (event.type === 'text_delta' && event.delta) {
         raw += event.delta;
+      }
+      if (event.type === 'done' && event.message?.usage) {
+        inputTokens = event.message.usage.input || 0;
+        outputTokens = event.message.usage.output || 0;
+        totalTokens = event.message.usage.totalTokens || 0;
       }
     }
 
@@ -1013,9 +1031,17 @@ async function generateTitleWithAI(
         mainWindow.webContents.send('session:updated', meta);
       }
     }
-    console.log(`[Main] AI title generated: "${title}"`);
+    const durationMs = Date.now() - requestStartTime;
+    console.log(
+      `[Main] AI title generated: "${title}" in ${durationMs}ms (tokens: ${totalTokens})`,
+    );
   } catch (err) {
-    console.error('[Main] Title generation failed:', (err as Error).message);
+    requestError = (err as Error).message;
+    console.error('[Main] Title generation failed:', requestError);
+  } finally {
+    if (requestError) {
+      console.log(`[Main] Title AI request failed after ${Date.now() - requestStartTime}ms`);
+    }
   }
 }
 

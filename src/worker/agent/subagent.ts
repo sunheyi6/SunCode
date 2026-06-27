@@ -226,7 +226,6 @@ export class SubagentDispatcher {
       workingDir: this.opts.workingDir,
       tools: toolDefs,
       skillsContent: '',
-      maxTurns: def.maxTurns ?? (this.opts.settings.maxTurns || FALLBACK_MAX_TURNS),
       permissionMode: this.opts.settings.permissionMode,
     });
     const systemContent = `${baseSystem}\n\n---\n\n## 你的角色\n\n${def.systemPrompt}\n\n请专注完成委托给你的任务，返回简洁的结果。`;
@@ -305,13 +304,19 @@ export class SubagentDispatcher {
       // Use parent session + agent name for cache affinity across subagent invocations
       sessionId: `${this.opts.parentSessionId}:${call.agent}`,
       onStream: (event: StreamEvent) => {
-        if (event.type === 'thinking_delta' && event.text) {
-          subThinking += event.text;
-          // Stream thinking to SubagentCard in real-time
-          this.opts.callbacks.onSubagentProgress(executionId, call.agent, {
-            type: 'thinking',
-            text: event.text,
-          });
+        if (event.type === 'message_update' && event.data) {
+          // Track thinking text for subagent
+          const delta = event.data.thinking;
+          if (delta && delta.length > subThinking.length) {
+            const newThinking = delta.slice(subThinking.length);
+            subThinking = delta;
+            if (newThinking) {
+              this.opts.callbacks.onSubagentProgress(executionId, call.agent, {
+                type: 'thinking',
+                text: newThinking,
+              });
+            }
+          }
         }
       },
       onToolStart: (toolCall: ToolCallContent) => {
@@ -349,7 +354,7 @@ export class SubagentDispatcher {
     // Save to named session
     if (call.session) {
       const sessionKey = this.sessionKey(call);
-      let history = this.namedSessions.get(sessionKey) || [];
+      const history = this.namedSessions.get(sessionKey) || [];
       history.push({ role: 'user', content: call.prompt });
       history.push(result.finalMessage);
       if (this.namedSessions.size >= MAX_NAMED_SESSIONS && !this.namedSessions.has(sessionKey)) {

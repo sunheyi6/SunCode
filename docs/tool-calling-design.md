@@ -76,6 +76,7 @@ interface ToolResult {
 **关键设计决策：`output` 是纯文本字符串**
 
 为什么不用结构化数据？
+
 - LLM 接受的是文本流，结构化数据需要额外序列化
 - 纯文本更灵活，可以包含自然语言解释 + 格式化数据
 - 参考 Claude、OpenAI 的 tool result 设计
@@ -104,7 +105,11 @@ abstract class BaseTool implements Tool {
 
 ## 4. 六个内置工具
 
+> 各工具详细设计见 [docs/tools/](./tools/) 目录。
+
 ### 4.1 read — 文件读取
+
+> 📄 详细设计：[docs/tools/read.md](./tools/read.md)（待补充）
 
 ```
 输入: file_path, offset?, limit?
@@ -112,60 +117,74 @@ abstract class BaseTool implements Tool {
 
 安全: 无（只读操作）
 特殊: 自动识别图片（png/jpg/gif/webp），返回 base64
+目录读取：列出目录内容
 ```
 
 ### 4.2 write — 文件写入
 
+> 📄 详细设计：[docs/tools/write.md](./tools/write.md)
+
 ```
 输入: file_path, content
-输出: 成功信息 (# 行数, 字节数)
+输出: 成功信息 + 行变更统计
 
 安全: 禁止写入工作目录之外
 特殊: 自动创建父目录 (mkdir -p)
+v2: 接入 file-mutation-queue 串行锁
 ```
 
-### 4.3 edit — 精确字符串替换
+### 4.3 edit — 精确字符串替换（批量 edits）
+
+> 📄 详细设计：[docs/tools/edit.md](./tools/edit.md)
 
 ```
-输入: file_path, old_string, new_string, replace_all?
-输出: 替换数量
+输入: file_path, edits: [{oldText, newText}]
+      (向后兼容: old_string, new_string, replace_all?)
+输出: 编辑成功，附上下文 diff
 
-安全: 只读操作，然后覆盖写入
 核心逻辑:
-  1. 读取文件
-  2. 检查 old_string 出现次数:
-     - 0 次 → 报错 "not found"
-     - >1 次且 replace_all ≠ true → 报错 "ambiguous"
-  3. 执行替换 → 写回文件
+  1. 文件并发锁 — 确保同文件不竞态
+  2. 读取文件 → 剥离 BOM → 行尾统一转 LF
+  3. 精确匹配 → 失败降级模糊匹配（Unicode/空格/引号规范化）
+  4. 重叠检测 → 逆序应用
+
+v2: 批量 edits + BOM/LF 规范化 + 模糊匹配降级 + 文件并发锁（详见 docs/tools/edit.md）
 ```
 
 **为什么用字符串匹配而非行号？**
 
 这是从 Claude Code / pi 项目借鉴的核心设计：
 - 行号会随编辑变化，多步编辑时行号失效
-- 字符串匹配是幂等的——同一个 old_string 匹配同一个位置
+- 字符串匹配是幂等的——同一个 oldText 匹配同一个位置
 - LLM 更擅长复制粘贴代码片段，而非计数行号
 
 ### 4.4 bash — Shell 执行
 
+> 📄 详细设计：[docs/tools/bash.md](./tools/bash.md)
+
 ```
-输入: command, timeout?, description?
-输出: stdout + stderr + exit code
+输入: command, timeout?, description?, run_in_background?
+输出: stdout + stderr + exit code + 临时文件路径（截断时）
 
 安全措施:
-  1. 黑名单正则检查（rm -rf /, mkfs, dd, fork bomb）
+  1. 黑名单正则检查
   2. 超时限制（默认 60s，最大 300s）
-  3. 输出截断（stdout/stderr 各 100KB 硬限制）
+  3. 溢出保护（stdout+stderr 超 200KB 时 kill 进程树）
+
+v2: 尾部截断（保留末尾 2000 行/50KB）+ 临时文件保存 + taskkill /T 进程树 kill
 ```
 
 ### 4.5 grep — 内容搜索
 
-```
-输入: pattern, path?, glob?, type?, multiline?, ignoreCase?, context?, head_limit?
-输出: 匹配行 + 行号
+> 📄 详细设计：[docs/tools/grep.md](./tools/grep.md)
 
-实现: 调用系统 rg (ripgrep)，失败时 fallback 提示
-默认限制: 100 行输出
+```
+输入: pattern, path?, glob?, type?, ignoreCase?, literal?, context?, limit?
+输出: 匹配行 + 行号 + 可选上下文行
+
+实现: 调用系统 rg，--json 结构化输出解析
+
+v2: JSON 解析 + 隐藏文件 + 字面量搜索 + 文件缓存上下文 + 提前 kill
 ```
 
 ### 4.6 glob — 文件名匹配
@@ -207,6 +226,7 @@ mcp__filesystem__read_file     → 文件系统 MCP 服务器
 ```
 
 前缀机制解决了两个问题：
+
 1. **命名冲突**：不同 MCP 服务器可能有同名工具
 2. **可识别性**：用户和 LLM 都能看出工具来源
 
@@ -266,6 +286,7 @@ turn_start { turnCount, maxTurns }
 ```
 
 **设计要点**：
+
 - `turn_start` 在每轮开始时发送，携带当前轮次和最大轮次
 - `turn_end` 携带 `hasToolCalls: true/false` 区分中间轮和最终轮
 - 前端据此展示思考摘要：`🧠 第2轮 bash ls...`
@@ -299,7 +320,7 @@ for (const key of required) {
 }
 ```
 
-**为什么不用 TypeBox？** SunCode 使用自定义的轻量 schema helper (`p()`/`obj()`) 
+**为什么不用 TypeBox？** SunCode 使用自定义的轻量 schema helper (`p()`/`obj()`)
 来定义工具参数，而非 TypeBox。API 层的 function calling JSON Schema 由 pi-ai 生成，
 这里的验证是额外的防御层。
 
@@ -341,7 +362,7 @@ ToolOperationList → FileOperationCard / CommandOperationCard / FileInspectCard
 ### ✅ 有效实践
 
 1. **工具描述要写"使用场景"而非"功能说明"**
-   - ❌ "Reads a file" 
+   - ❌ "Reads a file"
    - ✅ "Reads a file to examine its contents. Use this before editing or when you need to understand existing code."
 
 2. **参数 constrain 明确**
@@ -354,6 +375,7 @@ ToolOperationList → FileOperationCard / CommandOperationCard / FileInspectCard
    - ✅ "File not found: /path/to/file. Check the path and try again."
 
 4. **工具输出要结构化**
+
    ```
    File: /src/auth.ts (145 lines)
    

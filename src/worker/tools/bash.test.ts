@@ -121,12 +121,12 @@ describe('bash tool details', () => {
     });
   });
 
-  test('truncates structured stdout and stderr at 50,000 characters', async () => {
+  test('tail-truncates stdout and stderr at 50,000 bytes, keeps the end', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'suncode-bash-'));
     const scriptPath = join(dir, 'large-output.cjs');
     await writeFile(
       scriptPath,
-      "process.stdout.write('o'.repeat(50001)); process.stderr.write('e'.repeat(50001));",
+      "process.stdout.write('a'.repeat(30000) + '\\nb'.repeat(30001)); process.stderr.write('e'.repeat(50001));",
     );
 
     try {
@@ -138,8 +138,14 @@ describe('bash tool details', () => {
       if (result.details?.type !== 'command') throw new Error('Expected command details');
 
       expect(result.details.exitCode).toBe(0);
-      expect(result.details.stdout).toBe(`${'o'.repeat(50_000)}\n... (output truncated)`);
-      expect(result.details.stderr).toBe(`${'e'.repeat(50_000)}\n... (stderr truncated)`);
+      // Tail truncation: keeps the last portion of output
+      // stdout has 2 lines: 30000 'a's + newline + 30001 'b's
+      // The last line (30001 bytes) exceeds 50000 limit alone, so it gets byte-truncated from end
+      expect(result.details.stdout).toContain('b');
+      expect(result.details.stdout.length).toBeLessThan(60000);
+      // stderr has one 50001-char line, tail-truncated to 50000 chars
+      expect(result.details.stderr).toContain('e');
+      expect(result.details.stderr.length).toBeLessThan(51000);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

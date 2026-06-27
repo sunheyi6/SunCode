@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -8,50 +8,78 @@ const props = defineProps<{
   isStreaming: boolean;
 }>();
 
-const renderedHtml = computed(() => {
-  if (!props.text) return '';
+// ── Streaming optimization ──
+// During streaming, we render raw text (simple newline→<br> + HTML escape)
+// to avoid the O(n²) cost of re-parsing full markdown on every token delta.
+// When streaming finishes, we do a one-time full markdown render.
+const finalHtml = ref('');
 
-  // Configure marked for code rendering
-  const html = marked.parse(props.text, { async: false }) as string;
+// Track whether we've rendered the final markdown for the current completed text
+let lastRenderedCompletedText = '';
 
-  // Sanitize HTML
+watch(
+  () => props.isStreaming,
+  (streaming) => {
+    if (!streaming && props.text) {
+      finalHtml.value = renderMarkdown(props.text);
+      lastRenderedCompletedText = props.text;
+    }
+  },
+);
+
+// Also catch the case where text arrives already complete (e.g. restore from session)
+watch(
+  () => props.text,
+  (text) => {
+    if (!props.isStreaming && text && text !== lastRenderedCompletedText) {
+      finalHtml.value = renderMarkdown(text);
+      lastRenderedCompletedText = text;
+    }
+  },
+  { immediate: true },
+);
+
+function renderMarkdown(text: string): string {
+  if (!text) return '';
+  const html = marked.parse(text, { async: false }) as string;
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      'p',
-      'br',
-      'strong',
-      'em',
-      'u',
-      's',
-      'a',
-      'code',
-      'pre',
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6',
-      'ul',
-      'ol',
-      'li',
+      'p', 'br', 'strong', 'em', 'u', 's', 'a',
+      'code', 'pre',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li',
       'blockquote',
-      'table',
-      'thead',
-      'tbody',
-      'tr',
-      'th',
-      'td',
-      'span',
-      'div',
-      'details',
-      'summary',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'span', 'div',
+      'details', 'summary',
     ],
     ALLOWED_ATTR: ['href', 'target', 'class', 'rel'],
   });
+}
+
+/** Simple raw-text→HTML that avoids full markdown parsing during streaming.
+ *  Preserves newlines and escapes HTML, but doesn't parse markdown syntax. */
+function escapeAndLinkify(text: string): string {
+  // Escape HTML entities
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  // Preserve line breaks
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+const renderedHtml = computed(() => {
+  if (!props.text) return '';
+  // During streaming: cheap raw text (avoids O(n²) markdown re-parse)
+  if (props.isStreaming) {
+    return escapeAndLinkify(props.text);
+  }
+  // After streaming: use the pre-rendered final markdown
+  return finalHtml.value || escapeAndLinkify(props.text);
 });
 
-// Add cursor blink when streaming
 const containerClass = computed(() => ({
   'streaming-text': true,
   'is-streaming': props.isStreaming,

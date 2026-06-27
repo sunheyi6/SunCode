@@ -10,18 +10,12 @@ import type {
   ToolCallContent,
   ToolDefinition,
   ToolResult,
-  TurnDecision,
 } from '@shared/types';
-import { TASK_COMPLETE_TOOL_NAME } from '../tools/task-complete';
+
 import type { Tool } from '../tools/types';
+import { DiagLogger } from '../utils/diag-logger';
 import { buildSystemPrompt } from './system-prompt';
-import {
-  computeNeedsFollowUp,
-  hasTaskCompleteToolCall,
-  findTaskCompleteCall,
-  taxonomyFromError,
-  type NeedsFollowUpInput,
-} from './turn-decision';
+import { computeNeedsFollowUp } from './turn-decision';
 
 /** Context passed to prepareNextTurn so implementors can trim or adjust. */
 export interface PrepareNextTurnContext {
@@ -79,20 +73,20 @@ export interface AgentLoopResult {
   turnCount: number;
   tokenUsage: { input: number; output: number; total: number };
   /** Structured decision about why the loop terminated. */
-  decision: TurnDecision;
+  decision: { decision: string; reason: string; taxonomy?: string };
 }
 
 /**
  * Core agent loop: prompt → LLM stream → tool execution → repeat.
  *
- * Termination decisions are driven by `computeNeedsFollowUp()` (Codex-inspired):
+ * Termination is driven by the model's natural stop signals:
  * - Model called tools → execute them, then continue
  * - Model called task_complete → explicit stop signal
- * - Model produced only text → natural stop (no follow-up needed)
- * - Budget / abort → stop
+ * - Model produced only text → natural stop, no follow-up needed
+ * - Max turns / abort → stop
  *
- * Stop hooks run before finalizing any stop decision, allowing verification,
- * safety checks, or other post-turn processing to block or override.
+ * No text markers (## 最终结果, [STATUS:N]) are required or checked.
+ * Follows pi-agent-core's approach: trust the model's stopReason.
  */
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   const {
@@ -125,13 +119,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const contextMessages: Message[] = [...initialMessages];
   let turnCount = initialTurnCount;
   const tokenUsage = { input: 0, output: 0, total: 0 };
-  let lastToolHadError = false;
-  let planForceContinueCount = 0; // circuit breaker for plan-incomplete loops
+
+  // Diagnostic logger: persists to .suncode/diagnostics/<runId>.log
+  const diag = new DiagLogger(workingDir, runId);
+  diag.enter(
+    'RUN',
+    `model=${settings.activeProvider}/${settings.activeModel} tools=${tools.length} maxTurns=${settings.maxTurns || MAX_TURNS}`,
+  );
 
   const identityReply = getIdentityReply(initialMessages);
   if (identityReply) {
-    onStream({ type: 'text_delta', text: identityReply });
-    onStream({ type: 'text_end' });
+    onStream({
+      type: 'message_update',
+      data: { text: identityReply, thinking: '', toolCalls: [], isFinished: true },
+    });
     return {
       finalMessage: {
         role: 'assistant',
@@ -151,7 +152,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     workingDir,
     tools: toolDefs,
     skillsContent,
-    maxTurns: settings.maxTurns,
     permissionMode: settings.permissionMode,
     agentsMdContent,
     memoryContent,
@@ -160,67 +160,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // Prepend system message
   contextMessages.unshift({ role: 'system', content: systemPrompt });
 
-  // ═══════════════════════════════════════════════════════════
-  // Planning gate: inject planning instruction into the user
-  // message the model is about to respond to.  This fires for
-  // ANY user-initiated message (fresh conversation or follow-up).
-  // Synthetic reminders (task_complete nudge, plan nudge) are
-  // excluded so we don't double-inject or create infinite loops.
-  // ═══════════════════════════════════════════════════════════
-  const lastMsg = contextMessages[contextMessages.length - 1];
-  if (lastMsg?.role === 'user') {
-    const userText =
-      typeof lastMsg.content === 'string'
-        ? lastMsg.content
-        : lastMsg.content
-            .filter((b) => b.type === 'text')
-            .map((b) => ('text' in b ? b.text : ''))
-            .join('\n');
-
-    // Skip synthetic reminders — they already have planning baked in
-    const isSynthetic =
-      userText.includes('请调用 task_complete') ||
-      userText.includes('你跳过了规划步骤');
-
-    if (!isSynthetic) {
-      console.log('[AgentLoop] Injecting planning gate into user message');
-      const planningPrefix = `你必须按以下流程执行：
-
-**第一步（本轮）**：在正文开头先分类再列计划
-  [执行]
-  📋 执行计划：
-  - [ ] Step 1: <具体行动>
-  - [ ] Step 2: <具体行动>
-  禁止在列完计划之前调用任何工具。
-
-**第二步（每完成一步后）**：更新计划+输出结构化结果
-  📋 进度更新：
-  - [x] Step 1: 已完成 — 结果摘要
-  - [ ] Step 2: <进行中...>
-
-  然后紧接输出该步的详细结果：
-  ---
-  ## ✅ Step 1 完成：<步骤标题>
-  <结果详情，代码块、表格等结构化展示>
-  ---
-
-**第三步（全部完成后）**：在正文输出完整最终结果
-  ⚠️ 这是你唯一能被用户看到的内容！Thinking 字段是隐藏的！
-  - 必须包含：所有代码、运行输出、文件路径、根因分析、结论
-  - 必须 ≥ 3 句实质性内容。"已完成。"视为失败。
-  - 写完后停止调用工具即可。对话会自动结束。
-
-**格式要求**：
-- 严格使用 "- [ ] " 和 "- [x] " 前缀，注意空格
-- Step N 用英文冒号，编号连续
-- 每步结果用 "## ✅ Step N 完成：标题" 开头
-- 不要用代码块包裹计划，直接写纯文本
----
-用户消息：${userText}`;
-
-      lastMsg.content = [{ type: 'text', text: planningPrefix }];
-    }
-  }
+  // No prefix injection — user message goes to model as-is.
+  // Follows pi-agent-core's approach: keep the prompt minimal.
 
   // Emit system prompt for call trace panel
   onStream({ type: 'system_prompt', systemPrompt });
@@ -238,8 +179,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     turnCount++;
-    lastToolHadError = false;
     console.log(`[AgentLoop] Turn ${turnCount}/${settings.maxTurns}`);
+    diag.enter('TURN', `${turnCount}/${settings.maxTurns || MAX_TURNS}`, {
+      msgs: contextMessages.length,
+    });
     onStream({ type: 'turn_start', turnCount, maxTurns: settings.maxTurns || MAX_TURNS });
     onRunEvent({ type: 'turn_started', runId, turnNumber: turnCount, timestamp: '' });
 
@@ -271,18 +214,31 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       };
 
       console.log(
-        `[AgentLoop] Calling streamSimple with ${piContext.messages.length} messages, cache=long, session=${sessionId.slice(0, 8)}`,
+        `[AgentLoop] Turn ${turnCount} calling LLM: ${piContext.messages.length} msgs` +
+          ` (${systemPrompt.length} sys, ~${Math.round(systemPrompt.length / 3.5)} tokens)` +
+          ` | tools=${toolDefs.length} | session=${sessionId.slice(0, 8)}`,
       );
-
-      // Call the LLM with real token-by-token streaming + prompt caching
-      const stream = streamSimpleFn(model, piContext, {
-        reasoning: settings.thinkingLevel,
-        signal: abortSignal,
-        // Prompt caching — cacheRetention "long" requests Anthropic's 1h TTL
-        cacheRetention: 'long',
-        // Session affinity — same sessionId → same cache replica → higher hit rate
-        sessionId,
+      diag.enter('LLM', `call`, {
+        msgs: piContext.messages.length,
+        sysTokens: Math.round(systemPrompt.length / 3.5),
+        tools: toolDefs.length,
       });
+
+      // Log the last 2 non-system messages
+      const lastMsgsForLog = contextMessages.filter((m) => m.role !== 'system').slice(-3);
+      for (let mi = 0; mi < lastMsgsForLog.length; mi++) {
+        const m = lastMsgsForLog[mi];
+        const contentStr =
+          typeof m.content === 'string'
+            ? m.content
+            : m.content
+                .filter((b) => b.type === 'text' || b.type === 'thinking')
+                .map((b) => ('text' in b ? b.text : ''))
+                .join('\n');
+        diag.log('LLM_REQUEST_INPUT', `[msg-${mi}] role=${m.role} len=${contentStr.length}`, {
+          content: contentStr,
+        });
+      }
 
       // Accumulate content as it streams in
       let assistantText = '';
@@ -290,248 +246,218 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       let thinkingText = '';
       let assistantMsgRaw: Record<string, unknown> | null = null;
 
-      for await (const event of stream) {
-        switch (event.type) {
-          case 'start':
-            onStream({ type: 'start' });
-            break;
-          case 'text_start':
-            onStream({ type: 'text_start' });
-            break;
-          case 'text_delta':
-            assistantText += event.delta;
-            onStream({ type: 'text_delta', text: event.delta });
-            break;
-          case 'text_end':
-            // Per-content-block end — don't forward (our text_end means final turn)
-            break;
-          case 'thinking_start':
-            onStream({ type: 'thinking_start' });
-            break;
-          case 'thinking_delta':
-            thinkingText += event.delta;
-            onStream({ type: 'thinking_delta', text: event.delta });
-            break;
-          case 'thinking_end':
-            onStream({ type: 'thinking_end' });
-            break;
-          case 'toolcall_start': {
-            const partialBlock = event.partial.content[event.contentIndex] as unknown as
-              | Record<string, unknown>
-              | undefined;
-            const tcId = (partialBlock?.id as string) || '';
-            const tcName = (partialBlock?.name as string) || '';
-            onStream({ type: 'toolcall_start', toolCallId: tcId, toolName: tcName });
-            break;
-          }
-          case 'toolcall_delta': {
-            const partialBlock = event.partial.content[event.contentIndex] as unknown as
-              | Record<string, unknown>
-              | undefined;
-            const tcId = (partialBlock?.id as string) || '';
-            onStream({ type: 'toolcall_delta', toolCallId: tcId, delta: event.delta });
-            break;
-          }
-          case 'toolcall_end': {
-            const tc: ToolCallContent = {
-              type: 'tool_call',
-              id: event.toolCall.id,
-              name: event.toolCall.name,
-              arguments: JSON.stringify(event.toolCall.arguments),
-            };
-            toolCalls.push(tc);
-            onStream({ type: 'toolcall_end', toolCallId: tc.id, toolName: tc.name });
-            break;
-          }
-          case 'done':
-            assistantMsgRaw = event.message as unknown as Record<string, unknown>;
-            // Accumulate token usage from pi-ai (tallied per-turn)
-            if (event.message.usage) {
-              tokenUsage.input += event.message.usage.input || 0;
-              tokenUsage.output += event.message.usage.output || 0;
-              tokenUsage.total += event.message.usage.totalTokens || 0;
-            }
-            break;
-          case 'error': {
-            if (event.reason === 'aborted') {
-              const err = new Error('已中止') as Error & { name: string };
-              err.name = 'AbortError';
-              throw err;
-            }
-            const errMsg =
-              ((event.error as unknown as Record<string, unknown>)?.errorMessage as string) ||
-              'LLM stream error';
-            throw new Error(errMsg);
-          }
-        }
-      }
+      // Call the LLM with real token-by-token streaming + prompt caching
+      const requestStartTime = Date.now();
+      const requestAttempt = 1;
 
-      console.log(`[AgentLoop] Stream done:`, {
-        assistantTextLen: assistantText.length,
-        thinkingTextLen: thinkingText.length,
-        toolCalls: toolCalls.length,
-        stopReason: assistantMsgRaw?.stopReason,
+      onRunEvent({
+        type: 'model_request_started',
+        runId,
+        turnNumber: turnCount,
+        attempt: requestAttempt,
+        provider: settings.activeProvider,
+        model: settings.activeModel,
+        timestamp: '',
       });
 
-      // Handle error stop reason from the final message
-      if (assistantMsgRaw?.stopReason === 'error') {
-        throw new Error(
-          (assistantMsgRaw.errorMessage as string) ||
-            `模型 ${settings.activeProvider}/${settings.activeModel} 请求失败，请检查 API Key 和网络连接。`,
+      let requestError: string | undefined;
+
+      try {
+        const stream = streamSimpleFn(model, piContext, {
+          reasoning: settings.thinkingLevel,
+          signal: abortSignal,
+          cacheRetention: 'long',
+          sessionId,
+        });
+
+        // Emit message_start once at the beginning
+        onStream({ type: 'message_start' });
+
+        for await (const event of stream) {
+          switch (event.type) {
+            case 'start':
+            case 'text_start':
+            case 'thinking_start':
+            case 'thinking_end':
+              // No-op: we emit assembled state via message_update
+              break;
+            case 'text_delta':
+              assistantText += event.delta;
+              onStream({
+                type: 'message_update',
+                data: {
+                  text: assistantText,
+                  thinking: thinkingText,
+                  toolCalls: [...toolCalls],
+                },
+              });
+              break;
+            case 'text_end':
+              break;
+            case 'thinking_delta':
+              thinkingText += event.delta;
+              onStream({
+                type: 'message_update',
+                data: {
+                  text: assistantText,
+                  thinking: thinkingText,
+                  toolCalls: [...toolCalls],
+                },
+              });
+              break;
+            case 'toolcall_start':
+              // No-op: toolcall is added/updated on toolcall_end
+              break;
+            case 'toolcall_delta':
+              // No-op: arguments are accumulated locally
+              break;
+            case 'toolcall_end': {
+              const tc: ToolCallContent = {
+                type: 'tool_call',
+                id: event.toolCall.id,
+                name: event.toolCall.name,
+                arguments: JSON.stringify(event.toolCall.arguments),
+              };
+              toolCalls.push(tc);
+              onStream({
+                type: 'message_update',
+                data: {
+                  text: assistantText,
+                  thinking: thinkingText,
+                  toolCalls: [...toolCalls],
+                },
+              });
+              break;
+            }
+            case 'done':
+              assistantMsgRaw = event.message as unknown as Record<string, unknown>;
+              if (event.message.usage) {
+                tokenUsage.input += event.message.usage.input || 0;
+                tokenUsage.output += event.message.usage.output || 0;
+                tokenUsage.total += event.message.usage.totalTokens || 0;
+              }
+              break;
+            case 'error': {
+              if (event.reason === 'aborted') {
+                const err = new Error('已中止') as Error & { name: string };
+                err.name = 'AbortError';
+                throw err;
+              }
+              const errMsg =
+                ((event.error as unknown as Record<string, unknown>)?.errorMessage as string) ||
+                'LLM stream error';
+              throw new Error(errMsg);
+            }
+          }
+        }
+
+        console.log(`[AgentLoop] Stream done:`, {
+          assistantTextLen: assistantText.length,
+          thinkingTextLen: thinkingText.length,
+          toolCalls: toolCalls.length,
+          stopReason: assistantMsgRaw?.stopReason,
+        });
+        diag.exit(
+          'LLM',
+          `${assistantText.length}chars ${thinkingText.length}thinking ${toolCalls.length}tools`,
+          { stopReason: assistantMsgRaw?.stopReason },
         );
+
+        // Log full assistant text and thinking for post-mortem
+        if (assistantText) {
+          diag.log('LLM_RESPONSE_TEXT', `len=${assistantText.length}`, { content: assistantText });
+        }
+        if (thinkingText) {
+          diag.log('LLM_RESPONSE_THINKING', `len=${thinkingText.length}`, {
+            content: thinkingText,
+          });
+        }
+
+        // Handle error stop reason
+        if (assistantMsgRaw?.stopReason === 'error') {
+          requestError =
+            (assistantMsgRaw.errorMessage as string) ||
+            `模型 ${settings.activeProvider}/${settings.activeModel} 请求失败，请检查 API Key 和网络连接。`;
+          console.error(`[AgentLoop] LLM request error: ${requestError}`);
+          diag.log('LLM', 'request_error', { error: requestError.slice(0, 200) });
+          throw new Error(requestError);
+        }
+      } catch (streamErr) {
+        if (!requestError) {
+          requestError = (streamErr as Error).message;
+        }
+        throw streamErr;
+      } finally {
+        const durationMs = Date.now() - requestStartTime;
+        const usage = assistantMsgRaw?.usage as
+          | { input?: number; output?: number; totalTokens?: number }
+          | undefined;
+        onRunEvent({
+          type: 'model_request_completed',
+          runId,
+          turnNumber: turnCount,
+          attempt: requestAttempt,
+          provider: settings.activeProvider,
+          model: settings.activeModel,
+          durationMs,
+          inputTokens: usage?.input,
+          outputTokens: usage?.output,
+          totalTokens: usage?.totalTokens,
+          stopReason: assistantMsgRaw?.stopReason as string | undefined,
+          error: requestError,
+          timestamp: '',
+        });
       }
 
       if (!assistantText && toolCalls.length === 0 && !thinkingText) {
+        console.error(
+          `[AgentLoop] Empty response from ${settings.activeProvider}/${settings.activeModel}` +
+            ` on turn ${turnCount}. assistantTextLen=${assistantText.length}` +
+            ` toolCalls=${toolCalls.length} thinkingLen=${thinkingText.length}` +
+            ` stopReason=${assistantMsgRaw?.stopReason || 'none'}`,
+        );
+        diag.log('LLM', 'empty_response', { stopReason: assistantMsgRaw?.stopReason });
         throw new Error(
-          `模型 ${settings.activeProvider}/${settings.activeModel} 返回了空响应，请检查 API Key、额度和模型权限。`,
+          `模型 ${settings.activeProvider}/${settings.activeModel} 返回了空响应（stopReason=${assistantMsgRaw?.stopReason || 'none'}），请检查 API Key、额度和模型权限。`,
         );
       }
 
-      // ===== Turn Decision: compute whether we need another turn =====
-      // Codex-style: model naturally expresses "done" by not calling tools,
-      // or explicitly via task_complete. Stop hooks can override.
-      const hasTaskComplete = hasTaskCompleteToolCall(toolCalls);
+      // ===== Turn Decision =====
+      // Compute whether we need another turn based on tool calls and signals.
       const { decision: turnDecision } = computeNeedsFollowUp({
-        toolCalls: toolCalls.filter((tc) => tc.name !== TASK_COMPLETE_TOOL_NAME),
+        toolCalls: toolCalls,
         hasPendingInput: Boolean(inputHasPending),
         isMaxTurnsReached: turnCount >= (settings.maxTurns || MAX_TURNS),
         isAborted: false,
         assistantText,
-        hasTaskComplete,
+        hasTaskComplete: false,
+      });
+      console.log(
+        `[AgentLoop] Turn ${turnCount} decision: ${turnDecision.decision}` +
+          ` (reason=${turnDecision.reason}, tools=${toolCalls.length},` +
+          ` textLen=${assistantText.length})`,
+      );
+      diag.milestone('DECISION', `${turnDecision.decision}`, {
+        reason: turnDecision.reason,
+        tools: toolCalls.length,
+        textLen: assistantText.length,
+        assistantTextPreview: assistantText.slice(0, 500),
       });
 
-      // task_complete → explicit signal, but first check if plan is incomplete.
-      if (hasTaskComplete) {
-        // ═══════════════════════════════════════════════════════════
-        // Plan gate: if there's a plan embedded in the text, ALL
-        // plan steps must be [x] done before task_complete is accepted.
-        // Otherwise reject it and force the model to finish the plan.
-        // ═══════════════════════════════════════════════════════════
-        const planResult = checkPlanCompletion(assistantText);
-        if (planResult.hasPlan && planResult.pendingCount > 0 && planForceContinueCount < 3) {
-          planForceContinueCount++;
-          const pendingList = planResult.pendingSteps.length > 0
-            ? planResult.pendingSteps.map((s) => `  - [ ] ${s}`).join('\n')
-            : '';
-          console.log(
-            `[AgentLoop] Plan incomplete (attempt ${planForceContinueCount}/3): ${planResult.doneCount} done, ${planResult.pendingCount} pending — rejecting task_complete`,
-          );
-          // Push the current assistant message and inject a plan reminder
-          const blocks: ContentBlock[] = [];
-          if (thinkingText) blocks.push({ type: 'thinking', text: thinkingText });
-          if (assistantText) blocks.push({ type: 'text', text: assistantText });
-          else blocks.push({ type: 'text', text: '处理中...' });
-          contextMessages.push({ role: 'assistant', content: blocks, toolCalls });
-
-          // Add tool results for this turn (task_complete + any others)
-          for (const tc of toolCalls) {
-            const tr: ToolResult = tc.name === TASK_COMPLETE_TOOL_NAME
-              ? { toolCallId: tc.id, name: tc.name, success: false, output: '', error: '计划未完成，已拒绝' }
-              : { toolCallId: tc.id, name: tc.name, success: true, output: '' };
-            contextMessages.push({ role: 'tool', content: tr.success ? tr.output : `错误: ${tr.error}`, toolCallId: tr.toolCallId });
-          }
-
-          contextMessages.push({
-            role: 'user',
-            content: `你的执行计划还有 ${planResult.pendingCount} 个步骤未完成（${planResult.doneCount}/${planResult.totalCount}）。请立即执行：\n${pendingList}\n每完成一步后输出 📋 进度更新：。全部 [x] 后才能调用 task_complete。`,
-          });
-
-            onStream({ type: 'turn_end', turnCount, hasToolCalls: true });
-            onRunEvent({ type: 'turn_completed', runId, turnNumber: turnCount, hasToolCalls: true, timestamp: '' });
-            continue;
-          }
-
-        // If circuit breaker tripped, fall through to normal task_complete handling
-        const taskCompleteTC = findTaskCompleteCall(toolCalls);
-        let summary = '';
-        if (taskCompleteTC) {
-          try {
-            const args = JSON.parse(taskCompleteTC.arguments);
-            summary = (args.summary as string) || '';
-          } catch {
-            // ignore parse failures
-          }
-        }
-        if (summary) {
-          assistantText = assistantText ? `${assistantText}\n\n${summary}` : summary;
-        }
-
-        const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
-
-        onStream({ type: 'text_end' });
-        onStream({ type: 'turn_end', turnCount, hasToolCalls: true });
-        onRunEvent({
-          type: 'turn_completed',
-          runId,
-          turnNumber: turnCount,
-          hasToolCalls: true,
-          timestamp: '',
-          taxonomy: 'completed',
-        });
-
-        const contentBlocks: Array<
-          { type: 'thinking'; text: string } | { type: 'text'; text: string }
-        > = [];
-        if (thinkingText) {
-          contentBlocks.push({ type: 'thinking', text: thinkingText });
-        }
-        contentBlocks.push({ type: 'text', text: mergedText });
-
-        return {
-          finalMessage: { role: 'assistant', content: contentBlocks },
-          turnCount,
-          tokenUsage,
-          decision: { decision: 'stop', reason: 'task_complete', taxonomy: 'completed' },
-        };
-      }
-
-      // Tool calls present → execute them and continue
-      if (turnDecision.decision === 'continue' && toolCalls.length > 0) {
-        // Fall through to tool execution below
-      }
-
-      // Stop decision (natural end, no tools — model is done)
+      // Stop decision — model finished its turn naturally
       if (turnDecision.decision === 'stop') {
-        // ═══════════════════════════════════════════════════════════
-        // Plan Gate: if model says it's done but plan is incomplete,
-        // force continuation. Circuit breaker prevents infinite loop.
-        // ═══════════════════════════════════════════════════════════
-        const planCheck = checkPlanCompletion(assistantText);
-        if (planCheck.hasPlan && planCheck.pendingCount > 0 && planForceContinueCount < 3) {
-          planForceContinueCount++;
-          const pendingList = planCheck.pendingSteps.length > 0
-            ? planCheck.pendingSteps.map((s) => `  - [ ] ${s}`).join('\n')
-            : '';
-          console.log(`[AgentLoop] Plan incomplete (attempt ${planForceContinueCount}/3): ${planCheck.doneCount} done, ${planCheck.pendingCount} pending — forcing continue`);
+        console.log(
+          `[AgentLoop] Stop decision: reason=${turnDecision.reason}, taxonomy=${turnDecision.taxonomy || 'none'}`,
+        );
 
-          // Push current message
-          const blocks: ContentBlock[] = [];
-          if (thinkingText) blocks.push({ type: 'thinking', text: thinkingText });
-          if (assistantText) blocks.push({ type: 'text', text: assistantText });
-          else blocks.push({ type: 'text', text: '处理中...' });
-          contextMessages.push({ role: 'assistant', content: blocks, toolCalls });
-
-          contextMessages.push({
-            role: 'user',
-            content: `你的执行计划还有 ${planCheck.pendingCount} 个步骤未完成（${planCheck.doneCount}/${planCheck.totalCount}）。请继续执行：\n${pendingList}\n每完成一步后输出 📋 进度更新：更新状态。`,
-          });
-
-          onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
-          onRunEvent({ type: 'turn_completed', runId, turnNumber: turnCount, hasToolCalls: false, timestamp: '' });
-          continue;
-        }
-        if (planCheck.hasPlan && planCheck.pendingCount > 0) {
-          console.log(`[AgentLoop] Plan force-continue limit reached (${planForceContinueCount} attempts), accepting stop with incomplete plan`);
-        }
-
-        // Push current message before finalizing
+        // Push current assistant message before finalizing
         const interimBlocks: ContentBlock[] = [];
         if (thinkingText) interimBlocks.push({ type: 'thinking', text: thinkingText });
         if (assistantText) interimBlocks.push({ type: 'text', text: assistantText });
         else interimBlocks.push({ type: 'text', text: '处理中...' });
         contextMessages.push({ role: 'assistant', content: interimBlocks, toolCalls });
 
-        // Run stop hooks before finalizing (safety, completion check)
+        // Run stop hooks before finalizing (safety checks)
         if (stopHooks) {
           const hookResult = await stopHooks.runAll({
             assistantText,
@@ -545,7 +471,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
           if (hookResult.shouldStop) {
             const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
-            onStream({ type: 'text_end' });
+            onStream({
+              type: 'message_end',
+              data: {
+                text: mergedText,
+                thinking: thinkingText,
+                toolCalls: [...toolCalls],
+                isFinished: true,
+              },
+            });
             onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
             onRunEvent({
               type: 'turn_completed',
@@ -559,9 +493,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             const contentBlocks: Array<
               { type: 'thinking'; text: string } | { type: 'text'; text: string }
             > = [];
-            if (thinkingText) {
-              contentBlocks.push({ type: 'thinking', text: thinkingText });
-            }
+            if (thinkingText) contentBlocks.push({ type: 'thinking', text: thinkingText });
             contentBlocks.push({ type: 'text', text: mergedText });
 
             return {
@@ -593,10 +525,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           }
         }
 
-        // Normal stop — no follow-up needed, model is done
-        const mergedText = mergeThinkingIntoAnswer(assistantText, thinkingText);
+        // Normal stop — model finished naturally
+        const displayText = mergeThinkingIntoAnswer(assistantText, thinkingText);
 
-        onStream({ type: 'text_end' });
+        onStream({
+          type: 'message_end',
+          data: {
+            text: displayText,
+            thinking: thinkingText,
+            toolCalls: [...toolCalls],
+            isFinished: true,
+          },
+        });
         onStream({ type: 'turn_end', turnCount, hasToolCalls: toolCalls.length > 0 });
         onRunEvent({
           type: 'turn_completed',
@@ -610,10 +550,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         const contentBlocks: Array<
           { type: 'thinking'; text: string } | { type: 'text'; text: string }
         > = [];
-        if (thinkingText) {
-          contentBlocks.push({ type: 'thinking', text: thinkingText });
-        }
-        contentBlocks.push({ type: 'text', text: mergedText });
+        if (thinkingText) contentBlocks.push({ type: 'thinking', text: thinkingText });
+        contentBlocks.push({ type: 'text', text: displayText });
+
+        console.log(
+          `[AgentLoop] === LOOP EXIT: stop (reason=${turnDecision.reason}) ===` +
+            `  turns=${turnCount} tokens={in:${tokenUsage.input} out:${tokenUsage.output} total:${tokenUsage.total}}`,
+        );
+        diag.exit('LOOP', `stop`, {
+          reason: turnDecision.reason,
+          turns: turnCount,
+          tokensIn: tokenUsage.input,
+          tokensOut: tokenUsage.output,
+          tokensTotal: tokenUsage.total,
+        });
 
         return {
           finalMessage: { role: 'assistant', content: contentBlocks },
@@ -682,7 +632,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             toolCallId: tc.id,
             name: tc.name,
             success: false,
-            error: `参数解析失败: ${tc.arguments}`,
+            error: `Validation failed for tool "${tc.name}": JSON parse error in arguments.\n\nReceived arguments:\n${tc.arguments}`,
             output: '',
           };
           toolResults.push(e);
@@ -716,11 +666,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             }
           }
           if (missing) {
+            const formatted = `Validation failed for tool "${tc.name}":\n  - ${missing}: Required property\n\nReceived arguments:\n${JSON.stringify(params, null, 2)}`;
             const e: ToolResult = {
               toolCallId: tc.id,
               name: tc.name,
               success: false,
-              error: `缺少必需参数: ${missing}`,
+              error: formatted,
               output: '',
             };
             toolResults.push(e);
@@ -772,12 +723,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // Phase 2: Execute all valid tools in parallel
       if (toExecute.length > 0) {
         const mode = toExecute.length > 1 ? 'parallel' : 'single';
-        console.log(`[AgentLoop] Executing ${toExecute.length} tools in ${mode}`);
+        const toolExecStartTime = Date.now();
+        console.log(
+          `[AgentLoop] Executing ${toExecute.length} tools in ${mode}:` +
+            ` [${toExecute.map((t) => t.tc.name).join(', ')}]`,
+        );
 
         const settled = await Promise.allSettled(
           toExecute.map(async ({ tc, tool, params }) => {
+            const tStart = Date.now();
             try {
-              console.log(`[AgentLoop] Tool ${tc.name} executing...`);
+              const paramsStr = JSON.stringify(params);
+              const paramsPreview =
+                paramsStr.length > 100 ? `${paramsStr.slice(0, 100)}...` : paramsStr;
+              console.log(`[AgentLoop] Tool ${tc.name} executing (params: ${paramsPreview})`);
               const result = await tool.execute(params);
               result.toolCallId = tc.id;
               onToolEnd(result);
@@ -790,8 +749,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 timestamp: '',
               });
               console.log(
-                `[AgentLoop] Tool ${tc.name}: ${result.success ? 'success' : `error: ${result.error || 'unknown'}`}`,
+                `[AgentLoop] Tool ${tc.name}: ${result.success ? 'OK' : 'FAIL'}` +
+                  ` (${Date.now() - tStart}ms)` +
+                  `${result.error ? ` — ${result.error.slice(0, 80)}` : ''}`,
               );
+              diag.log('TOOL', `${tc.name} ${result.success ? 'OK' : 'FAIL'}`, {
+                durationMs: Date.now() - tStart,
+                success: result.success,
+                ...(result.error ? { error: result.error.slice(0, 80) } : {}),
+              });
               return result;
             } catch (error) {
               const e: ToolResult = {
@@ -810,6 +776,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 success: false,
                 timestamp: '',
               });
+              console.log(
+                `[AgentLoop] Tool ${tc.name}: CRASH (${Date.now() - tStart}ms) — ${(error as Error).message.slice(0, 80)}`,
+              );
+              diag.log('TOOL', `${tc.name} CRASH`, {
+                durationMs: Date.now() - tStart,
+                error: (error as Error).message.slice(0, 80),
+              });
               return e;
             }
           }),
@@ -819,7 +792,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           if (s.status === 'fulfilled') {
             toolResults.push(s.value);
           } else {
-            // Promise rejection from the mapper itself (unlikely, but handle it)
             toolResults.push({
               toolCallId: '',
               name: 'unknown',
@@ -829,20 +801,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             });
           }
         }
+
+        console.log(
+          `[AgentLoop] Tools done: ${toolResults.filter((t) => t.success).length}/${toolResults.length} OK` +
+            ` (total ${Date.now() - toolExecStartTime}ms)`,
+        );
+        diag.exit(
+          'TOOLS',
+          `${toolResults.filter((t) => t.success).length}/${toolResults.length} OK`,
+          { durationMs: Date.now() - toolExecStartTime },
+        );
       }
 
-      // Add assistant + tool results to context.
-      // With real streaming, the model already correctly separates thinking
-      // from text content — store each with its proper type as received.
+      // Add assistant + tool results to context
       const assistantBlocks: ContentBlock[] = [];
-      if (thinkingText) {
-        assistantBlocks.push({ type: 'thinking', text: thinkingText });
-      }
-      if (assistantText) {
-        assistantBlocks.push({ type: 'text', text: assistantText });
-      }
-      // Always construct content as an array so downstream consumers
-      // (e.g. pi-ai's transformMessages → .flatMap) don't break on a string.
+      if (thinkingText) assistantBlocks.push({ type: 'thinking', text: thinkingText });
+      if (assistantText) assistantBlocks.push({ type: 'text', text: assistantText });
       if (assistantBlocks.length === 0) {
         assistantBlocks.push({ type: 'text', text: assistantText || '处理中...' });
       }
@@ -853,8 +827,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       };
       contextMessages.push(assistantMsg2);
 
-      lastToolHadError = toolResults.some((tr) => !tr.success);
-
       for (const tr of toolResults) {
         contextMessages.push({
           role: 'tool',
@@ -863,27 +835,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         });
       }
 
-      // ═══════════════════════════════════════════════════════════
-      // Plan check: on turn 1, if the model used non-readonly tools
-      // without outputting a plan (📋 marker), inject a strong reminder.
-      // This is the LAST LINE OF DEFENSE when the primary injection
-      // (user message prefix) somehow fails.
-      // ═══════════════════════════════════════════════════════════
-      if (turnCount <= 2 && !assistantText.includes('📋')) {
-        const nonReadonlyTools = toolCalls.filter(
-          (tc) => !['read', 'grep', 'glob', 'web_fetch', 'web_search', 'task_complete'].includes(tc.name),
-        );
-        if (nonReadonlyTools.length > 0) {
-          console.log('[AgentLoop] Turn 1 without plan, injecting reminder');
-          contextMessages.push({
-            role: 'user',
-            content:
-              '你跳过了规划步骤。请立即在正文开头输出 [执行] 分类标记和 📋 执行计划（用 - [ ] Step N: 格式列出每一步）。然后继续执行。',
-          });
-        }
-      }
-
       // Emit turn_end for intermediate (tool-use) turns
+      const turnDurationMs = Date.now() - requestStartTime;
+      console.log(
+        `[AgentLoop] Turn ${turnCount} end: ${turnDurationMs}ms` +
+          ` | tokens: +${tokenUsage.input + tokenUsage.output} (acc ${tokenUsage.total})` +
+          ` | msgs: ${contextMessages.length}`,
+      );
+      diag.exit('TURN', `${turnCount}`, {
+        durationMs: turnDurationMs,
+        tokensTotal: tokenUsage.total,
+        msgs: contextMessages.length,
+      });
       onStream({ type: 'turn_end', turnCount, hasToolCalls: true });
       onRunEvent({
         type: 'turn_completed',
@@ -895,7 +858,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // Allow hook to trim context or adjust state before the next turn
       if (prepareNextTurn) {
-        // Extract model context window for budget-aware compaction
+        const beforeMsgs = contextMessages.length;
         const modelContextWindow = extractContextWindow(model);
         const result2 = prepareNextTurn({
           assistantText,
@@ -907,23 +870,38 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           modelContextWindow,
         });
         if (result2?.contextMessages) {
-          // Replace the mutable context array contents
           contextMessages.length = 0;
           contextMessages.push(...result2.contextMessages);
+          console.log(`[AgentLoop] Compaction: ${beforeMsgs}→${contextMessages.length} msgs`);
         }
       }
 
       // Continue loop
     } catch (error) {
       if ((error as { name?: string }).name === 'AbortError') {
+        console.log('[AgentLoop] Loop aborted');
+        diag.exit('LOOP', 'aborted');
         throw new DOMException('Aborted', 'AbortError');
       }
-      console.error('[AgentLoop] Error:', error);
+      console.error('[AgentLoop] Unhandled error in loop:', error);
+      diag.exit('LOOP', 'error', { error: (error as Error).message.slice(0, 200) });
       throw error;
     }
   }
 
   // Max turns reached
+  console.log(
+    `[AgentLoop] === LOOP EXIT: max turns (${settings.maxTurns || MAX_TURNS}) ===` +
+      `\n  turns=${turnCount} tokens={in:${tokenUsage.input} out:${tokenUsage.output} total:${tokenUsage.total}}` +
+      `\n  finalMsgs=${contextMessages.length}`,
+  );
+  diag.exit('LOOP', 'max_turns', {
+    maxTurns: settings.maxTurns || MAX_TURNS,
+    turns: turnCount,
+    tokensTotal: tokenUsage.total,
+    msgs: contextMessages.length,
+  });
+
   return {
     finalMessage: {
       role: 'assistant',
@@ -972,10 +950,31 @@ function getIdentityReply(messages: Message[]): string | null {
 }
 
 function convertMessage(msg: Message): Record<string, unknown> {
-  const role = msg.role === 'tool' ? 'user' : msg.role;
+  // Tool results must be sent with role "toolResult" (pi-ai converts this
+  // to provider-specific formats: role "tool" for OpenAI/DeepSeek,
+  // role "user" with tool_result content blocks for Anthropic).
+  // The old approach converted to role "user" which lost the tool-result
+  // semantics and confused the model.
+  if (msg.role === 'tool') {
+    const content =
+      typeof msg.content === 'string'
+        ? [{ type: 'text' as const, text: msg.content }]
+        : msg.content
+            .filter((b) => b.type === 'text' || b.type === 'thinking')
+            .map((b) => {
+              if (b.type === 'thinking')
+                return { type: 'text' as const, text: (b as { text: string }).text };
+              return { type: 'text' as const, text: b.text };
+            });
+    return {
+      role: 'toolResult' as const,
+      content,
+      toolCallId: msg.toolCallId || '',
+    };
+  }
 
   if (typeof msg.content === 'string') {
-    return { role, content: msg.content };
+    return { role: msg.role, content: msg.content };
   }
 
   const content = msg.content.map((block) => {
@@ -983,30 +982,43 @@ function convertMessage(msg: Message): Record<string, unknown> {
     if (block.type === 'thinking') return { type: 'thinking', text: block.text };
     if (block.type === 'tool_call')
       return {
-        type: 'tool_use',
+        type: 'toolCall' as const,
         id: block.id,
         name: block.name,
-        input: safeParseJson(block.arguments),
+        arguments: safeParseJson(block.arguments),
       };
     return block;
   });
 
+  // Include tool_calls from msg.toolCalls (stored separately from content blocks).
+  // pi-ai expects ToolCall blocks ({ type: "toolCall", id, name, arguments })
+  // in the content array for ALL providers.
+  const toolCalls =
+    msg.toolCalls && msg.toolCalls.length > 0
+      ? msg.toolCalls.map((tc) => ({
+          type: 'toolCall' as const,
+          id: tc.id,
+          name: tc.name,
+          arguments: safeParseJson(tc.arguments),
+        }))
+      : [];
+
   return {
-    role,
-    content,
+    role: msg.role === 'tool' ? 'user' : msg.role,
+    content: [...content, ...toolCalls],
     ...(msg.toolCallId ? { tool_call_id: msg.toolCallId } : {}),
   };
 }
 
 function convertToolDef(tool: ToolDefinition): Record<string, unknown> {
+  // pi-ai expects { name, description, parameters } where parameters is
+  // the full JSON Schema object (with type, properties, required).
+  // The provider layer (e.g. Anthropic) reads parameters.properties and
+  // parameters.required to build provider-specific formats like input_schema.
   return {
     name: tool.name,
     description: tool.description,
-    input_schema: {
-      type: 'object',
-      properties: tool.parameters.properties || {},
-      required: tool.parameters.required || [],
-    },
+    parameters: tool.parameters,
   };
 }
 
@@ -1021,37 +1033,18 @@ function safeParseJson(str: string): unknown {
 /**
  * Merge thinking content into the visible answer when the model outputs
  * substantial reasoning but little or no visible text.
- *
- * Reasoning models (DeepSeek, o1, etc.) often put the entire analysis in
- * the thinking/reasoning stream and produce only a token sentence as text.
- * Without merging, the user sees "已完成。" while the real answer is hidden
- * inside a collapsed thinking section.
- *
- * Strategy:
- * - If text is substantial (≥120 chars), return it unchanged.
- * - If text is short/empty but thinking is substantial, extract a useful
- *   summary from the end of the thinking stream (reasoning models typically
- *   conclude their chain-of-thought with the final answer).
- * - If nothing is available, fall back to a meaningful default.
  */
 function mergeThinkingIntoAnswer(assistantText: string, thinkingText: string): string {
   const textLen = assistantText.trim().length;
 
-  // Already has a meaningful visible answer — use it as-is
   if (textLen >= 120) return assistantText;
 
-  // No thinking to fall back to
   if (!thinkingText || thinkingText.trim().length === 0) {
     return assistantText || '已完成。';
   }
 
   const cleanThinking = thinkingText.trim();
   const thinkingLen = cleanThinking.length;
-
-  // When the visible answer is almost empty (≤2 words), and thinking is substantial,
-  // the model output is likely an intermediate thought ("Let me check..."), not a
-  // summary. Don't expose all the internal reasoning — just extract a brief tail.
-  // The full thinking remains accessible in the collapsed <details> section.
   const TAIL_EXTRACT_CHARS = 500;
 
   if (textLen <= 30 && thinkingLen > 100) {
@@ -1059,21 +1052,15 @@ function mergeThinkingIntoAnswer(assistantText: string, thinkingText: string): s
     const boundary = findNaturalBoundary(tail);
     const excerpt = tail.slice(boundary).trim();
     if (excerpt) {
-      return assistantText
-        ? `${assistantText}\n\n---\n\n${excerpt}`
-        : `思考结论：\n\n${excerpt}`;
+      return assistantText ? `${assistantText}\n\n---\n\n${excerpt}` : `思考结论：\n\n${excerpt}`;
     }
   }
 
-  // If thinking is short enough to show entirely, just use it
   if (thinkingLen <= 2000) {
     return assistantText ? `${assistantText}\n\n---\n\n${cleanThinking}` : cleanThinking;
   }
 
-  // For long thinking, extract the concluding portion (last ~1500 chars).
-  // Reasoning models tend to restate findings at the end of their chain-of-thought.
   const tail = cleanThinking.slice(-1500);
-  // Try to start at a natural boundary (paragraph break or sentence end)
   const boundary = findNaturalBoundary(tail);
   const excerpt = tail.slice(boundary).trim();
 
@@ -1081,20 +1068,13 @@ function mergeThinkingIntoAnswer(assistantText: string, thinkingText: string): s
     return `${assistantText}\n\n---\n\n${excerpt}`;
   }
 
-  // Prepend a brief note so the user understands what they're reading
   return `思考结论：\n\n${excerpt}`;
 }
 
-/**
- * Find a natural text boundary (paragraph break, double newline, or period+newline)
- * within the first 300 chars of the given text. Returns the offset to start from.
- */
 function findNaturalBoundary(text: string): number {
-  // Prefer paragraph breaks
   const paraIdx = text.indexOf('\n\n');
   if (paraIdx !== -1 && paraIdx < 300) return paraIdx + 2;
 
-  // Try to find end of a sentence followed by newline
   const sentenceMatch = text.slice(0, 400).match(/[。！？.!?]\n/g);
   if (sentenceMatch) {
     const firstMatch = sentenceMatch[0];
@@ -1104,62 +1084,18 @@ function findNaturalBoundary(text: string): number {
     }
   }
 
-  // Try to break at any newline
   const nlIdx = text.indexOf('\n');
   if (nlIdx !== -1 && nlIdx < 300) return nlIdx + 1;
 
-  // Fallback: no good boundary found, start from beginning of extracted text
   return 0;
-}
-
-/**
- * Extract the model's context window size (in tokens) from the pi-ai model object.
- * Falls back to a conservative default if unavailable.
- */
-/**
- * Quick check whether the accumulated assistant text contains a plan
- * and how many steps are pending vs done. Used as a gate before
- * accepting task_complete or stop decisions.
- */
-function checkPlanCompletion(text: string): {
-  hasPlan: boolean;
-  pendingCount: number;
-  doneCount: number;
-  totalCount: number;
-  pendingSteps: string[];
-} {
-  const hasPlan = text.includes('📋');
-  if (!hasPlan) {
-    return { hasPlan: false, pendingCount: 0, doneCount: 0, totalCount: 0, pendingSteps: [] };
-  }
-  const pendingRegex = /^\s*[-*+]\s+\[ \]\s+Step\s+\d+:\s*(.+)$/gm;
-  const doneRegex = /^\s*[-*+]\s+\[[xX]\]\s+/gm;
-  const pendingMatches = text.match(pendingRegex);
-  const doneMatches = text.match(doneRegex);
-  const pendingCount = pendingMatches ? pendingMatches.length : 0;
-  const doneCount = doneMatches ? doneMatches.length : 0;
-
-  // Extract pending step descriptions
-  const pendingSteps: string[] = [];
-  if (pendingMatches) {
-    // Re-run regex to get capture groups
-    const extractRegex = /^\s*[-*+]\s+\[ \]\s+Step\s+\d+:\s*(.+)$/gm;
-    let m: RegExpExecArray | null;
-    while ((m = extractRegex.exec(text)) !== null) {
-      pendingSteps.push(m[1]!.trim());
-    }
-  }
-
-  return { hasPlan: true, pendingCount, doneCount, totalCount: pendingCount + doneCount, pendingSteps };
 }
 
 function extractContextWindow(model: unknown): number {
   const m = model as Record<string, unknown> | null | undefined;
   if (!m) return 128_000;
-  // Try common property names across providers
   for (const key of ['contextWindow', 'context_window', 'maxInputTokens', 'max_input_tokens']) {
     const val = m[key];
     if (typeof val === 'number' && val > 0) return val;
   }
-  return 128_000; // Conservative default
+  return 128_000;
 }

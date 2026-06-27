@@ -5,7 +5,6 @@ export interface SystemPromptInput {
   workingDir: string;
   tools: ToolDefinition[];
   skillsContent: string;
-  maxTurns: number;
   /** Permission mode controls how the model should approach tool execution. */
   permissionMode: AppSettings['permissionMode'];
   /** Optional: Custom system prompt to override the default */
@@ -18,105 +17,60 @@ export interface SystemPromptInput {
 
 /**
  * Builds the system prompt for the agent.
- * Combines the base system prompt, tool descriptions, skills, and environment info.
- */
-/**
- * Builds the system prompt for the agent.
- *
- * DESIGN NOTE (prompt caching): The system prompt is ordered for maximum cache
- * stability. Static content (base prompt, guidelines, rules) comes FIRST so it
- * always occupies the cacheable prefix. Semi-static content (tools, skills,
- * memory) comes LATER so changes to those sections only invalidate the tail of
- * the cache. Dynamic per-request data (date, etc.) is NOT included here — it
- * belongs in the user message after the cache breakpoint.
+ * Follows pi-agent-core's minimal approach: base prompt + tools + date/cwd.
  */
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const {
     workingDir,
     tools,
     skillsContent,
-    maxTurns,
     permissionMode,
     customPrompt,
     agentsMdContent,
     memoryContent,
   } = input;
 
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const promptCwd = workingDir.replace(/\\/g, '/');
+
   const parts: string[] = [];
 
-  // ═══════════════════════════════════════════════════════
-  // SECTION 1: STATIC CACHEABLE PREFIX
-  // These sections rarely or never change — they form the
-  // cacheable prefix that pi-ai marks with cache_control.
-  // ═══════════════════════════════════════════════════════
-
-  // 1a. Base system prompt (from constants — never changes at runtime)
+  // Base system prompt
   parts.push(customPrompt || DEFAULT_SYSTEM_PROMPT);
 
-  // 1b. Git push rule (never changes)
+  // Permission mode (one line, always append to base)
   parts.push('');
-  parts.push('## CRITICAL: Git Push Rule');
-  parts.push(
-    'If the user asked to push/提交到远端/上传: ALL git operations MUST be chained in ONE bash call ending with git push. Example:',
-  );
-  parts.push('  git add <files> && git commit -m "msg" && git push');
-  parts.push(
-    'Never stop after commit. Never output text between commit and push. Commit without push = FAILURE.',
-  );
+  parts.push(permissionMode === 'plan' ? '## Mode: plan — read-only tools only' : '');
 
-  // ═══════════════════════════════════════════════════════
-  // SECTION 2: SEMI-STATIC CONTENT
-  // These change infrequently (per-session or per-settings-change).
-  // They come AFTER the cacheable prefix so prefix cache hits
-  // survive changes to these sections.
-  // ═══════════════════════════════════════════════════════
-
-  // 2a. Permission mode — changes when user toggles settings
-  parts.push('');
-  parts.push('## Permission Mode');
-  parts.push(permissionInstructions(permissionMode));
-
-  // 2b. Environment info — working dir and shell are per-session, OS is constant
-  // NOTE: Date is intentionally OMITTED. Injecting a daily-changing string
-  // into the system prompt would invalidate the prompt cache every midnight.
-  const shellInfo = getShellInfo();
-  parts.push('');
-  parts.push('## Environment');
-  parts.push(`- Working directory: ${workingDir}`);
-  parts.push(`- Operating system: ${shellInfo.osName}`);
-  parts.push(`- Shell: ${shellInfo.shell}`);
-  parts.push(`- Shell type: ${shellInfo.shellType}`);
-  parts.push(`- Maximum turns: ${maxTurns}`);
-  parts.push('');
-  parts.push(shellInfo.guidance);
-
-  // 2c. Available Tools — changes when tool registry changes (rare)
-  parts.push('');
-  parts.push('## Available Tools');
-  parts.push('');
-  for (const tool of tools) {
-    parts.push(`- **${tool.name}**: ${getToolSnippet(tool)}`);
+  // Tool-specific usage guidelines (like pi's promptGuidelines)
+  const toolGuidelines = getToolGuidelines(tools.map((t) => t.name));
+  if (toolGuidelines.length > 0) {
+    parts.push('');
+    parts.push('## Guidelines');
+    for (const g of toolGuidelines) {
+      parts.push(`- ${g}`);
+    }
   }
 
-  // ═══════════════════════════════════════════════════════
-  // SECTION 3: PROJECT-SPECIFIC DYNAMIC CONTENT
-  // These change with project state (memory, skills, agents.md).
-  // They're at the END so the static/semi-static prefix above
-  // stays cacheable even when project content updates.
-  // ═══════════════════════════════════════════════════════
+  // Available Tools (same as pi's approach)
+  if (tools.length > 0) {
+    parts.push('');
+    parts.push('## Available Tools');
+    for (const tool of tools) {
+      parts.push(`- **${tool.name}**: ${getToolSnippet(tool)}`);
+    }
+  }
 
-  // 3a. Project memory (auto-generated, changes between sessions)
+  // Project memory
   if (memoryContent) {
     parts.push('');
     parts.push('<project_memory>');
-    parts.push('The following is a summary of past work in this project. Use it to');
-    parts.push('understand the project context and avoid re-exploring known ground.');
-    parts.push('');
     parts.push(memoryContent);
     parts.push('</project_memory>');
   }
 
-  // 3b. Workspace instructions from .agents.md
+  // Workspace instructions
   if (agentsMdContent) {
     parts.push('');
     parts.push('<project_context>');
@@ -124,7 +78,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     parts.push('</project_context>');
   }
 
-  // 3c. Skills — changes when skill files are added/modified
+  // Skills
   if (skillsContent) {
     parts.push('');
     parts.push('<available_skills>');
@@ -132,121 +86,52 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     parts.push('</available_skills>');
   }
 
-  // Final instruction
-  parts.push('');
-  parts.push('## CRITICAL: Output Format — Two Fields');
-  parts.push('');
-  parts.push('You have TWO output fields. Use them correctly:');
-  parts.push('');
-  parts.push('1. **Thinking field** (thinking/reasoning block):');
-  parts.push('   - Put ALL intermediate working narration here: "Let me read the file...", "I need to check...", "The edit failed so I will..."');
-  parts.push('   - Internal reasoning, planning, analysis, and debugging logic belongs here.');
-  parts.push('   - This field is COLLAPSED by default — the user does NOT see it as your answer.');
-  parts.push('');
-  parts.push('2. **Text field** (visible content block — the ONLY thing the user sees during execution):');
-  parts.push('   - **First turn of execution task: output a plan checklist first!** Format:');
-  parts.push('     📋 执行计划：');
-  parts.push('     - [ ] Step 1: ...');
-  parts.push('     - [ ] Step 2: ...');
-  parts.push('   - **Every subsequent turn: update the plan** — mark done with [x] ✅.');
-  parts.push('   - **When all steps complete: output the COMPLETE FINAL RESULT in the text field.**');
-  parts.push('');
-  parts.push('   ⚠️ CRITICAL — THE TEXT FIELD IS YOUR ONLY DELIVERABLE:');
-  parts.push('   - The text field MUST contain the full answer: code, verification output, file paths, conclusions.');
-  parts.push('   - The user can ONLY see the text field. Thinking is hidden. If you put the answer in thinking, the user sees nothing.');
-  parts.push('   - Minimum: 3-5 sentences with concrete results. "已完成。" is a FAILURE.');
-  parts.push('   - If you wrote code, show the code. If you ran tests, show the output. If you fixed a bug, explain root cause + fix.');
-  parts.push('   - Write the text field as if you are handing a document to your boss — complete, self-contained, copy-paste ready.');
-  parts.push('');
-  parts.push('When you are done, call the `task_complete` tool with a summary.');
-  parts.push('The conversation will NOT end until you call `task_complete`.');
-  parts.push('');
-  parts.push('──────────────────────────────────────────');
-  parts.push('⚠️  PLANNING GATE — DO NOT SKIP ⚠️');
-  parts.push('──────────────────────────────────────────');
-  parts.push('');
-  parts.push('Every response MUST start with a task classification in the text field:');
-  parts.push('  [查询] — for read-only questions ("what is X", "explain Y")');
-  parts.push('  [执行] — for tasks that modify code, run commands, or produce deliverables');
-  parts.push('');
-  parts.push('If [执行], your text field MUST also include a plan BEFORE calling tools:');
-  parts.push('  📋 执行计划：');
-  parts.push('  - [ ] Step 1: <specific action>');
-  parts.push('  - [ ] Step 2: <specific action>');
-  parts.push('');
-  parts.push('The plan MUST appear in your FIRST response. Do NOT call tools before the plan.');
-  parts.push('──────────────────────────────────────────');
+  // Date and working directory (like pi)
+  parts.push(`\nCurrent date: ${date}`);
+  parts.push(`Current working directory: ${promptCwd}`);
 
-  return parts.join('\n');
+  return parts.join('\n').replace(/\n{3,}/g, '\n\n'); // Collapse excessive blank lines
 }
 
-function permissionInstructions(mode: AppSettings['permissionMode']): string {
-  switch (mode) {
-    case 'full_access':
-      return '**完全访问** — 你拥有对工作区的完全访问权限。直接执行工具，不需要询问用户确认。大胆行动，承担风险，事后报告结果。';
-    case 'auto_edit':
-      return '**自动编辑** — 你可以自由读写文件。执行 bash 命令前需简要说明目的（一句话即可，不需要等待确认）。';
-    case 'confirm_changes':
-      return '**变更前确认** — 在对文件做任何修改之前，先向用户说明你打算做什么并等待确认，然后再执行。读取操作不需要确认。';
-    case 'plan':
-      return '**计划模式** — 你只能使用 read/grep/glob 等只读工具。不要执行 write/edit/bash 等会修改文件的工具。分析用户请求并给出详细的执行计划。';
-  }
-}
-
-/** Shell environment info based on the current platform. */
-function getShellInfo(): { osName: string; shell: string; shellType: string; guidance: string } {
-  const platform = process.platform;
-  let osName: string;
-  let shell: string;
-  let shellType: string;
-  let guidance: string;
-
-  if (platform === 'win32') {
-    osName = 'Windows';
-    shell = 'pwsh.exe';
-    shellType = 'PowerShell';
-    guidance =
-      'The bash tool runs PowerShell (pwsh.exe) on this Windows system. ' +
-      'Key notes for PowerShell:\n' +
-      '  - Use `&&` to chain commands (same as bash).\n' +
-      '  - Double quotes for strings with spaces, single quotes for literals.\n' +
-      '  - Standard Unix aliases (ls, cat, rm, cp, mv, mkdir, grep) are available.\n' +
-      '  - Environment variables: use `$env:VAR` instead of `$VAR`.\n' +
-      '  - Avoid cmd.exe-specific syntax (e.g., `type` for cat, `copy` for cp).\n' +
-      '  - Git commands work identically to Unix.';
-  } else if (platform === 'darwin') {
-    osName = 'macOS';
-    shell = '/bin/bash';
-    shellType = 'Bash';
-    guidance =
-      'The bash tool runs bash on this macOS system. ' +
-      'Standard Unix/Linux commands and shell syntax apply.';
-  } else {
-    osName = 'Linux';
-    shell = '/bin/bash';
-    shellType = 'Bash';
-    guidance =
-      'The bash tool runs bash on this Linux system. ' +
-      'Standard Unix/Linux commands and shell syntax apply.';
-  }
-
-  return { osName, shell, shellType, guidance };
-}
-
-/** One-line summaries for built-in tools.  Concise but complete enough that
- *  the model knows which tool to pick and which parameters are required.
- *  Full JSON Schema is still available via `tool.getDefinition()` for
- *  function-calling providers that need it. */
-function getToolSnippet(tool: ToolDefinition): string {
-  const snippets: Record<string, string> = {
-    read: 'Read file contents with line numbers. `file_path` (required), `offset`, `limit`. Also reads images as base64.',
-    write: 'Create or overwrite a file (creates parent dirs). `file_path` and `content` required.',
-    edit: 'Exact string replacement in a file. `file_path`, `old_string`, `new_string` required. `replace_all` (bool) replaces all occurrences. Fails if old_string is not unique.',
-    bash: 'Execute a shell command. `command` (required). For git push: chain add+commit+push with && in one call.',
-    grep: 'Regex search via ripgrep. `pattern` (required), `path`, `glob` filter, `type` filter, `multiline` (bool), `ignoreCase` (bool). Supports -A/-B/-C context.',
-    glob: 'Find files by glob pattern. `pattern` required (e.g. "**/*.ts"). `path` (search dir). Results sorted by mtime.',
-    task_complete:
-      'Signal task completion. `summary` (required) — describe what was accomplished. Use this as the final action instead of just outputting text.',
+/**
+ * Tool-specific usage guidelines, matching pi-agent-core's promptGuidelines.
+ * These are added to the system prompt to tell the model WHEN to use each tool.
+ */
+function getToolGuidelines(toolNames: string[]): string[] {
+  const all: Record<string, string[]> = {
+    read: ['Use read to examine files instead of cat or sed.'],
+    bash: [
+      'For file operations like ls, find, grep: use the dedicated tools (ls, find, grep) instead of bash.',
+    ],
+    edit: ['Read a file before editing it. Make precise edits.'],
+    task_complete: [],
   };
-  return snippets[tool.name] ?? tool.description.slice(0, 120);
+  const result: string[] = [];
+  for (const name of toolNames) {
+    const guidelines = all[name];
+    if (guidelines) {
+      for (const g of guidelines) {
+        if (!result.includes(g)) result.push(g);
+      }
+    }
+  }
+  result.push('Be concise in your responses');
+  result.push('Show file paths clearly when working with files');
+  return result;
+}
+
+function getToolSnippet(tool: ToolDefinition): string {
+  // Short one-liners matching pi-agent-core's promptSnippet style.
+  // Detailed parameter schema is sent via the LLM tools array.
+  const snippets: Record<string, string> = {
+    read: 'Read file contents',
+    write: 'Create or overwrite a file',
+    edit: 'Make precise file edits',
+    bash: 'Execute a shell command',
+    grep: 'Search file contents with patterns',
+    glob: 'Find files by glob pattern',
+    ls: 'List directory contents',
+    find: 'Find files by name pattern',
+  };
+  return snippets[tool.name] ?? tool.description.slice(0, 60);
 }

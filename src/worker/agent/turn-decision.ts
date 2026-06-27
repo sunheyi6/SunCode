@@ -1,14 +1,14 @@
 /**
- * Turn decision logic — Codex-inspired `needs_follow_up` computation.
+ * Turn decision logic — simplified follow-up computation.
  *
- * Replaces the heuristic `isIncompleteProgressText()` approach with a
- * structured decision model: after each LLM response, determine whether
- * the agent turn should continue (more tool calls, pending input) or stop
- * (task complete, budget exhausted, etc.).
+ * After each LLM response, determine whether the agent turn should continue
+ * (more tool calls, pending input) or stop (model finished, budget, abort).
+ *
+ * Design follows pi-agent-core: rely on the LLM's native stop signals
+ * (stopReason, tool calls) rather than parsing output text for markers.
  */
 
 import type { ToolCallContent, TurnDecision, TurnTaxonomy } from '@shared/types';
-import { TASK_COMPLETE_TOOL_NAME } from '../tools/task-complete';
 
 /** Input to the needs-follow-up computation. */
 export interface NeedsFollowUpInput {
@@ -29,17 +29,11 @@ export interface NeedsFollowUpInput {
 /**
  * Compute whether the agent loop needs another turn (follow-up).
  *
- * Modeled after Codex's approach:
- *   needs_follow_up = hasPendingToolCalls || hasUnreportedToolResults || hasPendingInput
- *
- * For SunCode, tool results are reported synchronously within the same turn,
- * so `hasUnreportedToolResults` is always false at the decision point.
- * The key signals are:
+ * Key signals:
  *   1. Model called tools → execute them, then continue
- *   2. Model called task_complete → explicit stop signal
- *   3. Model produced only text → natural stop (no follow-up needed)
- *   4. Pending user input → continue to process it
- *   5. Budget / abort → stop
+ *   2. Model produced only text → natural stop (no follow-up needed)
+ *   3. Pending user input → continue to process it
+ *   4. Budget / abort → stop
  */
 export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
   needsFollowUp: boolean;
@@ -53,14 +47,6 @@ export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
     };
   }
 
-  // task_complete is an explicit termination signal from the model
-  if (input.hasTaskComplete) {
-    return {
-      needsFollowUp: false,
-      decision: { decision: 'stop', reason: 'task_complete', taxonomy: 'completed' },
-    };
-  }
-
   // Model called tools → need to execute them and continue
   if (input.toolCalls.length > 0) {
     return {
@@ -69,8 +55,8 @@ export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
     };
   }
 
-  // No tool calls — the model is done with this turn.
-  // But check if there's pending user input that was queued during execution.
+  // No tool calls — the model finished its response.
+  // Check for pending user input first.
   if (input.hasPendingInput) {
     return {
       needsFollowUp: true,
@@ -86,9 +72,7 @@ export function computeNeedsFollowUp(input: NeedsFollowUpInput): {
     };
   }
 
-  // Model produced text without calling tools — natural stop.
-  // The model has nothing more to do; its text IS the final answer.
-  // Plan Gate in agent-loop.ts will intercept if plan steps are incomplete.
+  // No tool calls, no pending input — model finished its turn naturally.
   return {
     needsFollowUp: false,
     decision: { decision: 'stop', reason: 'no_follow_up', taxonomy: 'completed' },
@@ -107,18 +91,4 @@ export function taxonomyFromError(error: unknown): TurnTaxonomy {
     return 'aborted';
   }
   return 'error';
-}
-
-/**
- * Check whether tool calls include task_complete (the explicit completion signal).
- */
-export function hasTaskCompleteToolCall(toolCalls: ToolCallContent[]): boolean {
-  return toolCalls.some((tc) => tc.name === TASK_COMPLETE_TOOL_NAME);
-}
-
-/**
- * Find the task_complete tool call in a list, if present.
- */
-export function findTaskCompleteCall(toolCalls: ToolCallContent[]): ToolCallContent | undefined {
-  return toolCalls.find((tc) => tc.name === TASK_COMPLETE_TOOL_NAME);
 }

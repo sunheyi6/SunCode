@@ -1,5 +1,7 @@
+import type { ToolResult } from '@shared/types';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, normalize, resolve } from 'node:path';
+import { withFileMutationQueue } from './file-mutation-queue';
 import { countLineChanges } from './line-diff';
 import { BaseTool, obj, p } from './types';
 
@@ -16,7 +18,7 @@ export function createWriteTool(workingDir: string) {
       ['file_path', 'content'],
     );
 
-    async execute(params: Record<string, unknown>): Promise<ReturnType<BaseTool['execute']>> {
+    async execute(params: Record<string, unknown>): Promise<ToolResult> {
       const filePath = params.file_path as string;
       const content = params.content as string;
 
@@ -40,29 +42,31 @@ export function createWriteTool(workingDir: string) {
       }
 
       try {
-        let oldContent = '';
-        try {
-          oldContent = await readFile(normalized, 'utf-8');
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        }
+        return await withFileMutationQueue(normalized, async () => {
+          let oldContent = '';
+          try {
+            oldContent = await readFile(normalized, 'utf-8');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          }
 
-        // Create parent directories
-        await mkdir(dirname(normalized), { recursive: true });
+          // Create parent directories
+          await mkdir(dirname(normalized), { recursive: true });
 
-        // Write the file
-        await writeFile(normalized, content, 'utf-8');
+          // Write the file
+          await writeFile(normalized, content, 'utf-8');
 
-        const changes = countLineChanges(oldContent, content);
-        return this.success(
-          `File written successfully: ${normalized}\n${changes.addedLines} added, ${changes.removedLines} removed`,
-          {
-            type: 'file_edit',
-            filePath: normalized,
-            status: 'edited',
-            ...changes,
-          },
-        );
+          const changes = countLineChanges(oldContent, content);
+          return this.success(
+            `File written successfully: ${normalized}\n${changes.addedLines} added, ${changes.removedLines} removed`,
+            {
+              type: 'file_edit',
+              filePath: normalized,
+              status: 'edited',
+              ...changes,
+            },
+          );
+        });
       } catch (error) {
         return failForTarget(`Failed to write file: ${(error as Error).message}`);
       }

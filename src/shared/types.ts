@@ -90,6 +90,8 @@ export interface CommandDetails {
   signal?: string;
   stdout: string;
   stderr: string;
+  /** Path to temp file with full output when truncated. */
+  fullOutputPath?: string;
 }
 
 export type ToolResultDetails = FileEditDetails | CommandDetails;
@@ -209,7 +211,7 @@ export interface McpServerConfig {
 
 /** Structured outcome taxonomy for a turn/run termination. */
 export type TurnTaxonomy =
-  | 'completed' // Task completed normally (task_complete or no_follow_up)
+  | 'completed' // Task completed normally (## 最终结果 标记 or task_complete)
   | 'max_turns_exhausted' // Turn budget exhausted
   | 'aborted' // User aborted
   | 'blocked' // Blocked by stop hook (e.g. verification failed)
@@ -220,7 +222,15 @@ export type TurnDecision =
   | { decision: 'continue'; reason?: string }
   | {
       decision: 'stop';
-      reason: 'task_complete' | 'no_follow_up' | 'max_turns' | 'aborted' | 'blocked' | 'error';
+      reason:
+        | 'task_complete'
+        | 'final_result'
+        | 'no_follow_up'
+        | 'missing_final_result'
+        | 'max_turns'
+        | 'aborted'
+        | 'blocked'
+        | 'error';
       taxonomy: TurnTaxonomy;
     };
 
@@ -358,39 +368,45 @@ export type WorkerOutMessage =
   | { type: 'confirmRequest'; toolCall: ToolCallContent };
 
 /** Streaming event types from the LLM */
+/**
+ * Streamed message data — assembled on the worker side, sent as a complete
+ * snapshot on each message_update. Replaces the old delta-level approach
+ * (text_delta, thinking_delta, toolcall_delta).
+ */
+export interface StreamMessageData {
+  text: string;
+  thinking: string;
+  toolCalls: ToolCallContent[];
+  /** True when the message is complete (final text_end / message_end). */
+  isFinished?: boolean;
+  /** stopReason from the LLM response (only on final update). */
+  stopReason?: string;
+  /** Error message if the stream failed. */
+  error?: string;
+}
+
 export type StreamEventType =
-  | 'text_start'
-  | 'text_delta'
-  | 'text_end'
-  | 'thinking_start'
-  | 'thinking_delta'
-  | 'thinking_end'
-  | 'toolcall_start'
-  | 'toolcall_delta'
-  | 'toolcall_end'
+  | 'message_start'
+  | 'message_update'
+  | 'message_end'
   | 'turn_start'
   | 'turn_end'
-  | 'start'
-  | 'done'
   | 'error'
   | 'system_prompt';
 
 /** A streaming event from the LLM */
 export interface StreamEvent {
   type: StreamEventType;
-  text?: string;
-  toolCallId?: string;
-  toolName?: string;
-  delta?: string;
+  /** Assembled message data (message_start / message_update / message_end). */
+  data?: StreamMessageData;
   /** For turn_start: current turn number / max turns */
   turnCount?: number;
   maxTurns?: number;
   /** For turn_end: whether this turn had tool calls (intermediate) */
   hasToolCalls?: boolean;
   error?: string;
-  message?: Message; // final message on 'done'
-  /** Unique identifier for the current agent run (LLM invocation chain). */
-  runId?: string;
+  /** Final assembled message on message_end (for persistence). */
+  message?: Message;
   /** System prompt text (emitted once at the start of each agent run). */
   systemPrompt?: string;
 }
@@ -433,6 +449,30 @@ export type RunEvent =
   | { type: 'run_failed'; runId: RunId; error: string; timestamp: string }
   | { type: 'run_aborted'; runId: RunId; timestamp: string }
   | { type: 'run_recovered'; runId: RunId; reason: string; timestamp: string }
+  | {
+      type: 'model_request_started';
+      runId: RunId;
+      turnNumber: number;
+      attempt: number;
+      provider: string;
+      model: string;
+      timestamp: string;
+    }
+  | {
+      type: 'model_request_completed';
+      runId: RunId;
+      turnNumber: number;
+      attempt: number;
+      provider: string;
+      model: string;
+      durationMs: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+      stopReason?: string;
+      error?: string;
+      timestamp: string;
+    }
   | { type: 'goal_started'; runId: RunId; goal: GoalDefinition; timestamp: string }
   | {
       type: 'goal_turn_completed';
