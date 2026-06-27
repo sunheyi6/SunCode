@@ -74,17 +74,63 @@ function createMainWindow(): BrowserWindow {
     });
   }
 
+  // ── Safety: if ready-to-show never fires (e.g. renderer crash during
+  //     load), force-show the window after a timeout so the user at least
+  //     sees a blank/error page instead of a silent dead process.
+  const READY_TIMEOUT_MS = 12_000;
+  const readyTimeout = setTimeout(() => {
+    if (!win.isDestroyed() && !win.isVisible()) {
+      logger.warn('[Window] ready-to-show timed out after %d ms — forcing show', READY_TIMEOUT_MS);
+      win.show();
+    }
+  }, READY_TIMEOUT_MS);
+
   win.on('ready-to-show', () => {
+    clearTimeout(readyTimeout);
+    logger.info('[Window] ready-to-show');
     win.show();
     win.focus();
   });
 
-  // Load the app
+  // ── Renderer failure diagnostics ────────────────────────────────────
+  // These are the key signals that tell us WHY the window never appeared.
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    logger.error('[Window] Page load failed', {
+      errorCode,
+      errorDescription,
+      validatedURL,
+    });
+  });
+
+  win.webContents.on('render-process-gone', (_event, details) => {
+    logger.error('[Window] Render process gone', {
+      reason: details.reason,
+      exitCode: details.exitCode,
+    });
+  });
+
+  win.on('unresponsive', () => {
+    logger.warn('[Window] Unresponsive — page may be hung');
+  });
+
+  // Capture renderer console errors (only errors, not all logs)
+  win.webContents.on('console-message', (_event, level, message) => {
+    if (level >= 2) {
+      // 0=verbose, 1=info, 2=warning, 3=error
+      logger.warn('[Renderer] %s', message);
+    }
+  });
+
+  // ── Load the app ─────────────────────────────────────────────────────
   if (process.env.VITE_DEV_SERVER_URL) {
+    logger.info('[Window] Loading dev URL: %s', process.env.VITE_DEV_SERVER_URL);
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
     win.webContents.openDevTools({ mode: 'detach' });
   } else {
-    win.loadFile(join(__dirname, '../../dist/index.html'));
+    const htmlPath = join(__dirname, '../../dist/index.html');
+    logger.info('[Window] Loading file: %s', htmlPath);
+    win.loadFile(htmlPath);
   }
 
   // Open external links in default browser
@@ -158,4 +204,17 @@ app.on('before-quit', () => {
 
 app.on('quit', () => {
   logger.info('[App] quit');
+});
+
+// ── GPU / child-process crash diagnostics ───────────────────────────────
+// Catches GPU process crashes, which can silently kill the app on Windows.
+// type: 'GPU' | 'Utility' | 'Zygote' | 'Sandbox helper' | etc.
+app.on('child-process-gone', (_event, details) => {
+  logger.error('[App] Child process gone', {
+    type: details.type,
+    reason: details.reason,
+    exitCode: details.exitCode,
+    serviceName: details.serviceName,
+    name: details.name,
+  });
 });
