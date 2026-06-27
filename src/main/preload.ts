@@ -314,6 +314,11 @@ const suncodeAPI = {
     return ipcRenderer.invoke('app:getVersion');
   },
 
+  /** Get the absolute path to the current app log file */
+  async getLogPath(): Promise<string> {
+    return ipcRenderer.invoke('app:getLogPath');
+  },
+
   /** Open a file or folder in the system file explorer */
   async openPath(targetPath: string): Promise<void> {
     return ipcRenderer.invoke('shell:openPath', targetPath);

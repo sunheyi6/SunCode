@@ -170,6 +170,10 @@ export const bridge = {
     return api().getAppVersion();
   },
 
+  async getLogPath(): Promise<string> {
+    return api().getLogPath();
+  },
+
   async openPath(targetPath: string): Promise<void> {
     return api().openPath(targetPath);
   },

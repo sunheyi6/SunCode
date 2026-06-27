@@ -4,6 +4,7 @@ import { app, BrowserWindow, Menu, nativeTheme, shell } from 'electron';
 import { registerIpcHandlers } from './ipc-handlers';
 import { WindowManager } from './window-manager';
 import { initAutoUpdater } from './auto-updater';
+import { logger, getLogPath } from './logger';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -27,6 +28,8 @@ if (!gotTheLock) {
 
 let windowManager: WindowManager;
 
+const isMac = process.platform === 'darwin';
+
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
@@ -44,24 +47,32 @@ function createMainWindow(): BrowserWindow {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
     autoHideMenuBar: true,
     show: false,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
-      symbolColor: nativeTheme.shouldUseDarkColors ? '#cdd6f4' : '#4c4f69',
-      height: 38,
-    },
+    // macOS only: hide native title bar with overlay color control
+    // On Windows, keeping the default title bar avoids rendering issues
+    ...(isMac
+      ? {
+          titleBarStyle: 'hidden' as const,
+          titleBarOverlay: {
+            color: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
+            symbolColor: nativeTheme.shouldUseDarkColors ? '#cdd6f4' : '#4c4f69',
+            height: 38,
+          },
+        }
+      : {}),
   });
   win.setMenuBarVisibility(false);
 
-  // Handle theme changes to update title bar overlay color
-  nativeTheme.on('updated', () => {
-    if (!win.isDestroyed()) {
-      win.setTitleBarOverlay({
-        color: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
-        symbolColor: nativeTheme.shouldUseDarkColors ? '#cdd6f4' : '#4c4f69',
-      });
-    }
-  });
+  // macOS: Handle theme changes to update title bar overlay color
+  if (isMac) {
+    nativeTheme.on('updated', () => {
+      if (!win.isDestroyed()) {
+        win.setTitleBarOverlay({
+          color: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
+          symbolColor: nativeTheme.shouldUseDarkColors ? '#cdd6f4' : '#4c4f69',
+        });
+      }
+    });
+  }
 
   win.on('ready-to-show', () => {
     win.show();
@@ -114,14 +125,37 @@ async function initApp(): Promise<void> {
 }
 
 // App lifecycle
-app.whenReady().then(initApp);
+logger.info('[App] Starting SunCode', {
+  version: app.getVersion(),
+  platform: process.platform,
+  arch: process.arch,
+  nodeVersion: process.version,
+  logPath: getLogPath(),
+  cwd: process.cwd(),
+  isPackaged: app.isPackaged,
+});
+
+app.whenReady().then(() => {
+  logger.info('[App] ready, initializing...');
+  return initApp();
+}).then(() => {
+  logger.info('[App] Init complete');
+}).catch((err) => {
+  logger.error('[App] Init failed', err);
+});
 
 app.on('window-all-closed', () => {
+  logger.info('[App] All windows closed');
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('before-quit', () => {
+  logger.info('[App] before-quit, running cleanup');
   windowManager.cleanup();
+});
+
+app.on('quit', () => {
+  logger.info('[App] quit');
 });

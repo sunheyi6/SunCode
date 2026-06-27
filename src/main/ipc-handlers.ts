@@ -19,6 +19,7 @@ import type {
 import { app, dialog, ipcMain, shell } from 'electron';
 import { getGitInfo } from './git-info';
 import { recoverInterruptedSessions } from './recovery';
+import { getLogPath } from './logger';
 import { appendEvent, getEvents, listRuns, startRun } from './run-store';
 import {
   deleteSession,
@@ -604,6 +605,10 @@ export function registerIpcHandlers(wm: WindowManager): void {
     return app.getVersion();
   });
 
+  ipcMain.handle('app:getLogPath', async () => {
+    return getLogPath();
+  });
+
   // Open a path in the system file explorer
   ipcMain.handle('shell:openPath', async (_event, targetPath: string) => {
     const result = await shell.openPath(targetPath);
@@ -618,8 +623,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.on('window:setTitleBarOverlayText', (_event, text: string) => {
     const mainWindow = windowManager.getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
-      // On Windows 11 with titleBarOverlay, this sets the text in the title bar area
-      // On other platforms, it updates the window title
+      // Updates the native window title (shown in title bar on all platforms)
       mainWindow.setTitle(text ? `SunCode — ${text}` : 'SunCode');
     }
   });

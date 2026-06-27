@@ -197,16 +197,24 @@ async function handleSend(): Promise<void> {
 
 // --- Input history (ArrowUp / ArrowDown cycling) ---
 const HISTORY_MAX = 50;
-const inputHistory: string[] = [];
+const HISTORY_STORAGE_KEY = 'suncode:input-history';
+const inputHistory: string[] = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? '[]');
 let historyIndex = -1;
 // Saved draft so the user can return to what they typed after browsing history
 let draftBeforeHistory = '';
+
+function persistHistory(): void {
+  try {
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(inputHistory));
+  } catch { /* quota exceeded — silently drop oldest entries */ }
+}
 
 function pushHistory(text: string): void {
   // Deduplicate consecutive identical entries
   if (inputHistory.length > 0 && inputHistory[inputHistory.length - 1] === text) return;
   inputHistory.push(text);
   if (inputHistory.length > HISTORY_MAX) inputHistory.shift();
+  persistHistory();
 }
 
 function navigateHistory(direction: 'up' | 'down'): void {

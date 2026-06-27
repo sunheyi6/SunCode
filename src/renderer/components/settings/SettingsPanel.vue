@@ -14,6 +14,7 @@ const emit = defineEmits<{
 const settingsStore = useSettingsStore();
 const updateStore = useUpdateStore();
 const appVersion = ref('');
+const logPath = ref('');
 
 type Section = 'model' | 'options' | 'usage' | 'about';
 const activeSection = ref<Section>('model');
@@ -31,7 +32,18 @@ onMounted(async () => {
   } catch {
     appVersion.value = '0.1.0';
   }
+  try {
+    logPath.value = await bridge.getLogPath();
+  } catch {
+    logPath.value = '';
+  }
 });
+
+function openLogFile(): void {
+  if (logPath.value) {
+    bridge.showItemInFolder(logPath.value);
+  }
+}
 
 function updateThinkingLevel(level: string): void {
   settingsStore.update({
@@ -242,6 +254,23 @@ const permissionModes = [
                   <span class="about-label">Vite</span>
                   <span class="about-value">6</span>
                 </div>
+                <div class="about-row">
+                  <span class="about-label">运行日志</span>
+                  <span class="about-value log-path-value">
+                    <code class="log-path">{{ logPath || '加载中...' }}</code>
+                    <button
+                      v-if="logPath"
+                      class="open-log-btn"
+                      title="在文件管理器中显示日志文件"
+                      @click="openLogFile"
+                    >
+                      📂
+                    </button>
+                  </span>
+                </div>
+                <p class="log-path-hint">
+                  日志文件位于应用数据目录，启动和运行信息会自动写入。遇到 App 崩溃或异常关闭时，可查看此文件排查。
+                </p>
               </div>
 
               <div class="option-group" style="margin-top: 20px;">
@@ -626,4 +655,50 @@ const permissionModes = [
 }
 .update-note.success { color: var(--color-green); }
 .update-note.error { color: var(--color-red); }
+
+/* Log path display */
+.log-path-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-path {
+  font-size: 11px;
+  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace);
+  background: var(--color-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.open-log-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.12s;
+}
+
+.open-log-btn:hover {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+}
+
+.log-path-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 8px;
+  line-height: 1.5;
+}
 </style>

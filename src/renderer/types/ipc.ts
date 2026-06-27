@@ -93,6 +93,7 @@ declare global {
       // App
       getWorkingDir(): Promise<string>;
       getAppVersion(): Promise<string>;
+      getLogPath(): Promise<string>;
       openPath(targetPath: string): Promise<void>;
       showItemInFolder(fullPath: string): void;
       getTokenUsage(): Promise<TokenUsageSummary>;
