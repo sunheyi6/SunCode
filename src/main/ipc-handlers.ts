@@ -453,16 +453,16 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
-  ipcMain.handle('session:saveMessage', async (_event, message: Message) => {
+  ipcMain.handle('session:saveMessage', async (_event, message: Message, targetSessionId?: string) => {
     try {
       // Role-based session targeting:
       // - User messages always go to currentSessionId (the session the user is viewing).
-      // - Assistant/system messages use promptSessionId (the session that originated
-      //   the agent prompt, which survives session switches mid-run).
-      // This prevents user messages from being routed to a stale promptSessionId
-      // when the user switches sessions and sends a new message.
+      // - Assistant/system messages use the explicit targetSessionId (from the renderer event),
+      //   falling back to promptSessionId for backward compatibility.
       const targetSession =
-        message.role === 'user' ? currentSessionId : promptSessionId || currentSessionId;
+        message.role === 'user'
+          ? currentSessionId
+          : targetSessionId || promptSessionId || currentSessionId;
       if (!targetSession) {
         console.log('[Main] saveMessage: SKIP (no session)');
         return;

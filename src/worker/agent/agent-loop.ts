@@ -61,8 +61,9 @@ export interface AgentLoopInput {
   /** Callback to request user confirmation before executing a destructive tool.
    *  Only called when permissionMode is 'confirm_changes'. */
   requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>;
-  /** Optional callback fired on each turn_start to keep external state in sync. */
-  onTurnStart?: (turnCount: number, maxTurns: number) => void;
+  /** Optional callback fired on each turn_start to keep external state in sync.
+   *  tokenUsage is the accumulated token count for the current run so far. */
+  onTurnStart?: (turnCount: number, maxTurns: number, tokenUsage: { input: number; output: number; total: number }) => void;
 }
 
 export interface PrepareNextTurnResult {
@@ -129,23 +130,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     `model=${settings.activeProvider}/${settings.activeModel} tools=${tools.length} maxTurns=${settings.maxTurns || MAX_TURNS}`,
   );
 
-  const identityReply = getIdentityReply(initialMessages);
-  if (identityReply) {
-    onStream({
-      type: 'message_update',
-      data: { text: identityReply, thinking: '', toolCalls: [], isFinished: true },
-    });
-    return {
-      finalMessage: {
-        role: 'assistant',
-        content: [{ type: 'text', text: identityReply }],
-      },
-      turnCount: initialTurnCount + 1,
-      tokenUsage,
-      decision: { decision: 'stop', reason: 'no_follow_up', taxonomy: 'completed' },
-    };
-  }
-
   // Build tool definitions for the LLM
   const toolDefs = tools.map((t) => t.getDefinition());
 
@@ -187,7 +171,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     });
     onStream({ type: 'turn_start', turnCount, maxTurns: settings.maxTurns || MAX_TURNS });
     onRunEvent({ type: 'turn_started', runId, turnNumber: turnCount, timestamp: '' });
-    input.onTurnStart?.(turnCount, settings.maxTurns || MAX_TURNS);
+    input.onTurnStart?.(turnCount, settings.maxTurns || MAX_TURNS, { ...tokenUsage });
 
     try {
       // Import pi-ai dynamically
@@ -930,40 +914,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 }
 
 // ===== Helpers =====
-
-function getIdentityReply(messages: Message[]): string | null {
-  const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-  if (!lastUserMessage) return null;
-
-  const text =
-    typeof lastUserMessage.content === 'string'
-      ? lastUserMessage.content
-      : lastUserMessage.content
-          .filter((block) => block.type === 'text')
-          .map((block) => ('text' in block ? block.text : ''))
-          .join(' ');
-
-  const normalized = text
-    .trim()
-    .toLowerCase()
-    .replace(/[？?！!。.，,]/g, '');
-  const identityQuestions = [
-    '你是谁',
-    '你叫什么',
-    '你叫什么名字',
-    '你的名字',
-    '你的身份',
-    'who are you',
-    'what are you',
-    'what is your name',
-  ];
-
-  if (!identityQuestions.includes(normalized)) return null;
-
-  return /[\u3400-\u9fff]/.test(text)
-    ? '我是 SunCode，你的 AI 编程助手。我可以帮助你阅读、编写、调试和重构代码，也能分析项目并执行开发命令。'
-    : 'I am SunCode, your AI programming assistant. I can help you read, write, debug, and refactor code, analyze projects, and run development commands.';
-}
 
 function convertMessage(msg: Message): Record<string, unknown> {
   // Tool results must be sent with role "toolResult" (pi-ai converts this

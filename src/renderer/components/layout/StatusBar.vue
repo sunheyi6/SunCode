@@ -89,51 +89,46 @@ const elapsedLabel = computed(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  height: 28px;
-  padding: 0 12px;
-  background: var(--color-bg-tertiary);
-  border-top: 1px solid var(--border-color);
+  padding: 4px 16px;
   font-size: 12px;
-  color: var(--color-text-secondary);
-  flex-shrink: 0;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-overlay);
+  color: var(--color-text-muted);
+  user-select: none;
+  min-height: 28px;
 }
-
 .status-left, .status-right {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
-
-.status-separator {
-  color: var(--color-text-muted);
-  opacity: 0.5;
-}
-
-.status-model {
-  color: var(--color-text);
+.status-text {
   font-weight: 500;
 }
-
-.status-elapsed {
-  font-family: var(--font-mono);
+.status-model {
   color: var(--color-text-muted);
 }
-
+.status-tokens,
+.status-turns,
+.status-elapsed {
+  font-family: var(--font-mono);
+}
 .goal-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 7px;
-  border-radius: var(--border-radius-sm);
-  background: color-mix(in srgb, var(--color-orange) 12%, transparent);
-  color: var(--color-orange);
-  font-weight: 600;
-  font-size: 11px;
+  background: var(--color-accent);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 16px;
+}
+.status-separator {
+  opacity: 0.3;
 }
 </style>

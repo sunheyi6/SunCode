@@ -2,9 +2,11 @@
 import type { SessionMeta } from '@shared/types';
 import { computed, onMounted, ref } from 'vue';
 import { useSessionsStore } from '../../stores/sessions';
+import { useChatStore } from '../../stores/chat';
 import { bridge } from '../../api/bridge';
 
 const sessionsStore = useSessionsStore();
+const chatStore = useChatStore();
 const searchOpen = ref(false);
 const searchQuery = ref('');
 const selectMode = ref(false);
@@ -259,7 +261,7 @@ function formatTime(value: string): string {
               class="conversation-item"
               @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
             >
-              <span class="conversation-mark" />
+              <span class="conversation-mark" :class="{ running: chatStore.streamingSessionIds.has(session.id) }" />
               <span class="conversation-copy">
                 <span class="conversation-name">{{ session.name }}</span>
                 <span class="conversation-time">{{ formatTime(session.updated) }}</span>
@@ -546,10 +548,19 @@ function formatTime(value: string): string {
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--color-overlay);
+  transition: background 0.2s, box-shadow 0.2s, opacity 0.3s;
 }
 .conversation-item.active .conversation-mark {
   background: var(--color-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.conversation-mark.running {
+  background: var(--color-green, #22c55e);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
 }
 
 .conversation-copy {

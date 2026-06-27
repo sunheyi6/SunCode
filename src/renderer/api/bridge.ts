@@ -102,8 +102,8 @@ export const bridge = {
     return api().loadSession(id);
   },
 
-  async saveMessage(message: Message): Promise<void> {
-    return api().saveMessage(message);
+  async saveMessage(message: Message, targetSessionId?: string): Promise<void> {
+    return api().saveMessage(message, targetSessionId);
   },
 
   async deleteSession(id: string): Promise<{ remaining: SessionMeta[]; wasActive: boolean }> {

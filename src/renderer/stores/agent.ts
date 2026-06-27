@@ -24,13 +24,26 @@ export const useAgentStore = defineStore('agent', () => {
     modelName: '',
   });
 
+  /** Per-session agent status (for concurrent agent runs). */
+  const sessionStatus = new Map<string, AgentStatus>();
+
   const toolExecutions = ref<ToolExecution[]>([]);
   const error = ref<string | null>(null);
   const pendingPrompts = ref<PendingPrompt[]>([]);
   const goalActive = ref(false);
 
-  function setStatus(newStatus: AgentStatus): void {
+  function setStatus(newStatus: AgentStatus, sid?: string): void {
     status.value = newStatus;
+    if (sid) sessionStatus.set(sid, newStatus);
+  }
+
+  function getSessionStatus(sid: string): AgentStatus {
+    return sessionStatus.get(sid) ?? {
+      state: 'idle',
+      turnCount: 0,
+      tokenUsage: { input: 0, output: 0, total: 0 },
+      modelName: '',
+    };
   }
 
   function setGoalActive(active: boolean): void {
@@ -100,6 +113,7 @@ export const useAgentStore = defineStore('agent', () => {
     pendingPrompts,
     goalActive,
     setStatus,
+    getSessionStatus,
     setGoalActive,
     startToolExecution,
     endToolExecution,

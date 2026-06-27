@@ -16,12 +16,7 @@ export function useAgent() {
   const cleanups: Array<() => void> = [];
   let nextPromptTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const isBusy = computed(
-    () =>
-      chatStore.isStreaming ||
-      agentStore.status.state === 'thinking' ||
-      agentStore.status.state === 'executing',
-  );
+  const isBusy = computed(() => chatStore.isStreaming);
 
   function dispatch(text: string): void {
     chatStore.addUserMessage(text);
@@ -54,7 +49,11 @@ export function useAgent() {
 
     cleanups.push(
       bridge.onStatusChange((data) => {
-        agentStore.setStatus(data.status);
+        // Always store per-session, but only update global status for active session
+        if (data.sessionId === sessionsStore.activeSessionId) {
+          agentStore.setStatus(data.status);
+        }
+        agentStore.setStatus(data.status, data.sessionId);
       }),
     );
 

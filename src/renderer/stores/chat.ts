@@ -14,6 +14,7 @@ import { ref } from 'vue';
 import { bridge } from '../api/bridge';
 import { buildPersistedAssistantMessage } from './chat-message-persistence';
 import { parseTaskPlan, stripPlanFromContent } from '../utils/task-plan-parser';
+import { useAgentStore } from './agent';
 
 export interface ChatMessage {
   id: string;
@@ -170,7 +171,9 @@ export const useChatStore = defineStore('chat', () => {
           target.toolCalls = merged;
         }
         target.isStreaming = event.type === 'message_update';
-        isStreaming.value = event.type === 'message_update';
+        if (sessionId === activeSessionId) {
+          isStreaming.value = event.type === 'message_update';
+        }
 
         // Parse task plan on message_update (throttled)
         if (event.type === 'message_update' && data.text) {
@@ -184,9 +187,11 @@ export const useChatStore = defineStore('chat', () => {
         if (event.type === 'message_end') {
           target.isStreaming = false;
           streamingSessionIds.delete(sessionId);
-          isStreaming.value = streamingSessionIds.size > 0;
+          if (sessionId === activeSessionId) {
+            isStreaming.value = false;
+          }
 
-          // Persist completed message
+          // Persist completed message to the session that originated the run
           void bridge.saveMessage(
             buildPersistedAssistantMessage({
               visibleContent: target.content,
@@ -196,6 +201,7 @@ export const useChatStore = defineStore('chat', () => {
               turnDetails: target.turnDetails,
               finalMessage: event.message,
             }),
+            sessionId,
           );
 
           if (sessionId === activeSessionId) {
@@ -212,8 +218,8 @@ export const useChatStore = defineStore('chat', () => {
           msg.isStreaming = false;
         }
         streamingSessionIds.delete(sessionId);
-        isStreaming.value = streamingSessionIds.size > 0;
         if (sessionId === activeSessionId) {
+          isStreaming.value = false;
           currentAssistantMsg = null;
         }
         pendingAssistantMessages.delete(sessionId);
@@ -378,11 +384,11 @@ export const useChatStore = defineStore('chat', () => {
       currentAssistantMsg.isStreaming = false;
     }
     currentAssistantMsg = null;
-    // Clear streaming state for the active session only
+    // Clear streaming state for the active session
     if (activeSessionId) {
       streamingSessionIds.delete(activeSessionId);
-      isStreaming.value = streamingSessionIds.size > 0;
     }
+    isStreaming.value = false;
   }
 
   function setActiveSessionId(id: string | null): void {
@@ -451,6 +457,15 @@ export const useChatStore = defineStore('chat', () => {
       messages.value.push(pending);
       currentAssistantMsg = pending;
       isStreaming.value = pending.isStreaming;
+      // Sync global agent status from per-session tracker
+      const agentStatus = useAgentStore().getSessionStatus(sessionId);
+      if (agentStatus.state !== 'idle' || agentStatus.tokenUsage.total > 0) {
+        useAgentStore().setStatus(agentStatus);
+      }
+    } else if (streamingSessionIds.has(sessionId)) {
+      // Session has a running agent but no pending message yet — sync status
+      const agentStatus = useAgentStore().getSessionStatus(sessionId);
+      useAgentStore().setStatus(agentStatus);
     }
   }
 
@@ -474,5 +489,7 @@ export const useChatStore = defineStore('chat', () => {
     finishCurrentResponse,
     clearMessages,
     loadMessages,
+    /** Set of session IDs with an active agent run (for sidebar breathing indicator). */
+    streamingSessionIds,
   };
 });

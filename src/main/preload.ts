@@ -132,8 +132,8 @@ const suncodeAPI = {
   },
 
   /** Save a message to the current session */
-  async saveMessage(message: Message): Promise<void> {
-    return ipcRenderer.invoke('session:saveMessage', message);
+  async saveMessage(message: Message, targetSessionId?: string): Promise<void> {
+    return ipcRenderer.invoke('session:saveMessage', message, targetSessionId);
   },
 
   /** Export session to HTML */

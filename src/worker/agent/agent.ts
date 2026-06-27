@@ -42,6 +42,8 @@ export class Agent {
   private isRunning = false;
   private turnCount = 0;
   private totalTokens = { input: 0, output: 0, total: 0 };
+  /** Token usage from the currently active run — merged into totalTokens on completion. */
+  private activeRunTokens = { input: 0, output: 0, total: 0 };
   /** Stable session ID for prompt cache affinity (Anthropic). */
   private sessionId: string;
 
@@ -240,6 +242,7 @@ export class Agent {
     this.messages.push(userMessage);
 
     // Emit status
+    this.activeRunTokens = { input: 0, output: 0, total: 0 };
     this.emitStatus('thinking');
 
     const runId = crypto.randomUUID();
@@ -282,6 +285,7 @@ export class Agent {
     if (this.isRunning) return;
     this.isRunning = true;
     this.abortController = new AbortController();
+    this.activeRunTokens = { input: 0, output: 0, total: 0 };
     this.emitStatus('thinking');
 
     const runId = crypto.randomUUID();
@@ -362,9 +366,10 @@ export class Agent {
         this.emitStatus('executing');
         this.onToolStart(toolCall);
       },
-      onTurnStart: (turnCount, maxTurns) => {
-        this.turnCount = turnCount;
-        this.emitStatus('thinking');
+      onTurnStart: (_turnCount: number, _maxTurns: number, tokens: { input: number; output: number; total: number }) => {
+        this.turnCount = _turnCount;
+        this.activeRunTokens = tokens;
+        this.emitStatus('thinking', tokens);
       },
       onToolEnd: (result) => {
         this.onToolEnd(result);
@@ -409,6 +414,7 @@ export class Agent {
       output: this.totalTokens.output + result.tokenUsage.output,
       total: this.totalTokens.total + result.tokenUsage.total,
     };
+    this.activeRunTokens = { input: 0, output: 0, total: 0 };
 
     // Emit run completed
     this.onRunEvent({
@@ -474,9 +480,10 @@ export class Agent {
         this.emitStatus('executing');
         this.onToolStart(toolCall);
       },
-      onTurnStart: (turnCount: number, _maxTurns: number) => {
+      onTurnStart: (turnCount: number, _maxTurns: number, tokens: { input: number; output: number; total: number }) => {
         this.turnCount = turnCount;
-        this.emitStatus('thinking');
+        this.activeRunTokens = tokens;
+        this.emitStatus('thinking', tokens);
       },
       onToolEnd: (result: ToolResult) => {
         this.onToolEnd(result);
@@ -553,6 +560,7 @@ export class Agent {
       output: this.totalTokens.output + goalResult.tokenUsage.output,
       total: this.totalTokens.total + goalResult.tokenUsage.total,
     };
+    this.activeRunTokens = { input: 0, output: 0, total: 0 };
     this.messages = goalMessages;
 
     // Emit run completed
@@ -617,11 +625,16 @@ export class Agent {
     }
   }
 
-  private emitStatus(state: AgentStatus['state']): void {
+  private emitStatus(state: AgentStatus['state'], currentTokens?: { input: number; output: number; total: number }): void {
+    const runTokens = currentTokens || this.activeRunTokens;
     this.onStatus({
       state,
       turnCount: this.turnCount,
-      tokenUsage: { ...this.totalTokens },
+      tokenUsage: {
+        input: this.totalTokens.input + runTokens.input,
+        output: this.totalTokens.output + runTokens.output,
+        total: this.totalTokens.total + runTokens.total,
+      },
       modelName: `${this.settings.activeProvider}/${this.settings.activeModel}`,
     });
   }
