@@ -179,6 +179,30 @@ Orchestrator (main agent)
 
 融合三者优点，发挥 Electron + Vue 3 + Worker Thread 架构优势：
 
+**多 Session 并发**（v0.1.12+）：
+```
+                    ┌──────────────────────────────────┐
+                    │        Worker Thread              │
+                    │        agent-worker.ts            │
+                    │                                  │
+                    │  agents: Map<string, Agent>       │
+                    │                                  │
+                    │  ┌──────────┐ ┌──────────┐      │
+                    │  │Session A │ │Session B │ ...   │
+                    │  │Agent     │ │Agent     │      │
+                    │  │Loop      │ │Loop      │      │
+                    │  └──────────┘ └──────────┘      │
+                    │                                  │
+                    │  createCallbacks(sid) 为每个      │
+                    │  session 自动附加 sessionId       │
+                    └──────────────────────────────────┘```
+
+- 每个 session 拥有独立的 Agent 实例和消息历史
+- 消息按 `sessionId` 路由到对应 Agent
+- `setMessages` 不再受 `isRunning` guard 限制，每 session 独立状态
+- 切换 session 时先 abort 当前 run，避免消息竞争
+
+**Subagent 调度**：
 ```
               ┌──────────────┐
               │  Main Agent   │  ← 高层规划 + 用户交互
@@ -194,8 +218,7 @@ Orchestrator (main agent)
          │   SunCode Worker      │
          │   (agent-worker.ts)   │  ← 已有基础设施
          │   + subagent dispatch │
-         └───────────────────────┘
-```
+         └───────────────────────┘```
 
 ### 4.2 与三大框架的差异与优势
 
@@ -204,7 +227,7 @@ Orchestrator (main agent)
 | **运行载体** | OS 进程 | Electron 会话 | 独立进程+git WT | **Worker Thread** |
 | **每次调用开销** | ~300ms | ~50ms | ~500ms | **~30ms** |
 | **上下文隔离** | 完全进程隔离 | Session 文件分片 | 文件系统隔离 | **逻辑上下文沙箱** |
-| **并发模型** | fork+pipe | turn 串行 | MCP 异步 | **线程池+AbortSignal** |
+| **并发模型** | fork+pipe | turn 串行 | MCP 异步 | **Map<string,Agent> 多 session 并行 + AbortSignal** |
 | **状态传递** | stdin/stdout | AgentRunStore | artifacts 文件 | **Pinia store+IPC** |
 | **UI 渲染** | TUI 文本流 | React 组件 | CLI 文本流 | **Vue 3 组件流** |
 | **持久化恢复** | 命名 Session | Ledger JSONL | checkpoints | **RunEvent JSONL** |

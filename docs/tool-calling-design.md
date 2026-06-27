@@ -15,30 +15,70 @@
 ## 2. 整体架构
 
 ```
-┌──────────────────────────────────────────────┐
-│                  Agent Loop                   │
-│                                               │
-│  1. LLM 返回 tool_call 事件                   │
-│  2. 解析 ToolCall { id, name, arguments }     │
-│  3. ToolRegistry.lookup(name) → Tool          │
-│  4. tool.execute(params) → ToolResult         │
-│  5. ToolResult 追加到对话上下文               │
-│  6. 继续循环 → LLM 决定下一步                 │
-│                                               │
-├──────────────────────────────────────────────┤
-│              ToolRegistry                      │
-│                                               │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐     │
-│  │  read    │ │  write   │ │  edit    │     │
-│  │  bash    │ │  grep    │ │  glob    │     │
-│  └──────────┘ └──────────┘ └──────────┘     │
-│                                               │
-│  ┌──────────────────────────────────────┐    │
-│  │  MCP Tools (mcp__前缀)                │    │
-│  │  mcp__github__search_repos           │    │
-│  │  mcp__postgres__query                │    │
-│  └──────────────────────────────────────┘    │
-└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     Worker Thread                            │
+│                     agent-worker.ts                          │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │           agents: Map<string, Agent>                     │ │
+│  │                                                         │ │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │ │
+│  │  │ Agent (sess1)│  │ Agent (sess2)│  │ Agent (sess3)│  │ │
+│  │  │ AgentLoop    │  │ AgentLoop    │  │ AgentLoop    │  │ │
+│  │  │ messages[]   │  │ messages[]   │  │ messages[]   │  │ │
+│  │  │ totalTokens  │  │ totalTokens  │  │ totalTokens  │  │ │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │ │
+│  │         │                 │                 │           │ │
+│  │  createCallbacks(sid) 为每个 session 的 Agent 创建独    │ │
+│  │  立的回调，所有 postMessage 自动带上 sessionId         │ │
+│  └─────────┬───────────────┬─────────────────┬─────────────┘ │
+│            │               │                 │               │
+│           postMessage(sessionId, event)                     │
+└────────────┬───────────────┬─────────────────┬───────────────┘
+             │               │                 │
+        ┌────▼───────────────▼─────────────────▼──────┐
+        │            Main Process                     │
+        │            ipc-handlers.ts                  │
+        │                                             │
+        │  switch (msg.type) {                        │
+        │    case 'stream': → agent:stream + sid      │
+        │    case 'status': → agent:status + sid      │
+        │    case 'done':   → agent:done + sid        │
+        │    ...                                      │
+        │  }                                          │
+        └────┬────────────────────────────────────────┘
+             │  IPC (contextBridge)
+        ┌────▼────────────────────────────────────────┐
+        │            Renderer (Vue 3)                  │
+        │                                             │
+        │  useAgent.ts: onStatusChange(data)          │
+        │    → agentStore.setStatus(data.status,      │
+        │                        data.sessionId)      │
+        │  chat.ts: handleStreamEvent(event, sid)     │
+        │    → activeAssistantMessage(sid) 按 sid 路由│
+        │                                             │
+        │  Agent Loop                                  │
+        │  1. LLM 返回 tool_call 事件                  │
+        │  2. 解析 ToolCall { id, name, arguments }    │
+        │  3. ToolRegistry.lookup(name) → Tool         │
+        │  4. tool.execute(params) → ToolResult        │
+        │  5. ToolResult 追加到对话上下文              │
+        │  6. 继续循环 → LLM 决定下一步                │
+        │                                             │
+        ├─────────────────────────────────────────────┤
+        │              ToolRegistry                    │
+        │                                             │
+        │  ┌──────────┐ ┌──────────┐ ┌──────────┐    │
+        │  │  read    │ │  write   │ │  edit    │    │
+        │  │  bash    │ │  grep    │ │  glob    │    │
+        │  └──────────┘ └──────────┘ └──────────┘    │
+        │                                             │
+        │  ┌─────────────────────────────────────┐   │
+        │  │  MCP Tools (mcp__前缀)               │   │
+        │  │  mcp__github__search_repos          │   │
+        │  │  mcp__postgres__query               │   │
+        │  └─────────────────────────────────────┘   │
+        └─────────────────────────────────────────────┘
 ```
 
 ---
@@ -341,19 +381,29 @@ for (const key of required) {
 
 ### 前端数据流
 
-```
-Worker: toolStart → main process → agent:tool-start
-    ↓
-useAgent.ts: chatStore.startToolExecution(toolCall)
-    ↓ (创建或更新 ChatMessage.toolCalls[] 中的条目，status='running')
+多 session 架构下，所有 IPC 事件包 `{ sessionId, ...data }` wrapper，前端按 sessionId 路由：
 
-Worker: toolEnd → main process → agent:tool-end
+```
+Worker: toolStart → main process → agent:tool-start { sessionId, toolCall }
     ↓
-useAgent.ts: chatStore.endToolExecution(result)
+useAgent.ts: onToolStart(data)
+    → chatStore.startToolExecution(data.toolCall, data.sessionId)
+    ↓ (按 sessionId 找到对应的 activeAssistantMessage，创建/更新 toolCalls[])
+
+Worker: toolEnd → main process → agent:tool-end { sessionId, toolResult }
+    ↓
+useAgent.ts: onToolEnd(data)
+    → chatStore.endToolExecution(data.toolResult, data.sessionId)
     ↓ (注入 result.output / result.details)
-    ↓
+
 ToolOperationList → FileOperationCard / CommandOperationCard / FileInspectCard
 ```
+
+**会话路由关键点**：
+- `chatStore` 维护 `activeSessionId`（当前可见）、`streamingSessionIds: Set<string>`（所有活跃 session）
+- `activeAssistantMessage(sid)` 返回当前可见 session 的实时消息，或后台 session 的 pending 快照
+- 切换 session 时先 abort 当前 run（`agent:abort`），再 load 目标 session 的消息和 Agent 状态
+- `agentStore` 额外维护 `sessionStatus: Map<string, AgentStatus>`，SessionBar 可显示各 session 独立状态
 
 ---
 

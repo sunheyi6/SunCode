@@ -14,6 +14,11 @@
 
 | 变更 | 说明 |
 |------|------|
+| 多 Session 并发 Agent | Worker 内 `Map<string,Agent>` 替代单例，每 session 独立 Agent 实例并行运行，消息按 sessionId 路由 |
+| Session 切换 abort | 切换 session 时先 abort 当前 run，避免 `setMessages` 被静默忽略导致消息丢失 |
+| Token 实时追踪 | `onTurnStart` 回调传递实时 token 累计值，`emitStatus` 合并已提交 + 当前 run token，StatusBar 每轮刷新 |
+| 后台进程多实例管理 | bgProcessStarted/bgProcessCompleted 事件，支持多 bash 后台进程独立追踪和 kill |
+| Agent turn 计数 | Agent 全局 turnCount 跨 run 累计，StatusBar 显示当前轮次 |
 | Tool Usage Discipline | 新增反循环规则章节，防止模型无限调用工具 |
 | 工具一行式摘要 | 替代完整 JSON Schema，节省 ~60% 工具 token |
 | `<project_context>` XML | 结构化注入 .agents.md / Skills，遵循 pi/Codex 约定 |
