@@ -13,6 +13,7 @@ import type {
 } from '@shared/types';
 
 import type { Tool } from '../tools/types';
+import { quickMatchLesson } from './lessons';
 import { DiagLogger } from '../utils/diag-logger';
 import { buildSystemPrompt } from './system-prompt';
 import { computeNeedsFollowUp } from './turn-decision';
@@ -811,6 +812,23 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           `${toolResults.filter((t) => t.success).length}/${toolResults.length} OK`,
           { durationMs: Date.now() - toolExecStartTime },
         );
+
+        // Enhance failed tool results with lesson hints
+        for (const tr of toolResults) {
+          if (!tr.success && tr.error) {
+            try {
+              const match = quickMatchLesson(workingDir, tr.name, tr.error);
+              if (match) {
+                tr.output = `⚠️ 相关教训：[${match.entry.date}] ${match.entry.title}
+   使用 search_lessons 工具查看详情。
+
+${tr.output}`;
+              }
+            } catch {
+              // Never let lesson matching break tool execution
+            }
+          }
+        }
       }
 
       // Add assistant + tool results to context
