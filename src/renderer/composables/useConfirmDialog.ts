@@ -64,7 +64,7 @@ export function useConfirmDialog() {
     confirmState.visible = true;
 
     resolveCurrent = (confirmed: boolean) => {
-      window.suncode.respondConfirm(request.toolCallId, confirmed);
+      window.suncode.respondConfirm(request.toolCallId, confirmed, (request as { sessionId?: string }).sessionId);
       resolveCurrent = null;
     };
   });

@@ -10,11 +10,11 @@ function ensureListening(): void {
   if (listening) return;
   listening = true;
 
-  bridge.onBgProcessStarted((process) => {
-    upsertStartedProcess(processes.value, process);
+  bridge.onBgProcessStarted((data) => {
+    upsertStartedProcess(processes.value, data.process);
   });
-  bridge.onBgProcessCompleted((pid, exitCode) => {
-    completeProcess(processes.value, pid, exitCode);
+  bridge.onBgProcessCompleted((data) => {
+    completeProcess(processes.value, data.pid, data.exitCode);
   });
 }
 

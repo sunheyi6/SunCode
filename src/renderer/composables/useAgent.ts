@@ -47,58 +47,59 @@ export function useAgent() {
 
   function setupListeners(): void {
     cleanups.push(
-      bridge.onStreamEvent((event) => {
-        chatStore.handleStreamEvent(event);
+      bridge.onStreamEvent((data) => {
+        chatStore.handleStreamEvent(data.event, data.sessionId);
       }),
     );
 
     cleanups.push(
-      bridge.onStatusChange((status) => {
-        agentStore.setStatus(status);
+      bridge.onStatusChange((data) => {
+        agentStore.setStatus(data.status);
       }),
     );
 
     cleanups.push(
-      bridge.onError((message) => {
-        agentStore.setError(message);
-        chatStore.handleStreamEvent({ type: 'error', error: message });
+      bridge.onError((data) => {
+        agentStore.setError(data.message);
+        chatStore.handleStreamEvent({ type: 'error', error: data.message }, data.sessionId);
         scheduleLatestPrompt();
       }),
     );
 
     cleanups.push(
-      bridge.onToolStart((toolCall) => {
-        chatStore.startToolExecution(toolCall);
-        agentStore.startToolExecution(toolCall.id, toolCall.name);
+      bridge.onToolStart((data) => {
+        chatStore.startToolExecution(data.toolCall, data.sessionId);
+        agentStore.startToolExecution(data.toolCall.id, data.toolCall.name);
       }),
     );
 
     cleanups.push(
-      bridge.onToolEnd((result) => {
-        chatStore.endToolExecution(result);
-        agentStore.endToolExecution(result);
+      bridge.onToolEnd((data) => {
+        chatStore.endToolExecution(data.toolResult, data.sessionId);
+        agentStore.endToolExecution(data.toolResult);
       }),
     );
 
     cleanups.push(
-      bridge.onRunEvent((event) => {
-        chatStore.handleRunEvent(event);
+      bridge.onRunEvent((data) => {
+        chatStore.handleRunEvent(data.event, data.sessionId);
       }),
     );
 
     cleanups.push(
-      bridge.onSubagentProgress((executionId, agent, delta) => {
+      bridge.onSubagentProgress((data) => {
         chatStore.handleSubagentProgress(
-          executionId,
-          agent,
-          delta as unknown as import('@shared/types').SubagentProgressDelta,
+          data.executionId,
+          data.agent,
+          data.delta as unknown as import('@shared/types').SubagentProgressDelta,
+          data.sessionId,
         );
       }),
     );
 
     cleanups.push(
-      bridge.onDone((message) => {
-        chatStore.handleStreamEvent({ type: 'message_end', message });
+      bridge.onDone((data) => {
+        chatStore.handleStreamEvent({ type: 'message_end', message: data.message }, data.sessionId);
         void sessionsStore.refresh();
         agentStore.setStatus({
           state: 'done',
@@ -111,15 +112,15 @@ export function useAgent() {
     );
 
     cleanups.push(
-      bridge.onGoalEvent((event) => {
-        console.log('[useAgent] Goal event:', event.type, event);
-        if (event.type === 'goal_started') {
+      bridge.onGoalEvent((data) => {
+        console.log('[useAgent] Goal event:', data.event.type, data.event);
+        if (data.event.type === 'goal_started') {
           agentStore.setGoalActive(true);
         } else if (
-          event.type === 'goal_completed' ||
-          event.type === 'goal_budget_exhausted' ||
-          event.type === 'goal_blocked' ||
-          event.type === 'goal_aborted'
+          data.event.type === 'goal_completed' ||
+          data.event.type === 'goal_budget_exhausted' ||
+          data.event.type === 'goal_blocked' ||
+          data.event.type === 'goal_aborted'
         ) {
           agentStore.setGoalActive(false);
         }

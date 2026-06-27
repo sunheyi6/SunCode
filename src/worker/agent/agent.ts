@@ -217,7 +217,6 @@ export class Agent {
   }
 
   setMessages(messages: Message[]): void {
-    if (this.isRunning) return;
     this.messages = [...messages];
     this.turnCount = 0;
     this.totalTokens = { input: 0, output: 0, total: 0 };

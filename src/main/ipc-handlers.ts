@@ -98,29 +98,29 @@ function getAgentWorker(): Worker {
 
       switch (msg.type) {
         case 'stream':
-          mainWindow.webContents.send('agent:stream', msg.event);
+          mainWindow.webContents.send('agent:stream', { sessionId: msg.sessionId, event: msg.event });
           break;
         case 'status':
-          mainWindow.webContents.send('agent:status', msg.status);
+          mainWindow.webContents.send('agent:status', { sessionId: msg.sessionId, status: msg.status });
           break;
         case 'error':
-          console.error('[Main] Worker error:', msg.message);
-          mainWindow.webContents.send('agent:error', msg.message);
+          console.error('[Main] Worker error:', msg.message, 'session=', msg.sessionId.slice(-8));
+          mainWindow.webContents.send('agent:error', { sessionId: msg.sessionId, message: msg.message });
           break;
         case 'done':
-          mainWindow.webContents.send('agent:done', msg.message);
+          mainWindow.webContents.send('agent:done', { sessionId: msg.sessionId, message: msg.message });
           break;
         case 'toolStart':
-          mainWindow.webContents.send('agent:tool-start', msg.toolCall);
+          mainWindow.webContents.send('agent:tool-start', { sessionId: msg.sessionId, toolCall: msg.toolCall });
           break;
         case 'toolEnd':
-          mainWindow.webContents.send('agent:tool-end', msg.toolResult);
+          mainWindow.webContents.send('agent:tool-end', { sessionId: msg.sessionId, toolResult: msg.toolResult });
           break;
         case 'bgProcessStarted':
-          mainWindow.webContents.send('agent:bg-process-started', msg.process);
+          mainWindow.webContents.send('agent:bg-process-started', { sessionId: msg.sessionId, process: msg.process });
           break;
         case 'bgProcessCompleted':
-          mainWindow.webContents.send('agent:bg-process-completed', msg.pid, msg.exitCode);
+          mainWindow.webContents.send('agent:bg-process-completed', { sessionId: msg.sessionId, pid: msg.pid, exitCode: msg.exitCode });
           break;
         case 'runEvent': {
           const evt = msg.event;
@@ -131,29 +131,28 @@ function getAgentWorker(): Worker {
           }
           await appendEvent(sid, evt.runId, evt);
           // Forward to renderer for call trace panel
-          mainWindow.webContents.send('agent:run-event', evt);
+          mainWindow.webContents.send('agent:run-event', { sessionId: msg.sessionId, event: evt });
           break;
         }
         case 'subagentStart':
-          mainWindow.webContents.send('agent:subagent-start', msg.execution);
+          mainWindow.webContents.send('agent:subagent-start', { sessionId: msg.sessionId, execution: msg.execution });
           break;
         case 'subagentEnd':
-          mainWindow.webContents.send('agent:subagent-end', msg.id, msg.result);
+          mainWindow.webContents.send('agent:subagent-end', { sessionId: msg.sessionId, id: msg.id, result: msg.result });
           break;
         case 'subagentProgress':
           mainWindow.webContents.send(
             'agent:subagent-progress',
-            msg.executionId,
-            msg.agent,
-            msg.delta,
+            { sessionId: msg.sessionId, executionId: msg.executionId, agent: msg.agent, delta: msg.delta },
           );
           break;
         case 'goalEvent':
-          mainWindow.webContents.send('agent:goal-event', msg.event);
+          mainWindow.webContents.send('agent:goal-event', { sessionId: msg.sessionId, event: msg.event });
           break;
         case 'confirmRequest':
           // Forward to renderer for in-app Vue confirmation dialog
           mainWindow.webContents.send('agent:confirm-request', {
+            sessionId: msg.sessionId,
             toolCallId: msg.toolCall.id,
             toolName: msg.toolCall.name,
             description: msg.toolCall.arguments || '',
@@ -173,9 +172,8 @@ function getAgentWorker(): Worker {
       agentWorker = null;
     });
 
-    // Send initial config and working dir
+    // Send initial config — working dir is set later by session init
     sendToWorker({ type: 'config', settings: currentSettings });
-    sendToWorker({ type: 'setWorkingDir', path: process.cwd() });
   }
   return agentWorker;
 }
@@ -271,7 +269,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
     try {
       console.log('[Main] agent:prompt received:', text.slice(0, 80));
       promptSessionId = currentSessionId; // Snap the owning session
-      sendToWorker({ type: 'prompt', text });
+      sendToWorker({ type: 'prompt', sessionId: currentSessionId!, text });
     } catch (err) {
       console.error('[Main] agent:prompt failed:', (err as Error).message);
     }
@@ -279,7 +277,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.on('agent:abort', () => {
     try {
-      sendToWorker({ type: 'abort' });
+      if (currentSessionId) sendToWorker({ type: 'abort', sessionId: currentSessionId });
     } catch (err) {
       console.error('[Main] agent:abort failed:', (err as Error).message);
     }
@@ -287,16 +285,18 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.on('agent:continue', () => {
     try {
-      sendToWorker({ type: 'continue' });
+      if (currentSessionId) sendToWorker({ type: 'continue', sessionId: currentSessionId });
     } catch (err) {
       console.error('[Main] agent:continue failed:', (err as Error).message);
     }
   });
 
   // Tool confirmation response from renderer → worker
-  ipcMain.on('agent:confirm-response', (_event, toolCallId: string, confirmed: boolean) => {
+  ipcMain.on('agent:confirm-response', (_event, toolCallId: string, confirmed: boolean, sessionId?: string) => {
     try {
-      sendToWorker({ type: 'confirmResponse', toolCallId, confirmed });
+      const sid = sessionId || currentSessionId;
+      if (!sid) { console.error('[Main] confirm-response: no sessionId'); return; }
+      sendToWorker({ type: 'confirmResponse', sessionId: sid, toolCallId, confirmed });
     } catch (err) {
       console.error('[Main] agent:confirm-response failed:', (err as Error).message);
     }
@@ -305,7 +305,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
   // Kill background process from renderer → worker
   ipcMain.on('agent:kill-bg-process', (_event, pid: number) => {
     try {
-      sendToWorker({ type: 'killBgProcess', pid });
+      if (currentSessionId) sendToWorker({ type: 'killBgProcess', sessionId: currentSessionId, pid });
     } catch (err) {
       console.error('[Main] agent:kill-bg-process failed:', (err as Error).message);
     }
@@ -405,9 +405,8 @@ export function registerIpcHandlers(wm: WindowManager): void {
       sessionMessages.set(id, []);
       await saveSession(meta, []);
       currentSessionId = id;
-      sendToWorker({ type: 'abort' });
-      sendToWorker({ type: 'setMessages', messages: [] });
-      sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
+      sendToWorker({ type: 'setMessages', sessionId: id, messages: [] });
+      sendToWorker({ type: 'setWorkingDir', sessionId: id, path: meta.workingDirectory });
       return meta;
     } catch (err) {
       console.error('[Main] session:create failed:', (err as Error).message);
@@ -443,10 +442,9 @@ export function registerIpcHandlers(wm: WindowManager): void {
         `[Main] session:load id=${id.slice(-8)} mem=${memCount} disk=${diskCount} result=${resultCount} diskExists=${!!disk}`,
       );
       messages = messages || [];
-      sendToWorker({ type: 'abort' });
-      sendToWorker({ type: 'setMessages', messages });
+      sendToWorker({ type: 'setMessages', sessionId: id, messages });
       if (meta) {
-        sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
+        sendToWorker({ type: 'setWorkingDir', sessionId: id, path: meta.workingDirectory });
       }
       return messages;
     } catch (err) {

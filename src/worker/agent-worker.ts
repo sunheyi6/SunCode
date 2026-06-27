@@ -1,6 +1,7 @@
 /**
  * Agent Worker Thread — Entry point.
  * 每个 console.log 都会通过 parentPort 转发到主进程控制台。
+ * 支持多 session 并发：每个 session 拥有独立的 Agent 实例。
  */
 import { parentPort } from 'node:worker_threads';
 import { DEFAULT_SETTINGS } from '@shared/constants';
@@ -15,10 +16,12 @@ const workerPort = parentPort;
 
 console.log('[Worker] Started');
 
-let agent: Agent | null = null;
+/** Per-session agent instances. Keyed by sessionId. */
+const agents = new Map<string, Agent>();
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 
-/** Pending confirmations waiting for user response. */
+/** Pending confirmations waiting for user response.
+ *  Keyed by toolCallId (LLM-generated UUID, collision-safe across sessions). */
 const pendingConfirmations = new Map<
   string,
   { resolve: (confirmed: boolean) => void; timeout: ReturnType<typeof setTimeout> }
@@ -26,7 +29,10 @@ const pendingConfirmations = new Map<
 
 /** Request user confirmation before executing a destructive tool.
  *  Sends a message to the main process and waits for the response. */
-function requestConfirmation(toolCall: import('@shared/types').ToolCallContent): Promise<boolean> {
+function requestConfirmation(
+  sessionId: string,
+  toolCall: import('@shared/types').ToolCallContent,
+): Promise<boolean> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       pendingConfirmations.delete(toolCall.id);
@@ -34,7 +40,7 @@ function requestConfirmation(toolCall: import('@shared/types').ToolCallContent):
     }, 120_000); // 2 minutes
 
     pendingConfirmations.set(toolCall.id, { resolve, timeout });
-    post({ type: 'confirmRequest', toolCall });
+    post({ type: 'confirmRequest', sessionId, toolCall });
   });
 }
 
@@ -65,41 +71,88 @@ function syncApiKeys(nextSettings: AppSettings): void {
   }
 }
 
+/**
+ * Get or create an Agent for a given session.
+ * The first call for a session must come via setWorkingDir to establish
+ * the initial working directory.
+ */
+function getAgent(sessionId: string): Agent | undefined {
+  return agents.get(sessionId);
+}
+
+/** Create per-session callbacks that stamp every outgoing message with sessionId. */
+function createCallbacks(sessionId: string) {
+  return {
+    onStream: (event: import('@shared/types').StreamEvent) =>
+      post({ type: 'stream', sessionId, event }),
+    onStatus: (status: import('@shared/types').AgentStatus) =>
+      post({ type: 'status', sessionId, status }),
+    onToolStart: (toolCall: import('@shared/types').ToolCallContent) =>
+      post({ type: 'toolStart', sessionId, toolCall }),
+    onToolEnd: (toolResult: import('@shared/types').ToolResult) =>
+      post({ type: 'toolEnd', sessionId, toolResult }),
+    onDone: (message: import('@shared/types').Message) =>
+      post({ type: 'done', sessionId, message }),
+    onError: (errorMsg: string) =>
+      post({ type: 'error', sessionId, message: errorMsg }),
+    onBgProcessStarted: (proc: import('@shared/types').BackgroundProcess) =>
+      post({ type: 'bgProcessStarted', sessionId, process: proc }),
+    onBgProcessCompleted: (pid: number, exitCode: number) =>
+      post({ type: 'bgProcessCompleted', sessionId, pid, exitCode }),
+    onRunEvent: (event: import('@shared/types').RunEvent) =>
+      post({ type: 'runEvent', sessionId, event }),
+    onSubagentEvent: (
+      type: string,
+      data: unknown,
+    ) => {
+      const base = { sessionId, ...(data as Record<string, unknown>) };
+      post({ type: type as WorkerOutMessage['type'], ...base } as WorkerOutMessage);
+    },
+    onGoalEvent: (event: import('@shared/types').GoalEvent) =>
+      post({ type: 'goalEvent', sessionId, event }),
+    requestConfirmation: (toolCall: import('@shared/types').ToolCallContent) =>
+      requestConfirmation(sessionId, toolCall),
+  };
+}
+
 async function handleMessage(msg: WorkerInMessage): Promise<void> {
   console.log('[Worker] Received message:', msg.type);
 
   switch (msg.type) {
     case 'prompt': {
+      const agent = getAgent(msg.sessionId);
       if (!agent) {
-        console.error('[Worker] Agent not initialized — no working dir set');
-        post({ type: 'error', message: 'Agent 未初始化。请先设置工作目录。' });
+        console.error('[Worker] Agent not initialized for session:', msg.sessionId);
+        post({ type: 'error', sessionId: msg.sessionId, message: 'Agent 未初始化。请先设置工作目录。' });
         return;
       }
-      console.log('[Worker] Dispatching prompt:', msg.text.slice(0, 50));
+      console.log('[Worker] Dispatching prompt:', msg.text.slice(0, 50), 'session=', msg.sessionId.slice(-8));
       try {
         await agent.prompt(msg.text);
-        console.log('[Worker] Prompt completed');
+        console.log('[Worker] Prompt completed session=', msg.sessionId.slice(-8));
       } catch (error) {
         console.error('[Worker] Prompt error:', error);
-        post({ type: 'error', message: (error as Error).message });
+        post({ type: 'error', sessionId: msg.sessionId, message: (error as Error).message });
       }
       break;
     }
 
     case 'abort': {
-      console.log('[Worker] Aborting');
+      console.log('[Worker] Aborting session=', msg.sessionId.slice(-8));
+      const agent = getAgent(msg.sessionId);
       agent?.abort();
       break;
     }
 
     case 'continue': {
-      console.log('[Worker] Continue');
+      const agent = getAgent(msg.sessionId);
       if (!agent) return;
+      console.log('[Worker] Continue session=', msg.sessionId.slice(-8));
       try {
         await agent.continue();
       } catch (error) {
         console.error('[Worker] Continue error:', error);
-        post({ type: 'error', message: (error as Error).message });
+        post({ type: 'error', sessionId: msg.sessionId, message: (error as Error).message });
       }
       break;
     }
@@ -107,51 +160,52 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
     case 'config': {
       console.log('[Worker] Config updated, activeModel=', msg.settings.activeModel);
       settings = msg.settings;
-      // Worker threads receive an environment snapshot when they are created.
-      // Apply keys again so keys saved after worker startup are available to pi-ai.
       syncApiKeys(settings);
-      if (agent) {
+      // Update settings on ALL agents
+      for (const agent of agents.values()) {
         agent.updateSettings(msg.settings);
       }
       break;
     }
 
     case 'setWorkingDir': {
-      console.log('[Worker] Working dir set:', msg.path);
-      if (agent) {
-        // Update existing agent without recreating it
-        await agent.setWorkingDir(msg.path);
-        console.log('[Worker] Working dir updated');
+      console.log('[Worker] Working dir set:', msg.path, 'session=', msg.sessionId.slice(-8));
+      const existing = agents.get(msg.sessionId);
+      if (existing) {
+        await existing.setWorkingDir(msg.path);
+        console.log('[Worker] Working dir updated session=', msg.sessionId.slice(-8));
       } else {
-        // First-time initialization
-        agent = new Agent(
+        const cbs = createCallbacks(msg.sessionId);
+        const newAgent = new Agent(
           msg.path,
           settings,
-          (event) => post({ type: 'stream', event }),
-          (status) => post({ type: 'status', status }),
-          (toolCall) => post({ type: 'toolStart', toolCall }),
-          (toolResult) => post({ type: 'toolEnd', toolResult }),
-          (message) => post({ type: 'done', message }),
-          (errorMsg) => post({ type: 'error', message: errorMsg }),
-          (proc) => post({ type: 'bgProcessStarted', process: proc }),
-          (pid, exitCode) => post({ type: 'bgProcessCompleted', pid, exitCode }),
-          (event) => post({ type: 'runEvent', event }),
-          (type, data) =>
-            post({
-              type: type as WorkerOutMessage['type'],
-              ...(data as Record<string, unknown>),
-            } as WorkerOutMessage),
-          (event) => post({ type: 'goalEvent', event }),
-          requestConfirmation,
+          cbs.onStream,
+          cbs.onStatus,
+          cbs.onToolStart,
+          cbs.onToolEnd,
+          cbs.onDone,
+          cbs.onError,
+          cbs.onBgProcessStarted,
+          cbs.onBgProcessCompleted,
+          cbs.onRunEvent,
+          cbs.onSubagentEvent,
+          cbs.onGoalEvent,
+          cbs.requestConfirmation,
         );
-        console.log('[Worker] Agent created');
+        agents.set(msg.sessionId, newAgent);
+        console.log('[Worker] Agent created session=', msg.sessionId.slice(-8));
       }
       break;
     }
 
     case 'setMessages': {
-      agent?.setMessages(msg.messages);
-      console.log('[Worker] Conversation context replaced:', msg.messages.length, 'messages');
+      const agent = getAgent(msg.sessionId);
+      if (agent) {
+        agent.setMessages(msg.messages);
+        console.log('[Worker] Conversation context replaced:', msg.messages.length, 'messages', 'session=', msg.sessionId.slice(-8));
+      } else {
+        console.warn('[Worker] setMessages for unknown session:', msg.sessionId.slice(-8), '- no agent exists yet');
+      }
       break;
     }
 
@@ -173,7 +227,7 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
         console.error('[Worker] Failed to kill process:', (err as Error).message);
       }
       // Notify renderer that the process was terminated externally
-      post({ type: 'bgProcessCompleted', pid: msg.pid, exitCode: -1 });
+      post({ type: 'bgProcessCompleted', sessionId: msg.sessionId, pid: msg.pid, exitCode: -1 });
       break;
     }
 
@@ -185,6 +239,6 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
 workerPort.on('message', (msg: WorkerInMessage) => {
   handleMessage(msg).catch((err) => {
     console.error('[Worker] Unhandled error:', err);
-    post({ type: 'error', message: err.message });
+    post({ type: 'error', sessionId: '', message: err.message });
   });
 });

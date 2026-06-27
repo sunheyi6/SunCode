@@ -39,48 +39,49 @@ const suncodeAPI = {
   },
 
   /** Listen for stream events from the agent */
-  onStreamEvent(callback: (event: StreamEvent) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, event: StreamEvent): void =>
-      callback(event);
+  onStreamEvent(callback: (data: { sessionId: string; event: StreamEvent }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; event: StreamEvent }): void =>
+      callback(data);
     ipcRenderer.on('agent:stream', handler);
     return () => ipcRenderer.removeListener('agent:stream', handler);
   },
 
   /** Listen for agent status changes */
-  onStatusChange(callback: (status: AgentStatus) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, status: AgentStatus): void =>
-      callback(status);
+  onStatusChange(callback: (data: { sessionId: string; status: AgentStatus }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; status: AgentStatus }): void =>
+      callback(data);
     ipcRenderer.on('agent:status', handler);
     return () => ipcRenderer.removeListener('agent:status', handler);
   },
 
   /** Listen for agent errors */
-  onError(callback: (message: string) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, message: string): void => callback(message);
+  onError(callback: (data: { sessionId: string; message: string }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; message: string }): void =>
+      callback(data);
     ipcRenderer.on('agent:error', handler);
     return () => ipcRenderer.removeListener('agent:error', handler);
   },
 
   /** Listen for agent done event */
-  onDone(callback: (message: Message) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, message: Message): void =>
-      callback(message);
+  onDone(callback: (data: { sessionId: string; message: Message }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; message: Message }): void =>
+      callback(data);
     ipcRenderer.on('agent:done', handler);
     return () => ipcRenderer.removeListener('agent:done', handler);
   },
 
   /** Listen for tool execution start */
-  onToolStart(callback: (toolCall: ToolCallContent) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, toolCall: ToolCallContent): void =>
-      callback(toolCall);
+  onToolStart(callback: (data: { sessionId: string; toolCall: ToolCallContent }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; toolCall: ToolCallContent }): void =>
+      callback(data);
     ipcRenderer.on('agent:tool-start', handler);
     return () => ipcRenderer.removeListener('agent:tool-start', handler);
   },
 
   /** Listen for tool execution end */
-  onToolEnd(callback: (result: ToolResult) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, result: ToolResult): void =>
-      callback(result);
+  onToolEnd(callback: (data: { sessionId: string; toolResult: ToolResult }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; toolResult: ToolResult }): void =>
+      callback(data);
     ipcRenderer.on('agent:tool-end', handler);
     return () => ipcRenderer.removeListener('agent:tool-end', handler);
   },
@@ -152,14 +153,12 @@ const suncodeAPI = {
 
   /** Listen for sub-agent progress updates */
   onSubagentProgress(
-    callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void,
+    callback: (data: { sessionId: string; executionId: string; agent: string; delta: Record<string, unknown> }) => void,
   ): () => void {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      executionId: string,
-      agent: string,
-      delta: Record<string, unknown>,
-    ): void => callback(executionId, agent, delta);
+      data: { sessionId: string; executionId: string; agent: string; delta: Record<string, unknown> },
+    ): void => callback(data);
     ipcRenderer.on('agent:subagent-progress', handler);
     return () => ipcRenderer.removeListener('agent:subagent-progress', handler);
   },
@@ -264,17 +263,17 @@ const suncodeAPI = {
   // ===== Background Processes =====
 
   /** Listen for background process started events */
-  onBgProcessStarted(callback: (process: BackgroundProcess) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, proc: BackgroundProcess): void =>
-      callback(proc);
+  onBgProcessStarted(callback: (data: { sessionId: string; process: BackgroundProcess }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; process: BackgroundProcess }): void =>
+      callback(data);
     ipcRenderer.on('agent:bg-process-started', handler);
     return () => ipcRenderer.removeListener('agent:bg-process-started', handler);
   },
 
   /** Listen for background process completed events */
-  onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, pid: number, exitCode: number): void =>
-      callback(pid, exitCode);
+  onBgProcessCompleted(callback: (data: { sessionId: string; pid: number; exitCode: number }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; pid: number; exitCode: number }): void =>
+      callback(data);
     ipcRenderer.on('agent:bg-process-completed', handler);
     return () => ipcRenderer.removeListener('agent:bg-process-completed', handler);
   },
@@ -285,32 +284,34 @@ const suncodeAPI = {
   },
 
   /** Listen for goal lifecycle events */
-  onGoalEvent(callback: (event: GoalEvent) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, event: GoalEvent): void => callback(event);
+  onGoalEvent(callback: (data: { sessionId: string; event: GoalEvent }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; event: GoalEvent }): void =>
+      callback(data);
     ipcRenderer.on('agent:goal-event', handler);
     return () => ipcRenderer.removeListener('agent:goal-event', handler);
   },
 
   /** Listen for tool confirmation requests (confirm_changes mode) */
   onConfirmRequest(
-    callback: (request: { toolCallId: string; toolName: string; description: string }) => void,
+    callback: (data: { sessionId: string; toolCallId: string; toolName: string; description: string }) => void,
   ): () => void {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      request: { toolCallId: string; toolName: string; description: string },
-    ): void => callback(request);
+      data: { sessionId: string; toolCallId: string; toolName: string; description: string },
+    ): void => callback(data);
     ipcRenderer.on('agent:confirm-request', handler);
     return () => ipcRenderer.removeListener('agent:confirm-request', handler);
   },
 
   /** Respond to a tool confirmation request */
-  respondConfirm(toolCallId: string, confirmed: boolean): void {
-    ipcRenderer.send('agent:confirm-response', toolCallId, confirmed);
+  respondConfirm(toolCallId: string, confirmed: boolean, sessionId?: string): void {
+    ipcRenderer.send('agent:confirm-response', toolCallId, confirmed, sessionId);
   },
 
   /** Listen for run lifecycle events (for call trace panel). */
-  onRunEvent(callback: (event: RunEvent) => void): () => void {
-    const handler = (_event: Electron.IpcRendererEvent, evt: RunEvent): void => callback(evt);
+  onRunEvent(callback: (data: { sessionId: string; event: RunEvent }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; event: RunEvent }): void =>
+      callback(data);
     ipcRenderer.on('agent:run-event', handler);
     return () => ipcRenderer.removeListener('agent:run-event', handler);
   },

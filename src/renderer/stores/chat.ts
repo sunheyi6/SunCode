@@ -49,8 +49,8 @@ export const useChatStore = defineStore('chat', () => {
 
   /** ID of the renderer's currently visible session. */
   let activeSessionId: string | null = null;
-  /** ID of the session that originated the current agent run. */
-  let streamingSessionId: string | null = null;
+  /** IDs of all sessions with an active agent run (supports concurrent runs). */
+  const streamingSessionIds = new Set<string>();
   /** In-progress assistant messages for sessions the user left mid-stream. */
   const pendingAssistantMessages = new Map<string, ChatMessage>();
 
@@ -79,20 +79,32 @@ export const useChatStore = defineStore('chat', () => {
     // instance so stream mutations update the rendered message.
     currentAssistantMsg = messages.value[messages.value.length - 1];
     isStreaming.value = true;
-    streamingSessionId = activeSessionId;
+    if (activeSessionId) streamingSessionIds.add(activeSessionId);
   }
 
-  /** Return the assistant message that should receive stream/tool events.
-   *  If the user switched to another session mid-stream, updates are applied
-   *  to the pending snapshot for the originating session so nothing is lost. */
-  function activeAssistantMessage(): ChatMessage | null {
-    if (currentAssistantMsg) return currentAssistantMsg;
-    if (!streamingSessionId) return null;
-    return pendingAssistantMessages.get(streamingSessionId) ?? null;
+  /** Return the assistant message that should receive stream/tool events for a given session.
+   *  Active session → currentAssistantMsg; inactive session → pending snapshot. */
+  function activeAssistantMessage(sessionId: string): ChatMessage | null {
+    if (sessionId === activeSessionId) return currentAssistantMsg;
+    return pendingAssistantMessages.get(sessionId) ?? null;
   }
 
-  function handleStreamEvent(event: StreamEvent): void {
-    const msg = activeAssistantMessage();
+  /** Create a fresh assistant message in pending state for an inactive session. */
+  function createPendingAssistant(sessionId: string): ChatMessage {
+    const msg: ChatMessage = {
+      id: nextId(),
+      role: 'assistant',
+      content: '',
+      thinking: '',
+      timestamp: Date.now(),
+      isStreaming: true,
+    };
+    pendingAssistantMessages.set(sessionId, msg);
+    return msg;
+  }
+
+  function handleStreamEvent(event: StreamEvent, sessionId: string): void {
+    const msg = activeAssistantMessage(sessionId);
 
     switch (event.type) {
       case 'system_prompt':
@@ -113,17 +125,26 @@ export const useChatStore = defineStore('chat', () => {
       case 'message_start':
         // Create streaming message context if not already present
         if (!msg) {
-          startAssistantMessage();
+          if (sessionId === activeSessionId) {
+            startAssistantMessage();
+          } else {
+            createPendingAssistant(sessionId);
+          }
         }
+        streamingSessionIds.add(sessionId);
         break;
 
       case 'message_update':
       case 'message_end': {
         if (!msg && event.type === 'message_update') {
-          // No streaming message yet — create one
-          startAssistantMessage();
+          if (sessionId === activeSessionId) {
+            startAssistantMessage();
+          } else {
+            createPendingAssistant(sessionId);
+          }
+          streamingSessionIds.add(sessionId);
         }
-        const target = activeAssistantMessage();
+        const target = activeAssistantMessage(sessionId);
         if (!target) break;
 
         const data = event.data;
@@ -162,7 +183,8 @@ export const useChatStore = defineStore('chat', () => {
 
         if (event.type === 'message_end') {
           target.isStreaming = false;
-          isStreaming.value = false;
+          streamingSessionIds.delete(sessionId);
+          isStreaming.value = streamingSessionIds.size > 0;
 
           // Persist completed message
           void bridge.saveMessage(
@@ -176,11 +198,10 @@ export const useChatStore = defineStore('chat', () => {
             }),
           );
 
-          currentAssistantMsg = null;
-          if (streamingSessionId) {
-            pendingAssistantMessages.delete(streamingSessionId);
-            streamingSessionId = null;
+          if (sessionId === activeSessionId) {
+            currentAssistantMsg = null;
           }
+          pendingAssistantMessages.delete(sessionId);
         }
         break;
       }
@@ -189,20 +210,20 @@ export const useChatStore = defineStore('chat', () => {
         if (msg) {
           msg.content += `\n\n❌ Error: ${event.error || 'Unknown error'}`;
           msg.isStreaming = false;
-          isStreaming.value = false;
         }
-        currentAssistantMsg = null;
-        if (streamingSessionId) {
-          pendingAssistantMessages.delete(streamingSessionId);
-          streamingSessionId = null;
+        streamingSessionIds.delete(sessionId);
+        isStreaming.value = streamingSessionIds.size > 0;
+        if (sessionId === activeSessionId) {
+          currentAssistantMsg = null;
         }
+        pendingAssistantMessages.delete(sessionId);
         break;
     }
   }
 
   /** Wire up tool execution start from worker — sets the tool call to running. */
-  function startToolExecution(toolCall: ToolCallContent): void {
-    const msg = activeAssistantMessage();
+  function startToolExecution(toolCall: ToolCallContent, sessionId: string): void {
+    const msg = activeAssistantMessage(sessionId);
     if (!msg) return;
     if (!msg.toolCalls) msg.toolCalls = [];
     let target = msg.toolCalls.find((t) => t.id === toolCall.id);
@@ -251,8 +272,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /** Wire up tool execution result from worker — attaches output/error to the tool call. */
-  function endToolExecution(result: ToolResult): void {
-    const msg = activeAssistantMessage();
+  function endToolExecution(result: ToolResult, sessionId: string): void {
+    const msg = activeAssistantMessage(sessionId);
     if (!msg?.toolCalls) return;
     const tc = msg.toolCalls.find((t) => t.id === result.toolCallId);
     if (tc) {
@@ -274,9 +295,9 @@ export const useChatStore = defineStore('chat', () => {
   /** Handle incremental sub-agent progress: thinking deltas and tool calls. */
   /** Handle run lifecycle events — convert model_request_completed to TurnDetail
    *  and accumulate on the current assistant message for the call trace panel. */
-  function handleRunEvent(event: RunEvent): void {
+  function handleRunEvent(event: RunEvent, sessionId: string): void {
     if (event.type !== 'model_request_completed') return;
-    const msg = activeAssistantMessage();
+    const msg = activeAssistantMessage(sessionId);
     if (!msg) return;
     if (!msg.turnDetails) msg.turnDetails = [];
     // Avoid duplicate entries (same turn number can emit twice in error retry)
@@ -314,8 +335,9 @@ export const useChatStore = defineStore('chat', () => {
     _executionId: string,
     _agent: string,
     delta: SubagentProgressDelta,
+    sessionId: string,
   ): void {
-    const msg = activeAssistantMessage();
+    const msg = activeAssistantMessage(sessionId);
     if (!msg?.toolCalls) return;
     // Find the subagent tool call (there should be only one running at a time)
     const subTc = msg.toolCalls.find((t) => t.name === 'subagent' && t.status === 'running');
@@ -356,10 +378,10 @@ export const useChatStore = defineStore('chat', () => {
       currentAssistantMsg.isStreaming = false;
     }
     currentAssistantMsg = null;
-    isStreaming.value = false;
-    if (streamingSessionId) {
-      pendingAssistantMessages.delete(streamingSessionId);
-      streamingSessionId = null;
+    // Clear streaming state for the active session only
+    if (activeSessionId) {
+      streamingSessionIds.delete(activeSessionId);
+      isStreaming.value = streamingSessionIds.size > 0;
     }
   }
 

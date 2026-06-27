@@ -1,5 +1,6 @@
 /**
  * Type declarations for the window.suncode API.
+ * All event callbacks receive a wrapper with sessionId for multi-session routing.
  */
 import type {
   BackgroundProcess,
@@ -17,6 +18,22 @@ import type {
   TokenUsageSummary,
 } from '@shared/types';
 
+/** Wrapper types for IPC events that carry sessionId for multi-session routing. */
+export interface SessionStreamEvent { sessionId: string; event: StreamEvent }
+export interface SessionStatusEvent { sessionId: string; status: AgentStatus }
+export interface SessionErrorEvent { sessionId: string; message: string }
+export interface SessionDoneEvent { sessionId: string; message: Message }
+export interface SessionToolStartEvent { sessionId: string; toolCall: ToolCallContent }
+export interface SessionToolEndEvent { sessionId: string; toolResult: ToolResult }
+export interface SessionBgProcessStartedEvent { sessionId: string; process: BackgroundProcess }
+export interface SessionBgProcessCompletedEvent { sessionId: string; pid: number; exitCode: number }
+export interface SessionRunEvent { sessionId: string; event: RunEvent }
+export interface SessionSubagentStartEvent { sessionId: string; execution: Record<string, unknown> }
+export interface SessionSubagentEndEvent { sessionId: string; id: string; result: Record<string, unknown> }
+export interface SessionSubagentProgressEvent { sessionId: string; executionId: string; agent: string; delta: Record<string, unknown> }
+export interface SessionGoalEvent { sessionId: string; event: GoalEvent }
+export interface SessionConfirmRequestEvent { sessionId: string; toolCallId: string; toolName: string; description: string }
+
 declare global {
   interface Window {
     suncode: {
@@ -24,12 +41,12 @@ declare global {
       prompt(text: string): void;
       abort(): void;
       continue(): void;
-      onStreamEvent(callback: (event: StreamEvent) => void): () => void;
-      onStatusChange(callback: (status: AgentStatus) => void): () => void;
-      onError(callback: (message: string) => void): () => void;
-      onDone(callback: (message: Message) => void): () => void;
-      onToolStart(callback: (toolCall: ToolCallContent) => void): () => void;
-      onToolEnd(callback: (result: ToolResult) => void): () => void;
+      onStreamEvent(callback: (data: SessionStreamEvent) => void): () => void;
+      onStatusChange(callback: (data: SessionStatusEvent) => void): () => void;
+      onError(callback: (data: SessionErrorEvent) => void): () => void;
+      onDone(callback: (data: SessionDoneEvent) => void): () => void;
+      onToolStart(callback: (data: SessionToolStartEvent) => void): () => void;
+      onToolEnd(callback: (data: SessionToolEndEvent) => void): () => void;
 
       // File system
       getFileTree(rootPath?: string): Promise<FileNode[]>;
@@ -86,30 +103,30 @@ declare global {
       generateCommitMessage(workingDir: string): Promise<{ message: string }>;
 
       // Background Processes
-      onBgProcessStarted(callback: (proc: BackgroundProcess) => void): () => void;
-      onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void;
+      onBgProcessStarted(callback: (data: SessionBgProcessStartedEvent) => void): () => void;
+      onBgProcessCompleted(callback: (data: SessionBgProcessCompletedEvent) => void): () => void;
       killBgProcess(pid: number): void;
 
       // Window
       setTitleBarOverlayText(text: string): void;
       // Subagent
       onSubagentProgress(
-        callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void,
+        callback: (data: SessionSubagentProgressEvent) => void,
       ): () => void;
       // Goal
-      onGoalEvent(callback: (event: GoalEvent) => void): () => void;
+      onGoalEvent(callback: (data: SessionGoalEvent) => void): () => void;
 
       // Permission confirmation
       onConfirmRequest(
-        callback: (request: { toolCallId: string; toolName: string; description: string }) => void,
+        callback: (data: SessionConfirmRequestEvent) => void,
       ): () => void;
-      respondConfirm(toolCallId: string, confirmed: boolean): void;
+      respondConfirm(toolCallId: string, confirmed: boolean, sessionId?: string): void;
 
       // Session updates (e.g. AI-generated title)
       onSessionUpdated(callback: (meta: SessionMeta) => void): () => void;
 
       // Run lifecycle events (for call trace panel)
-      onRunEvent(callback: (event: RunEvent) => void): () => void;
+      onRunEvent(callback: (data: SessionRunEvent) => void): () => void;
     };
   }
 }

@@ -343,32 +343,32 @@ export interface StopHookRegistry {
 
 /** Messages sent from main process to agent worker */
 export type WorkerInMessage =
-  | { type: 'prompt'; text: string; attachments?: string[] }
-  | { type: 'abort' }
-  | { type: 'continue' }
+  | { type: 'prompt'; sessionId: string; text: string; attachments?: string[] }
+  | { type: 'abort'; sessionId: string }
+  | { type: 'continue'; sessionId: string }
   | { type: 'config'; settings: AppSettings }
-  | { type: 'setWorkingDir'; path: string }
-  | { type: 'setMessages'; messages: Message[] }
-  | { type: 'confirmResponse'; toolCallId: string; confirmed: boolean }
-  | { type: 'killBgProcess'; pid: number };
+  | { type: 'setWorkingDir'; sessionId: string; path: string }
+  | { type: 'setMessages'; sessionId: string; messages: Message[] }
+  | { type: 'confirmResponse'; sessionId: string; toolCallId: string; confirmed: boolean }
+  | { type: 'killBgProcess'; sessionId: string; pid: number };
 
 /** Messages sent from agent worker to main process */
 export type WorkerOutMessage =
-  | { type: 'stream'; event: StreamEvent }
-  | { type: 'status'; status: AgentStatus }
-  | { type: 'error'; message: string }
-  | { type: 'done'; message: Message }
-  | { type: 'toolStart'; toolCall: ToolCallContent }
-  | { type: 'toolEnd'; toolResult: ToolResult }
-  | { type: 'bgProcessStarted'; process: BackgroundProcess }
-  | { type: 'bgProcessCompleted'; pid: number; exitCode: number }
-  | { type: 'runStarted'; runId: string }
-  | { type: 'runEvent'; event: RunEvent }
-  | { type: 'subagentStart'; execution: SubagentExecution }
-  | { type: 'subagentEnd'; id: string; result: SubagentResult }
-  | { type: 'subagentProgress'; executionId: string; agent: string; delta: SubagentProgressDelta }
-  | { type: 'goalEvent'; event: GoalEvent }
-  | { type: 'confirmRequest'; toolCall: ToolCallContent };
+  | { type: 'stream'; sessionId: string; event: StreamEvent }
+  | { type: 'status'; sessionId: string; status: AgentStatus }
+  | { type: 'error'; sessionId: string; message: string }
+  | { type: 'done'; sessionId: string; message: Message }
+  | { type: 'toolStart'; sessionId: string; toolCall: ToolCallContent }
+  | { type: 'toolEnd'; sessionId: string; toolResult: ToolResult }
+  | { type: 'bgProcessStarted'; sessionId: string; process: BackgroundProcess }
+  | { type: 'bgProcessCompleted'; sessionId: string; pid: number; exitCode: number }
+  | { type: 'runStarted'; sessionId: string; runId: string }
+  | { type: 'runEvent'; sessionId: string; event: RunEvent }
+  | { type: 'subagentStart'; sessionId: string; execution: SubagentExecution }
+  | { type: 'subagentEnd'; sessionId: string; id: string; result: SubagentResult }
+  | { type: 'subagentProgress'; sessionId: string; executionId: string; agent: string; delta: SubagentProgressDelta }
+  | { type: 'goalEvent'; sessionId: string; event: GoalEvent }
+  | { type: 'confirmRequest'; sessionId: string; toolCall: ToolCallContent };
 
 /** Streaming event types from the LLM */
 /**

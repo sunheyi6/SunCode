@@ -3,7 +3,6 @@
  * Provides a clean interface for Vue components to interact with the agent.
  */
 import type {
-  BackgroundProcess,
   GitInfo,
   GoalEvent,
   RunEvent,
@@ -17,6 +16,20 @@ import type {
   SessionMeta,
   TokenUsageSummary,
 } from '@shared/types';
+import type {
+  SessionStreamEvent,
+  SessionStatusEvent,
+  SessionErrorEvent,
+  SessionDoneEvent,
+  SessionToolStartEvent,
+  SessionToolEndEvent,
+  SessionBgProcessStartedEvent,
+  SessionBgProcessCompletedEvent,
+  SessionRunEvent,
+  SessionSubagentProgressEvent,
+  SessionGoalEvent,
+  SessionConfirmRequestEvent,
+} from '../types/ipc';
 
 const api = (): NonNullable<Window['suncode']> => {
   if (!window.suncode) {
@@ -39,27 +52,27 @@ export const bridge = {
     api().continue();
   },
 
-  onStreamEvent(callback: (event: StreamEvent) => void): () => void {
+  onStreamEvent(callback: (data: SessionStreamEvent) => void): () => void {
     return api().onStreamEvent(callback);
   },
 
-  onStatusChange(callback: (status: AgentStatus) => void): () => void {
+  onStatusChange(callback: (data: SessionStatusEvent) => void): () => void {
     return api().onStatusChange(callback);
   },
 
-  onError(callback: (message: string) => void): () => void {
+  onError(callback: (data: SessionErrorEvent) => void): () => void {
     return api().onError(callback);
   },
 
-  onDone(callback: (message: Message) => void): () => void {
+  onDone(callback: (data: SessionDoneEvent) => void): () => void {
     return api().onDone(callback);
   },
 
-  onToolStart(callback: (toolCall: ToolCallContent) => void): () => void {
+  onToolStart(callback: (data: SessionToolStartEvent) => void): () => void {
     return api().onToolStart(callback);
   },
 
-  onToolEnd(callback: (result: ToolResult) => void): () => void {
+  onToolEnd(callback: (data: SessionToolEndEvent) => void): () => void {
     return api().onToolEnd(callback);
   },
 
@@ -177,11 +190,11 @@ export const bridge = {
   },
 
   // ===== Background Processes =====
-  onBgProcessStarted(callback: (proc: BackgroundProcess) => void): () => void {
+  onBgProcessStarted(callback: (data: SessionBgProcessStartedEvent) => void): () => void {
     return api().onBgProcessStarted(callback);
   },
 
-  onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void {
+  onBgProcessCompleted(callback: (data: SessionBgProcessCompletedEvent) => void): () => void {
     return api().onBgProcessCompleted(callback);
   },
 
@@ -189,30 +202,30 @@ export const bridge = {
     api().killBgProcess(pid);
   },
 
-  onGoalEvent(callback: (event: GoalEvent) => void): () => void {
+  onGoalEvent(callback: (data: SessionGoalEvent) => void): () => void {
     return api().onGoalEvent(callback);
   },
 
   // ===== Subagent =====
   onSubagentProgress(
-    callback: (executionId: string, agent: string, delta: Record<string, unknown>) => void,
+    callback: (data: SessionSubagentProgressEvent) => void,
   ): () => void {
     return api().onSubagentProgress(callback);
   },
 
   // ===== Permission Confirmation =====
   onConfirmRequest(
-    callback: (request: { toolCallId: string; toolName: string; description: string }) => void,
+    callback: (data: SessionConfirmRequestEvent) => void,
   ): () => void {
     return api().onConfirmRequest(callback);
   },
 
-  onRunEvent(callback: (event: RunEvent) => void): () => void {
+  onRunEvent(callback: (data: SessionRunEvent) => void): () => void {
     return api().onRunEvent(callback);
   },
 
-  respondConfirm(toolCallId: string, confirmed: boolean): void {
-    api().respondConfirm(toolCallId, confirmed);
+  respondConfirm(toolCallId: string, confirmed: boolean, sessionId?: string): void {
+    api().respondConfirm(toolCallId, confirmed, sessionId);
   },
 
   // ===== Session Updates =====
