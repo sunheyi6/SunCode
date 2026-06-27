@@ -9,6 +9,14 @@ import { logger, getLogPath } from './logger';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// ── GPU / hardware acceleration workaround (Windows) ───────────────
+// On some Windows machines, GPU acceleration causes hard crashes that
+// kill the entire process without firing any error events. This is the
+// most reliable way to disable it — must be called before app.whenReady().
+// The app is fully functional without GPU acceleration; only CSS
+// transforms/animations will fall back to software rendering.
+app.disableHardwareAcceleration();
+
 // ── Single-instance lock ────────────────────────────────────────────
 const gotTheLock = app.requestSingleInstanceLock();
 

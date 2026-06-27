@@ -92,7 +92,10 @@ export default defineConfig({
   root: '.',
   server: {
     port: 5173,
-    strictPort: true,
+    // strictPort: false — allow auto-increment when 5173 is occupied.
+    // This is essential when the SunCode product (itself on 5173) launches
+    // a dev project that also defaults to 5173.
+    strictPort: false,
   },
   build: {
     outDir: 'dist',
