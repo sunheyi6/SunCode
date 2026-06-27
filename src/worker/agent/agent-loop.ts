@@ -61,6 +61,8 @@ export interface AgentLoopInput {
   /** Callback to request user confirmation before executing a destructive tool.
    *  Only called when permissionMode is 'confirm_changes'. */
   requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>;
+  /** Optional callback fired on each turn_start to keep external state in sync. */
+  onTurnStart?: (turnCount: number, maxTurns: number) => void;
 }
 
 export interface PrepareNextTurnResult {
@@ -185,6 +187,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     });
     onStream({ type: 'turn_start', turnCount, maxTurns: settings.maxTurns || MAX_TURNS });
     onRunEvent({ type: 'turn_started', runId, turnNumber: turnCount, timestamp: '' });
+    input.onTurnStart?.(turnCount, settings.maxTurns || MAX_TURNS);
 
     try {
       // Import pi-ai dynamically

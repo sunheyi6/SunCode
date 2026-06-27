@@ -349,7 +349,8 @@ export type WorkerInMessage =
   | { type: 'config'; settings: AppSettings }
   | { type: 'setWorkingDir'; path: string }
   | { type: 'setMessages'; messages: Message[] }
-  | { type: 'confirmResponse'; toolCallId: string; confirmed: boolean };
+  | { type: 'confirmResponse'; toolCallId: string; confirmed: boolean }
+  | { type: 'killBgProcess'; pid: number };
 
 /** Messages sent from agent worker to main process */
 export type WorkerOutMessage =

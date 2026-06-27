@@ -22,7 +22,7 @@ export interface BashToolCallbacks {
 /**
  * Kill a process and all its children (cross-platform).
  */
-function killProcessTree(pid: number): void {
+export function killProcessTree(pid: number): void {
   if (process.platform === 'win32') {
     try {
       spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
@@ -163,12 +163,21 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
         return new Promise((resolveResult) => {
           let child: ReturnType<typeof spawn>;
           try {
+            // Use stdio: 'pipe' (not 'ignore') — GUI apps (Electron) need
+            // valid stdio handles to create visible windows on Windows.
+            // Pipes are drained to prevent backpressure.
             child = spawn(shell, shellArgs, {
               cwd,
               env: process.env,
-              stdio: 'ignore',
+              stdio: 'pipe',
               detached: true,
             });
+            // Drain pipes to prevent backpressure from filling buffers
+            child.stdout?.resume();
+            child.stderr?.resume();
+            // Close stdin — background processes don't read from it,
+            // and an open pipe could cause the child to block.
+            child.stdin?.end();
           } catch (error) {
             resolveResult(
               commandFailure(`Failed to start background process: ${(error as Error).message}`),
@@ -193,15 +202,31 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
           };
 
           child.on('error', (error) => {
+            // Startup failure: the process couldn't be spawned at all
             failStartup(error.message);
             notifyComplete(-1);
           });
 
           child.on('close', (code) => {
             if (!startupSettled) {
+              // Exited before spawn event fired — startup failure
               failStartup(`process closed before startup (exit code: ${code ?? 'null'})`);
+              notifyComplete(code ?? -1);
+              return;
             }
-            notifyComplete(code ?? -1);
+            // Startup succeeded, but the shell process exited.
+            // Use exit code as heuristic:
+            // - code 0 → command ran to completion (app/dev-server likely started) → keep "running"
+            // - code non-zero/null → command failed → notify completion
+            // This correctly handles both cases:
+            //   1. Failed launch (e.g. build error) → non-zero exit → UI shows completed
+            //   2. Successful dev server → zero exit, grandchild lives on → UI shows running
+            if (code !== 0) {
+              console.log(`[Bash] PID ${startedPid} exited with code ${code} — notifying completion`);
+              notifyComplete(code ?? -1);
+            } else {
+              console.log(`[Bash] PID ${startedPid} exited with code 0 — keeping as running (app likely started)`);
+            }
           });
 
           child.once('spawn', () => {

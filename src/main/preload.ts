@@ -279,6 +279,11 @@ const suncodeAPI = {
     return () => ipcRenderer.removeListener('agent:bg-process-completed', handler);
   },
 
+  /** Kill a running background process by PID */
+  killBgProcess(pid: number): void {
+    ipcRenderer.send('agent:kill-bg-process', pid);
+  },
+
   /** Listen for goal lifecycle events */
   onGoalEvent(callback: (event: GoalEvent) => void): () => void {
     const handler = (_event: Electron.IpcRendererEvent, event: GoalEvent): void => callback(event);

@@ -1,4 +1,4 @@
-import { readonly, ref } from 'vue';
+import { ref } from 'vue';
 import type { BackgroundProcess } from '@shared/types';
 import { bridge } from '../api/bridge';
 import { completeProcess, upsertStartedProcess } from './background-process-state';
@@ -20,5 +20,7 @@ function ensureListening(): void {
 
 export function useBackgroundProcesses() {
   ensureListening();
-  return { processes: readonly(processes) };
+  // Note: not wrapped with readonly() because GitPanel's stopProcess() and
+  // the internal callbacks need to mutate array elements in place (status/exitCode).
+  return { processes };
 }

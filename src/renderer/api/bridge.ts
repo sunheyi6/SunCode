@@ -185,6 +185,10 @@ export const bridge = {
     return api().onBgProcessCompleted(callback);
   },
 
+  killBgProcess(pid: number): void {
+    api().killBgProcess(pid);
+  },
+
   onGoalEvent(callback: (event: GoalEvent) => void): () => void {
     return api().onGoalEvent(callback);
   },

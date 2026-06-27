@@ -29,6 +29,17 @@ export function latestProcess(processes: BackgroundProcess[]): BackgroundProcess
   );
 }
 
+export function markProcessKilled(
+  processes: BackgroundProcess[],
+  pid: number,
+): void {
+  const process = processes.find((item) => item.pid === pid);
+  if (!process) return;
+  process.status = 'error';
+  process.exitCode = -1;
+  process.endTime = Date.now();
+}
+
 export function formatElapsedTime(elapsedMs: number): string {
   const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
   if (seconds < 60) return `${seconds}秒`;

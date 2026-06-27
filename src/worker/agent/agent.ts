@@ -363,6 +363,10 @@ export class Agent {
         this.emitStatus('executing');
         this.onToolStart(toolCall);
       },
+      onTurnStart: (turnCount, maxTurns) => {
+        this.turnCount = turnCount;
+        this.emitStatus('thinking');
+      },
       onToolEnd: (result) => {
         this.onToolEnd(result);
       },
@@ -470,6 +474,10 @@ export class Agent {
       onToolStart: (toolCall: ToolCallContent) => {
         this.emitStatus('executing');
         this.onToolStart(toolCall);
+      },
+      onTurnStart: (turnCount: number, _maxTurns: number) => {
+        this.turnCount = turnCount;
+        this.emitStatus('thinking');
       },
       onToolEnd: (result: ToolResult) => {
         this.onToolEnd(result);

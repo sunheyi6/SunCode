@@ -6,6 +6,7 @@ import { parentPort } from 'node:worker_threads';
 import { DEFAULT_SETTINGS } from '@shared/constants';
 import type { AppSettings, WorkerInMessage, WorkerOutMessage } from '@shared/types';
 import { Agent } from './agent/agent';
+import { killProcessTree } from './tools/bash';
 
 if (!parentPort) {
   throw new Error('Agent worker must be run as a Worker thread');
@@ -161,6 +162,18 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
         pendingConfirmations.delete(msg.toolCallId);
         pending.resolve(msg.confirmed);
       }
+      break;
+    }
+
+    case 'killBgProcess': {
+      console.log('[Worker] Killing background process:', msg.pid);
+      try {
+        killProcessTree(msg.pid);
+      } catch (err) {
+        console.error('[Worker] Failed to kill process:', (err as Error).message);
+      }
+      // Notify renderer that the process was terminated externally
+      post({ type: 'bgProcessCompleted', pid: msg.pid, exitCode: -1 });
       break;
     }
 

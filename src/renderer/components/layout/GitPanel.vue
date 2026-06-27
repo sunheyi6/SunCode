@@ -5,7 +5,7 @@ import { useSessionsStore } from '../../stores/sessions';
 import { useChatStore } from '../../stores/chat';
 import { bridge } from '../../api/bridge';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
-import { formatElapsedTime, latestProcess } from '../../composables/background-process-state';
+import { formatElapsedTime, markProcessKilled } from '../../composables/background-process-state';
 
 const sessionsStore = useSessionsStore();
 const chatStore = useChatStore();
@@ -33,10 +33,30 @@ const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
 
-const latest = computed(() => latestProcess([...processes.value]));
+const sortedProcesses = computed(() =>
+  [...processes.value].sort((a, b) => {
+    // Running processes first, then by recency
+    if (a.status === 'running' && b.status !== 'running') return -1;
+    if (a.status !== 'running' && b.status === 'running') return 1;
+    return b.startTime - a.startTime;
+  }),
+);
 const runningCount = computed(
   () => processes.value.filter((process) => process.status === 'running').length,
 );
+
+function formatProcessTime(proc: { status: string; startTime: number; endTime?: number }): string {
+  if (proc.status === 'running') {
+    return formatElapsedTime(now.value - proc.startTime);
+  }
+  if (proc.status === 'completed') return '已完成';
+  return '已停止';
+}
+
+function stopProcess(pid: number): void {
+  markProcessKilled(processes.value, pid);
+  bridge.killBgProcess(pid);
+}
 const hasChanges = computed(
   () => gitStatus.value.changedFiles > 0 || gitStatus.value.stagedFiles > 0,
 );
@@ -93,10 +113,9 @@ watch(hasPlan, (val) => {
   }
 });
 const elapsedText = computed(() => {
-  const process = latest.value;
-  if (!process) return '未运行';
-  const end = process.endTime ?? now.value;
-  return formatElapsedTime(end - process.startTime);
+  const running = sortedProcesses.value.find((p) => p.status === 'running');
+  if (!running) return '未运行';
+  return formatElapsedTime(now.value - running.startTime);
 });
 
 async function refreshGit(): Promise<void> {
@@ -355,25 +374,36 @@ watch(collapsed, (isCollapsed) => {
       <!-- ═══ Process Section ═══ -->
       <section class="process-section">
         <div class="section-heading">
-          <span>进程</span><span>{{ latest ? '1/1' : '0/0' }}</span>
+          <span>进程</span><span>{{ runningCount }}/{{ processes.length }}</span>
         </div>
-        <div v-if="latest" class="process-command" :title="latest.command">
-          <span :class="['status-mark', latest.status]">
-            {{ latest.status === 'running' ? '●' : latest.status === 'completed' ? '✓' : '×' }}
-          </span>
-          <span class="command-text">{{ latest.command }}</span>
+        <div v-if="processes.length > 0" class="process-list">
+          <div
+            v-for="proc in sortedProcesses"
+            :key="proc.pid"
+            class="process-row"
+            :title="proc.command"
+          >
+            <span :class="['status-dot', proc.status]">
+              {{ proc.status === 'running' ? '●' : proc.status === 'completed' ? '✓' : '×' }}
+            </span>
+            <span class="process-command-text">{{ proc.command }}</span>
+            <span class="process-time">{{ formatProcessTime(proc) }}</span>
+            <button
+              v-if="proc.status === 'running'"
+              class="process-kill-btn"
+              title="停止进程"
+              @click.stop="stopProcess(proc.pid)"
+            >■</button>
+          </div>
         </div>
         <div v-else class="empty-process">暂无运行进程</div>
       </section>
 
       <div class="section-divider" />
       <footer class="runtime-row">
-        <span>{{ latest?.status === 'running' ? '运行中' : '运行状态' }}</span>
+        <span>{{ runningCount > 0 ? '运行中' : '运行状态' }}</span>
         <span>
           {{ elapsedText }} · {{ runningCount }} 后台
-          <template v-if="latest?.status === 'error' && latest.exitCode !== undefined">
-            · 退出码 {{ latest.exitCode }}
-          </template>
         </span>
       </footer>
     </section>
@@ -437,13 +467,68 @@ watch(collapsed, (isCollapsed) => {
 
 .added { color: var(--color-green); }
 .deleted { color: var(--color-red); }
-.process-command,
-.empty-process,
-.process-section { min-width: 0; }
-.command-text {
+
+/* ── Process list ── */
+.process-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 0;
+}
+.process-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.process-command-text {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.process-time {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.status-dot {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 10px;
+}
+.status-dot.running { color: var(--color-accent); }
+.status-dot.completed { color: var(--color-green); }
+.status-dot.error { color: var(--color-red); }
+.process-kill-btn {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--color-red);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-red);
+  font-size: 9px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.process-kill-btn:hover {
+  background: var(--color-red);
+  color: #fff;
+}
+.empty-process {
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .git-pill:hover,
@@ -453,8 +538,7 @@ watch(collapsed, (isCollapsed) => {
   color: var(--color-text);
 }
 
-.pill-branch,
-.command-text {
+.pill-branch {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -521,21 +605,7 @@ watch(collapsed, (isCollapsed) => {
   font-size: 12px;
 }
 
-.process-command {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-text-secondary);
-}
-
-.status-mark.running { color: var(--color-accent); }
-.status-mark.completed { color: var(--color-green); }
-.status-mark.error { color: var(--color-red); }
-
-.empty-process {
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
+.process-section { min-width: 0; }
 
 .runtime-row {
   gap: 16px;

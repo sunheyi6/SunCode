@@ -88,6 +88,7 @@ declare global {
       // Background Processes
       onBgProcessStarted(callback: (proc: BackgroundProcess) => void): () => void;
       onBgProcessCompleted(callback: (pid: number, exitCode: number) => void): () => void;
+      killBgProcess(pid: number): void;
 
       // Window
       setTitleBarOverlayText(text: string): void;

@@ -302,6 +302,15 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
+  // Kill background process from renderer → worker
+  ipcMain.on('agent:kill-bg-process', (_event, pid: number) => {
+    try {
+      sendToWorker({ type: 'killBgProcess', pid });
+    } catch (err) {
+      console.error('[Main] agent:kill-bg-process failed:', (err as Error).message);
+    }
+  });
+
   // File tree
   ipcMain.handle('fs:getFileTree', async (_event, rootPath?: string) => {
     const dir = rootPath || process.cwd();
