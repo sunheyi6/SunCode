@@ -9,6 +9,7 @@ import { createLsTool } from './ls';
 import { createFindTool } from './find';
 import { createWebFetchTool } from './web-fetch';
 import { createWebSearchTool } from './web-search';
+import { createSearchLessonsTool } from './search-lessons';
 import type { AppSettings } from '@shared/types';
 
 /**
@@ -94,6 +95,7 @@ export function createToolRegistry(
   registry.register(createFindTool(workingDir));
   registry.register(createWebFetchTool(workingDir));
   registry.register(createWebSearchTool(settings));
+  registry.register(createSearchLessonsTool(workingDir));
 
   return registry;
 }
