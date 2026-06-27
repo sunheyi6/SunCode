@@ -610,6 +610,10 @@ export function registerIpcHandlers(wm: WindowManager): void {
     if (result) console.error('[Main] shell:openPath failed:', result, targetPath);
   });
 
+  ipcMain.handle('shell:showItemInFolder', async (_event, fullPath: string) => {
+    shell.showItemInFolder(fullPath);
+  });
+
   // Window title bar overlay text
   ipcMain.on('window:setTitleBarOverlayText', (_event, text: string) => {
     const mainWindow = windowManager.getMainWindow();

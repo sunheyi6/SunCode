@@ -319,6 +319,11 @@ const suncodeAPI = {
     return ipcRenderer.invoke('shell:openPath', targetPath);
   },
 
+  /** Show a file in the system file explorer (opens folder and selects file) */
+  showItemInFolder(fullPath: string): void {
+    ipcRenderer.invoke('shell:showItemInFolder', fullPath);
+  },
+
   /** Listen for run lifecycle events (for call trace panel). */
   onRunEvent(callback: (data: { sessionId: string; event: RunEvent }) => void): () => void {
     const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; event: RunEvent }): void =>

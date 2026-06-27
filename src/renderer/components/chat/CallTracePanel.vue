@@ -23,14 +23,14 @@ defineEmits<{
   close: [];
 }>();
 
-const traceDirPath = computed(() => {
-  if (!props.workingDir) return '';
-  return `${props.workingDir}/.suncode/sessions`.replace(/\\/g, '/');
+const traceFilePath = computed(() => {
+  if (!props.workingDir || !props.sessionId) return '';
+  return `${props.workingDir}/.suncode/sessions/${props.sessionId}.json`.replace(/\\/g, '/');
 });
 
-async function openTraceDir(): Promise<void> {
-  if (!traceDirPath.value) return;
-  await bridge.openPath(traceDirPath.value);
+function openTraceFolder(): void {
+  if (!traceFilePath.value) return;
+  bridge.showItemInFolder(traceFilePath.value);
 }
 
 // ── Identity-tagged timeline entry ──
@@ -161,12 +161,22 @@ function toolSummary(tc: ToolCallContent): string {
   <aside class="call-trace-panel">
     <div class="trace-header">
       <span class="trace-title">调用轨迹</span>
-      <button class="trace-close" @click="$emit('close')" title="关闭">×</button>
+      <div class="trace-header-actions">
+        <button
+          v-if="traceFilePath"
+          class="trace-folder-btn"
+          title="在文件管理器中显示"
+          @click="openTraceFolder"
+        >
+          📂
+        </button>
+        <button class="trace-close" @click="$emit('close')" title="关闭">×</button>
+      </div>
     </div>
 
-    <div v-if="traceDirPath" class="trace-path-bar" @click="openTraceDir" title="点击打开所在文件夹">
-      <span class="trace-path-label">Trace</span>
-      <span class="trace-path-value">{{ traceDirPath }}</span>
+    <div v-if="traceFilePath" class="trace-path-bar">
+      <span class="trace-path-label">当前会话文件</span>
+      <span class="trace-path-value">{{ traceFilePath }}</span>
     </div>
 
     <div class="trace-body">
@@ -311,16 +321,29 @@ function toolSummary(tc: ToolCallContent): string {
 
 .trace-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 12px; height: 38px; min-height: 38px;
+  padding: 0 8px 0 12px; height: 38px; min-height: 38px;
   border-bottom: 1px solid var(--border-color);
   background: var(--color-bg-secondary); flex-shrink: 0;
 }
 
 .trace-title { font-size: 13px; font-weight: 600; color: var(--color-text); }
 
+.trace-header-actions {
+  display: flex; align-items: center; gap: 2px;
+}
+
+.trace-folder-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border: none; border-radius: 4px;
+  background: transparent; color: var(--color-text-muted);
+  cursor: pointer; font-size: 15px;
+}
+.trace-folder-btn:hover { background: var(--color-surface-hover); color: var(--color-accent); }
+
 .trace-close {
   display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px;
+  width: 28px; height: 28px;
   border: none; border-radius: 4px;
   background: transparent; color: var(--color-text-muted);
   cursor: pointer; font-size: 14px;
@@ -329,13 +352,10 @@ function toolSummary(tc: ToolCallContent): string {
 
 .trace-path-bar {
   display: flex; align-items: center; gap: 8px;
-  padding: 4px 12px; min-height: 28px; flex-shrink: 0;
+  padding: 4px 12px; min-height: 26px; flex-shrink: 0;
   border-bottom: 1px solid var(--border-color);
   background: var(--color-bg-tertiary);
-  cursor: pointer;
-  transition: background 0.12s;
 }
-.trace-path-bar:hover { background: var(--color-surface-hover); }
 
 .trace-path-label {
   font-size: 10px; font-weight: 600; color: var(--color-text-muted);

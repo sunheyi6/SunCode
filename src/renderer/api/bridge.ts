@@ -174,6 +174,10 @@ export const bridge = {
     return api().openPath(targetPath);
   },
 
+  showItemInFolder(fullPath: string): void {
+    api().showItemInFolder(fullPath);
+  },
+
   async getTokenUsage(): Promise<TokenUsageSummary> {
     return api().getTokenUsage();
   },
