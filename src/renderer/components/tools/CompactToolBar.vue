@@ -7,52 +7,42 @@ const props = defineProps<{
   calls: ToolCallContent[];
 }>();
 
-// ── Categorize ──
-
+// -- Categories --
 const inspectCalls = computed(() =>
   props.calls.filter((c) => c.name === 'read' || c.name === 'glob' || c.name === 'grep'),
 );
-
 const editCalls = computed(() =>
   props.calls.filter((c) => c.name === 'edit' || c.name === 'write'),
 );
-
 const bashCalls = computed(() =>
   props.calls.filter((c) => c.name === 'bash'),
 );
-
 const subagentCalls = computed(() =>
   props.calls.filter((c) => c.name === 'subagent'),
 );
-
 const otherCalls = computed(() =>
   props.calls.filter(
-    (c) =>
-      !['read', 'glob', 'grep', 'edit', 'write', 'bash', 'subagent'].includes(c.name),
+    (c) => !['read', 'glob', 'grep', 'edit', 'write', 'bash', 'subagent'].includes(c.name),
   ),
 );
 
-// ── File inspect merged line ──
-
-/** The label for the merged inspect line ("读取" / "查找" / "搜索"). */
+// -- Inspect merge --
 const inspectLabel = computed(() => {
   const names = new Set(inspectCalls.value.map((c) => c.name));
   if (names.size === 1) {
-    const name = inspectCalls.value[0]?.name;
-    if (name === 'read') return '读取';
-    if (name === 'glob') return '查找';
-    if (name === 'grep') return '搜索';
+    const n = inspectCalls.value[0]?.name;
+    if (n === 'read') return '读取';
+    if (n === 'glob') return '查找';
+    if (n === 'grep') return '搜索';
   }
   return '查看';
 });
 
-/** Comma-separated file targets, latest first. */
 const inspectTarget = computed(() => {
   const files = inspectCalls.value.map((c) => {
     const args = parseToolArguments(c.arguments);
     return (args.file_path as string) || (args.pattern as string) || '';
   });
-  // Show latest file first, truncate each
   const latest = files.slice(-3).reverse();
   return latest.map((f) => f.split('/').pop() || f.split('\\').pop() || f).join(', ');
 });
@@ -67,8 +57,7 @@ const inspectStatus = computed(() => {
   return `${inspectCalls.value.length} 完成`;
 });
 
-// ── Per-call helpers ──
-
+// -- Per-call helpers --
 function callTarget(call: ToolCallContent): string {
   const args = parseToolArguments(call.arguments);
   const fp = (args.file_path as string) || '';
@@ -76,7 +65,6 @@ function callTarget(call: ToolCallContent): string {
     const short = fp.split('/').pop() || fp.split('\\').pop() || fp;
     return short;
   }
-  // For bash, show the command
   const cmd = (args.command as string) || (args.description as string) || '';
   return cmd.length > 50 ? `${cmd.slice(0, 47)}...` : cmd;
 }
@@ -89,150 +77,123 @@ function callLabel(name: string): string {
   return name;
 }
 
-function callIcon(name: string): string {
-  if (name === 'edit' || name === 'write') return '✏️';
-  if (name === 'bash') return '🔧';
-  if (name === 'subagent') return '🤖';
-  return '🔹';
-}
-
-function callStatusText(call: ToolCallContent): string {
-  if (call.status === 'running') return '执行中...';
-  if (call.status === 'error' || call.result?.success === false) return '失败';
-  return '完成';
-}
-
 function callStatusClass(call: ToolCallContent): string {
   if (call.status === 'running') return 'status-running';
   if (call.status === 'error' || call.result?.success === false) return 'status-failed';
   return 'status-done';
 }
+
+function resultPreview(call: ToolCallContent): string | null {
+  if (!call.result || call.status === 'running') return null;
+  // Bash: show stdout tail
+  if (call.name === 'bash' && call.result.details?.type === 'command') {
+    const d = call.result.details;
+    if (d.stdout) {
+      const lines = d.stdout.trim().split('\n');
+      const tail = lines.slice(-3).join('\n');
+      return tail.length > 200 ? tail.slice(0, 200) + '...' : tail;
+    }
+    if (d.stderr) return `stderr: ${d.stderr.slice(0, 100)}`;
+    return `exit=${d.exitCode ?? '?'}`;
+  }
+  // Read/grep: show output tail
+  if ((call.name === 'read' || call.name === 'grep' || call.name === 'glob') && call.result.output) {
+    const out = call.result.output;
+    return out.length > 200 ? out.slice(0, 200) + '...' : out;
+  }
+  // Error fallback
+  if (call.result.error) return call.result.error.slice(0, 120);
+  return null;
+}
 </script>
 
 <template>
   <div class="compact-tool-bar">
-    <!-- Merged file inspect line -->
+    <!-- File inspect (merged) -->
     <div v-if="inspectCalls.length > 0" class="compact-line inspect-line">
-      <span class="compact-icon">📖</span>
+      <span class="compact-icon">$</span>
       <span class="compact-label">{{ inspectLabel }}</span>
       <span class="compact-target">{{ inspectTarget }}</span>
       <span class="compact-status">{{ inspectStatus }}</span>
     </div>
 
-    <!-- Edit tools (each gets a line) -->
-    <div
-      v-for="call in editCalls"
-      :key="call.id"
-      class="compact-line"
-      :class="callStatusClass(call)"
-    >
-      <span class="compact-icon">{{ callIcon(call.name) }}</span>
-      <span class="compact-label">{{ callLabel(call.name) }}</span>
-      <span class="compact-target">{{ callTarget(call) }}</span>
-      <span class="compact-status">{{ callStatusText(call) }}</span>
+    <!-- Bash (each gets a line + output preview) -->
+    <div v-for="call in bashCalls" :key="call.id">
+      <div class="compact-line" :class="callStatusClass(call)">
+        <span class="compact-icon">&gt;</span>
+        <span class="compact-label">{{ callLabel(call.name) }}</span>
+        <span class="compact-target">{{ callTarget(call) }}</span>
+        <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
+      </div>
+      <pre v-if="resultPreview(call)" class="compact-output">{{ resultPreview(call) }}</pre>
     </div>
 
-    <!-- Bash (each gets a line) -->
-    <div
-      v-for="call in bashCalls"
-      :key="call.id"
-      class="compact-line"
-      :class="callStatusClass(call)"
-    >
-      <span class="compact-icon">🔧</span>
-      <span class="compact-label">{{ callLabel(call.name) }}</span>
-      <span class="compact-target">{{ callTarget(call) }}</span>
-      <span class="compact-status">{{ callStatusText(call) }}</span>
+    <!-- Edit/Write (each gets a line + diff summary) -->
+    <div v-for="call in editCalls" :key="call.id">
+      <div class="compact-line" :class="callStatusClass(call)">
+        <span class="compact-icon">+</span>
+        <span class="compact-label">{{ callLabel(call.name) }}</span>
+        <span class="compact-target">{{ callTarget(call) }}</span>
+        <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
+      </div>
+      <div v-if="call.result?.details?.type === 'file_edit' && call.result.details.status === 'edited'" class="compact-diff-summary">
+        <span v-if="call.result.details.addedLines" class="diff-added">+{{ call.result.details.addedLines }}</span>
+        <span v-if="call.result.details.removedLines" class="diff-removed">-{{ call.result.details.removedLines }}</span>
+      </div>
     </div>
 
     <!-- Subagent -->
-    <div
-      v-for="call in subagentCalls"
-      :key="call.id"
-      class="compact-line"
-      :class="callStatusClass(call)"
-    >
-      <span class="compact-icon">🤖</span>
+    <div v-for="call in subagentCalls" :key="call.id" class="compact-line" :class="callStatusClass(call)">
+      <span class="compact-icon">@</span>
       <span class="compact-label">{{ callLabel(call.name) }}</span>
       <span class="compact-target">{{ callTarget(call) }}</span>
-      <span class="compact-status">{{ callStatusText(call) }}</span>
+      <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
     </div>
 
-    <!-- Other tools -->
-    <div
-      v-for="call in otherCalls"
-      :key="call.id"
-      class="compact-line"
-      :class="callStatusClass(call)"
-    >
-      <span class="compact-icon">🔹</span>
+    <!-- Other -->
+    <div v-for="call in otherCalls" :key="call.id" class="compact-line" :class="callStatusClass(call)">
+      <span class="compact-icon">*</span>
       <span class="compact-label">{{ call.name }}</span>
-      <span class="compact-status">{{ callStatusText(call) }}</span>
+      <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
     </div>
   </div>
 </template>
 
 <style scoped>
-.compact-tool-bar {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
+.compact-tool-bar { display: flex; flex-direction: column; gap: 1px; }
 
 .compact-line {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  font-size: 11px;
-  border-radius: 3px;
-  line-height: 1.4;
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 6px; font-size: 11px;
+  border-radius: 3px; line-height: 1.4;
 }
+.compact-line.status-running { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.compact-line.status-failed  { color: var(--color-red); }
 
-.compact-line.status-running {
-  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-}
+.compact-icon   { flex-shrink: 0; font-size: 11px; }
+.compact-label  { flex-shrink: 0; font-size: 10px; padding: 0 4px; border-radius: 2px; background: var(--color-surface); color: var(--color-text-muted); }
+.compact-target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-family: var(--font-mono); font-size: 10px; color: var(--color-text-secondary); }
+.compact-status { flex-shrink: 0; font-size: 10px; color: var(--color-text-muted); }
+.status-running .compact-status { color: var(--color-accent); }
+.status-failed  .compact-status { color: var(--color-red); }
 
-.compact-line.status-failed {
-  color: var(--color-red);
-}
-
-.compact-icon {
-  flex-shrink: 0;
-  font-size: 11px;
-}
-
-.compact-label {
-  flex-shrink: 0;
-  font-size: 10px;
-  padding: 0 4px;
-  border-radius: 2px;
-  background: var(--color-surface);
+/* Output preview for completed bash commands */
+.compact-output {
+  margin: 0 0 1px 20px; padding: 3px 6px;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.3;
   color: var(--color-text-muted);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 80px; overflow-y: auto;
+  background: var(--color-bg); border-radius: 2px;
+  border-left: 2px solid var(--border-color);
 }
 
-.compact-target {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--color-text-secondary);
+/* Diff summary for file edits */
+.compact-diff-summary {
+  margin: 0 0 1px 20px; padding: 1px 6px;
+  font-family: var(--font-mono); font-size: 10px;
+  display: flex; gap: 8px;
 }
-
-.compact-status {
-  flex-shrink: 0;
-  font-size: 10px;
-  color: var(--color-text-muted);
-}
-
-.status-running .compact-status {
-  color: var(--color-accent);
-}
-
-.status-failed .compact-status {
-  color: var(--color-red);
-}
+.diff-added   { color: var(--color-green); }
+.diff-removed { color: var(--color-red); }
 </style>

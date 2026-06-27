@@ -5,6 +5,7 @@ import type {
   BackgroundProcess,
   GitInfo,
   GoalEvent,
+  RunEvent,
   StreamEvent,
   AgentStatus,
   Message,
@@ -98,13 +99,16 @@ declare global {
       onGoalEvent(callback: (event: GoalEvent) => void): () => void;
 
       // Permission confirmation
-      onConfirmRequest(callback: (request: { toolCallId: string; toolName: string; description: string }) => void): () => void;
+      onConfirmRequest(
+        callback: (request: { toolCallId: string; toolName: string; description: string }) => void,
+      ): () => void;
       respondConfirm(toolCallId: string, confirmed: boolean): void;
 
       // Session updates (e.g. AI-generated title)
       onSessionUpdated(callback: (meta: SessionMeta) => void): () => void;
+
+      // Run lifecycle events (for call trace panel)
+      onRunEvent(callback: (event: RunEvent) => void): () => void;
     };
   }
 }
-
-export {};

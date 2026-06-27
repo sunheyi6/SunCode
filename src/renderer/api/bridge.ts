@@ -6,6 +6,7 @@ import type {
   BackgroundProcess,
   GitInfo,
   GoalEvent,
+  RunEvent,
   StreamEvent,
   AgentStatus,
   Message,
@@ -200,6 +201,10 @@ export const bridge = {
     callback: (request: { toolCallId: string; toolName: string; description: string }) => void,
   ): () => void {
     return api().onConfirmRequest(callback);
+  },
+
+  onRunEvent(callback: (event: RunEvent) => void): () => void {
+    return api().onRunEvent(callback);
   },
 
   respondConfirm(toolCallId: string, confirmed: boolean): void {

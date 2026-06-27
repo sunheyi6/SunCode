@@ -22,10 +22,10 @@ export function createLsTool(workingDir: string) {
       const recursive = params.recursive === true;
       const limit = (params.limit as number) || 100;
 
-      const absPath = isAbsolute(dirPath) ? dirPath : resolve(workingDir, dirPath);
+      const absPath = normalizePath(isAbsolute(dirPath) ? dirPath : resolve(workingDir, dirPath));
+      const workRoot = normalizePath(resolve(workingDir));
 
       // Security: prevent listing outside working directory
-      const workRoot = resolve(workingDir);
       if (!absPath.startsWith(workRoot)) {
         return this.failure(`Cannot list directory outside working directory: ${absPath}`);
       }
@@ -132,4 +132,9 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/** Normalize path separators to forward slashes for consistent comparison. */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/');
 }

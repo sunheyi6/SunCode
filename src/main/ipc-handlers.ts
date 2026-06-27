@@ -130,6 +130,8 @@ function getAgentWorker(): Worker {
             await startRun(sid, evt.runId);
           }
           await appendEvent(sid, evt.runId, evt);
+          // Forward to renderer for call trace panel
+          mainWindow.webContents.send('agent:run-event', evt);
           break;
         }
         case 'subagentStart':
@@ -451,9 +453,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       // This prevents user messages from being routed to a stale promptSessionId
       // when the user switches sessions and sends a new message.
       const targetSession =
-        message.role === 'user'
-          ? currentSessionId
-          : promptSessionId || currentSessionId;
+        message.role === 'user' ? currentSessionId : promptSessionId || currentSessionId;
       if (!targetSession) {
         console.log('[Main] saveMessage: SKIP (no session)');
         return;
@@ -923,10 +923,7 @@ function extractTitle(message: Message): string | null {
  * Generate a session title using AI via the configured model.
  * Runs asynchronously and updates the session name when complete.
  */
-async function generateTitleWithAI(
-  targetSession: string,
-  userMessage: Message,
-): Promise<void> {
+async function generateTitleWithAI(targetSession: string, userMessage: Message): Promise<void> {
   const text = extractText(userMessage);
   if (!text) return;
 
@@ -942,10 +939,10 @@ async function generateTitleWithAI(
 
     const pi = await import('@earendil-works/pi-ai');
     const model = (pi as unknown as Record<string, unknown>).getModel
-      ? ((pi as unknown as { getModel: (p: string, m: string) => unknown }).getModel(
+      ? (pi as unknown as { getModel: (p: string, m: string) => unknown }).getModel(
           provider,
           modelId,
-        ))
+        )
       : null;
 
     if (!model) {
@@ -1013,7 +1010,10 @@ async function generateTitleWithAI(
     }
 
     // Clean up: remove markdown, quotes, trailing punctuation
-    title = title.replace(/^["']|["']$/g, '').replace(/[.。,，!！?？;；:：]+$/, '').trim();
+    title = title
+      .replace(/^["']|["']$/g, '')
+      .replace(/[.。,，!！?？;；:：]+$/, '')
+      .trim();
     const maxLen = 50;
     if (title.length > maxLen) {
       title = title.slice(0, maxLen).replace(/\s+\S*$/, '');

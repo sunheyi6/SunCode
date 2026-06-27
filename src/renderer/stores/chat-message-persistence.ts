@@ -1,10 +1,11 @@
-import type { Message, ToolCallContent } from '@shared/types';
+import type { Message, ToolCallContent, TurnDetail } from '@shared/types';
 
 interface PersistedAssistantInput {
   visibleContent: string;
   thinking?: string;
   toolCalls?: ToolCallContent[];
   systemPrompt?: string;
+  turnDetails?: TurnDetail[];
   finalMessage?: Message;
 }
 
@@ -29,6 +30,7 @@ export function buildPersistedAssistantMessage(input: PersistedAssistantInput): 
     })),
     // Persist system prompt so call trace panel works across session switches
     systemPrompt: input.systemPrompt,
+    ...(input.turnDetails ? { turnDetails: input.turnDetails } : {}),
   };
 
   // Deep-clone to strip Vue reactivity proxies before IPC.

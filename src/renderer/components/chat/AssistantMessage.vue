@@ -5,38 +5,20 @@ import CompactToolBar from '../tools/CompactToolBar.vue';
 import ToolOperationList from '../tools/ToolOperationList.vue';
 import StreamingText from './StreamingText.vue';
 
-// Note: The "调用轨迹" toggle has moved to ChatHeader (global right-side panel).
-// CompactToolBar remains here as the default collapsed view of tool calls during streaming.
-
 const props = defineProps<{
   message: ChatMessage;
 }>();
 
 const hasContent = computed(() => props.message.content.length > 0);
-const hasThinking = computed(() => props.message.isStreaming || Boolean(props.message.thinking));
-
-/**
- * Auto-expand the thinking section when the visible text answer is very short
- * relative to the thinking content. Reasoning models often put the real answer
- * inside thinking and leave only a token sentence as text — without expansion
- * the user can't find the actual results.
- */
-const isFinalMessage = computed(() => (props.message.toolCalls?.length ?? 0) === 0);
-
-const autoExpandThinking = computed(() => {
-  if (props.message.isStreaming) return false; // Already inline during streaming
-  // Only auto-expand the FINAL message (no tool calls) — intermediate turns
-  // with tool calls should stay collapsed to avoid showing raw reasoning chains
-  if (!isFinalMessage.value) return false;
-  const textLen = props.message.content.length;
-  const thinkingLen = props.message.thinking?.length ?? 0;
-  // Auto-expand when text is empty or trivially short, and thinking is substantial
-  return thinkingLen > 200 && textLen < 120;
-});
+const hasThinking = computed(() =>
+  props.message.isStreaming ||
+  Boolean(props.message.thinking) ||
+  (props.message.toolCalls?.length ?? 0) > 0
+);
 
 const copied = ref(false);
 
-// ── Elapsed time tracking ──
+// -- elapsed time --
 const elapsedSeconds = ref(0);
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -49,35 +31,17 @@ function startElapsedTimer(): void {
 }
 
 function stopElapsedTimer(): void {
-  if (elapsedTimer) {
-    clearInterval(elapsedTimer);
-    elapsedTimer = null;
-  }
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
 }
 
-watch(
-  () => props.message.isStreaming,
-  (streaming) => {
-    if (streaming) {
-      startElapsedTimer();
-    } else {
-      // Final snapshot when streaming ends
-      elapsedSeconds.value = Math.round((Date.now() - props.message.timestamp) / 1000);
-      stopElapsedTimer();
-    }
-  },
-  { immediate: true },
-);
+watch(() => props.message.isStreaming, (streaming) => {
+  if (streaming) startElapsedTimer();
+  else { elapsedSeconds.value = Math.round((Date.now() - props.message.timestamp) / 1000); stopElapsedTimer(); }
+}, { immediate: true });
 
-onMounted(() => {
-  if (props.message.isStreaming) startElapsedTimer();
-});
+onMounted(() => { if (props.message.isStreaming) startElapsedTimer(); });
+onBeforeUnmount(() => { stopElapsedTimer(); });
 
-onBeforeUnmount(() => {
-  stopElapsedTimer();
-});
-
-/** Format elapsed seconds as a human-readable string. */
 const formattedElapsed = computed(() => {
   const s = elapsedSeconds.value;
   if (s < 60) return `${s}s`;
@@ -85,7 +49,6 @@ const formattedElapsed = computed(() => {
   const remain = s % 60;
   return remain > 0 ? `${m}m${remain}s` : `${m}m`;
 });
-
 
 const timeLabel = computed(() => {
   const d = new Date(props.message.timestamp);
@@ -96,116 +59,43 @@ const timeLabel = computed(() => {
 
 const fullTextForCopy = computed(() => {
   const parts: string[] = [];
-  if (props.message.thinking) {
-    parts.push(props.message.thinking);
-  }
-  if (props.message.content) {
-    parts.push(props.message.content);
-  }
+  if (props.message.thinking) parts.push(props.message.thinking);
+  if (props.message.content) parts.push(props.message.content);
   return parts.join('\n\n');
 });
 
-/** Interleaved timeline of thinking text and tool calls in arrival order. */
-const thinkingTimeline = computed(() => {
-  const thinking = props.message.thinking || '';
-  const calls = props.message.toolCalls ?? [];
-  type Entry =
-    | { type: 'thinking'; text: string }
-    | { type: 'tool'; calls: [(typeof calls)[number]] };
-
-  if (calls.length === 0) {
-    return thinking ? [{ type: 'thinking' as const, text: thinking }] : [];
-  }
-
-  // Sort by thinkingOffset so chunks appear in the order the model produced them
-  const sorted = [...calls].sort((a, b) => (a.thinkingOffset ?? 0) - (b.thinkingOffset ?? 0));
-
-  const timeline: Entry[] = [];
-  let prevEnd = 0;
-
-  for (const tc of sorted) {
-    const start = tc.thinkingOffset ?? 0;
-    // Thinking text before this tool call
-    if (start > prevEnd) {
-      timeline.push({ type: 'thinking', text: thinking.slice(prevEnd, start) });
-    } else if (start < prevEnd) {
-      // Tool call appeared "before" previous thinking ended (overlapping offsets).
-      // Just emit the tool at this position.
-    }
-    timeline.push({ type: 'tool', calls: [tc] });
-    prevEnd = start;
-  }
-
-  // Remaining thinking text after the last tool call
-  if (prevEnd < thinking.length) {
-    timeline.push({ type: 'thinking', text: thinking.slice(prevEnd) });
-  }
-
-  return timeline;
-});
-
-/** Rich summary line for the thinking section.
- *
- *  Design intent:
- *  - Live streaming: show what's happening NOW (tool name, completion count) + elapsed time.
- *    We intentionally omit the raw agent-level turn counter here — it's an internal metric
- *    that reads as "X rounds of thinking" to users, when it's really "X API calls to get
- *    the job done." Each tool call triggers another LLM round, so a 5-tool task shows "第6轮"
- *    and feels like the AI is struggling, not efficiently working.
- *  - Collapsed (done): show request count + elapsed + tool list. The request count gives
- *    the user a sense of how much work was done without the "still going?" anxiety of the
- *    live counter. */
 const thinkingSummary = computed(() => {
   const calls = props.message.toolCalls ?? [];
   const running = calls.find((t) => t.status === 'running');
   const done = calls.filter((t) => t.status === 'done' || t.status === 'error').length;
-  const hasAnyDone = done > 0;
-  const hasThinkingText = Boolean(props.message.thinking);
-  const timeLabel = `⏱ ${formattedElapsed.value}`;
+  const time = formattedElapsed.value;
 
-  // --- Streaming / working ---
   if (props.message.isStreaming) {
-    // A tool is currently executing — show what's running
     if (running) {
       const shortArgs = running.arguments ? running.arguments.slice(0, 50) : '';
-      return `🧠 ${running.name}${shortArgs ? ` ${shortArgs}` : ''}... ${timeLabel}`;
+      return `[${running.name}] ${shortArgs}  ${time}`;
     }
-    // Tools have completed, waiting for next round of thinking — show completion progress
-    if (hasAnyDone) {
-      return `🧠 分析结果 · ${done}/${calls.length} 完成 ${timeLabel}`;
-    }
-    // Pure thinking / waiting for first tool
-    if (hasThinkingText) return `🧠 正在思考... ${timeLabel}`;
-    return `🧠 等待模型响应... ${timeLabel}`;
+    if (done > 0) return `[工具] ${done}/${calls.length} 完成  ${time}`;
+    return `[等待响应] ${time}`;
   }
 
-  // --- Collapsed (done) ---
-  const parts: string[] = ['🧠 思考过程'];
+  const parts: string[] = ['思考过程'];
   const turn = props.message.turnCount ?? 0;
-  if (turn > 0) {
-    parts.push(`${turn}次请求`);
-  }
-  if (elapsedSeconds.value > 0) {
-    parts.push(timeLabel);
-  }
+  if (turn > 0) parts.push(`${turn}次请求`);
+  if (elapsedSeconds.value > 0) parts.push(time);
   if (calls.length > 0) {
-    const names = calls
-      .slice(0, 3)
-      .map((t) => t.name)
-      .join(', ');
-    const more = calls.length > 3 ? ` 等${calls.length}项` : '';
-    parts.push(`· ${names}${more}`);
+    const names = calls.slice(0, 3).map((t) => t.name).join(', ');
+    const more = calls.length > 3 ? ` +${calls.length - 3}` : '';
+    parts.push(names + more);
   }
-  return parts.join(' · ');
+  return parts.join('  ');
 });
 
 async function copyContent() {
   try {
     await navigator.clipboard.writeText(fullTextForCopy.value);
     copied.value = true;
-    setTimeout(() => {
-      copied.value = false;
-    }, 1500);
+    setTimeout(() => { copied.value = false; }, 1500);
   } catch {
     const textarea = document.createElement('textarea');
     textarea.value = fullTextForCopy.value;
@@ -216,9 +106,7 @@ async function copyContent() {
     document.execCommand('copy');
     document.body.removeChild(textarea);
     copied.value = true;
-    setTimeout(() => {
-      copied.value = false;
-    }, 1500);
+    setTimeout(() => { copied.value = false; }, 1500);
   }
 }
 </script>
@@ -226,63 +114,44 @@ async function copyContent() {
 <template>
   <div class="assistant-message">
     <div class="message-body">
-      <!-- 流式进行中：只显示关键步骤（工具折叠 + 文件读取合并） -->
-      <!-- 完整调用轨迹见右侧 CallTracePanel（顶部 📋 按钮打开） -->
+      <!-- Streaming: compact tool bar with live status -->
       <div v-if="hasThinking && message.isStreaming" class="thinking-live">
         <div class="thinking-live-header">
           <span class="thinking-live-dot" />
           <span>{{ thinkingSummary }}</span>
         </div>
-
-        <!-- Compact one-line summaries (full detail in right panel) -->
         <CompactToolBar
           v-if="(message.toolCalls?.length ?? 0) > 0"
           :calls="message.toolCalls ?? []"
         />
       </div>
 
-      <!-- 完成后：思考过程折叠（文本过短时自动展开），包含完整调用轨迹 -->
-      <details v-else-if="hasThinking" class="thinking-section" :open="autoExpandThinking">
+      <!-- Done: collapsed section, only tool call details (no raw thinking text) -->
+      <details v-else-if="hasThinking" class="thinking-section">
         <summary class="thinking-summary">{{ thinkingSummary }}</summary>
         <div class="thinking-content">
-          <template v-for="(entry, i) in thinkingTimeline" :key="i">
-            <StreamingText
-              v-if="entry.type === 'thinking'"
-              :text="entry.text"
-              :is-streaming="false"
-            />
-            <ToolOperationList
-              v-else-if="entry.type === 'tool'"
-              :calls="entry.calls"
-            />
-          </template>
+          <ToolOperationList
+            v-if="(message.toolCalls?.length ?? 0) > 0"
+            :calls="message.toolCalls ?? []"
+          />
+          <div v-else class="thinking-no-tools">无工具调用</div>
         </div>
       </details>
 
-      <!-- 正文（流式时显示进度节点，完成后显示完整结果） -->
+      <!-- Visible reply text -->
       <div v-if="hasContent" class="message-content" :class="{ streaming: message.isStreaming }">
-        <StreamingText
-          :text="message.content"
-          :is-streaming="message.isStreaming"
-        />
+        <StreamingText :text="message.content" :is-streaming="message.isStreaming" />
       </div>
 
-      <!-- 等待中 -->
+      <!-- Waiting for first response -->
       <div v-if="message.isStreaming && !hasContent && !hasThinking" class="streaming-indicator">
-        <span class="dot" />
-        <span class="dot" />
-        <span class="dot" />
+        <span class="dot" /><span class="dot" /><span class="dot" />
       </div>
     </div>
     <div v-if="!message.isStreaming" class="message-footer">
       <span class="message-time">{{ timeLabel }}</span>
-      <button
-        class="copy-btn"
-        :class="{ copied }"
-        title="复制回复"
-        @click="copyContent"
-      >
-        {{ copied ? '✓ 已复制' : '📋' }}
+      <button class="copy-btn" :class="{ copied }" title="复制回复" @click="copyContent">
+        {{ copied ? '已复制' : '复制' }}
       </button>
     </div>
   </div>
@@ -290,156 +159,92 @@ async function copyContent() {
 
 <style scoped>
 .assistant-message {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  display: flex; flex-direction: column; align-items: flex-start;
   padding: var(--spacing-sm) var(--spacing-xl);
 }
+.message-body { max-width: 90%; }
 
-.message-body {
-  max-width: 90%;
-}
-
-/* ── 流式进行中：思考内联展示 ── */
-.thinking-live {
-  margin-bottom: 8px;
-}
+/* -- streaming live -- */
+.thinking-live { margin-bottom: 8px; }
 
 .thinking-live-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  margin-bottom: 2px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--color-text-muted); margin-bottom: 2px;
 }
 
 .thinking-live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-accent, #6c8cff);
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-accent);
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
+@keyframes pulse-dot { 0%,100%{opacity:.4} 50%{opacity:1} }
 
-
-/* ── 完成后：折叠 ── */
+/* -- collapsed -- */
 .thinking-section {
   margin-bottom: var(--spacing-sm);
-  border: 1px solid transparent;
+  border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   overflow: hidden;
   background: var(--color-bg-tertiary);
 }
 
 .thinking-summary {
-  padding: 6px 12px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: var(--color-surface);
-  user-select: none;
+  padding: 6px 12px; font-size: 12px; color: var(--color-text-secondary);
+  cursor: pointer; background: var(--color-surface); user-select: none;
+  list-style: none;
 }
+.thinking-summary::-webkit-details-marker { display: none; }
+.thinking-summary::before {
+  content: '>'; display: inline-block; margin-right: 6px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted);
+  transition: transform 0.15s;
+}
+details[open] > .thinking-summary::before { transform: rotate(90deg); }
+.thinking-summary:hover { background: var(--color-surface-hover); }
 
 .thinking-content {
-  padding: 6px 10px;
-  font-size: 12px;
-  line-height: 1.2;
-  color: var(--color-text-secondary);
-  background: var(--color-bg);
-  white-space: pre-wrap;
-  max-height: 400px;
-  overflow-y: auto;
+  padding: 6px 10px; font-size: 12px; line-height: 1.2;
+  color: var(--color-text-secondary); background: var(--color-bg);
+  max-height: 400px; overflow-y: auto;
 }
 
-.thinking-content :deep(p) {
-  margin: 0;
-}
-.thinking-content :deep(br) {
-  line-height: 1;
-}
-
-.message-content {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--color-text);
-}
-
-/* Progress milestones during streaming — slightly muted, narrative style */
-.message-content.streaming {
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
+.thinking-no-tools {
+  font-size: 11px; color: var(--color-text-muted); font-style: italic;
   padding: 4px 0;
-  border-left: 2px solid var(--color-accent);
-  padding-left: 10px;
-  margin: 4px 0;
 }
 
-.streaming-indicator {
-  display: flex;
-  gap: 4px;
-  padding: 8px 0;
+/* -- reply text -- */
+.message-content { font-size: 14px; line-height: 1.6; color: var(--color-text); }
+
+.message-content.streaming {
+  color: var(--color-text-secondary); font-size: 13px; line-height: 1.5;
+  padding: 4px 0; border-left: 2px solid var(--color-accent);
+  padding-left: 10px; margin: 4px 0;
 }
+
+/* -- waiting dots -- */
+.streaming-indicator { display: flex; gap: 4px; padding: 8px 0; }
 
 .dot {
-  width: 6px;
-  height: 6px;
-  background: var(--color-text-muted);
-  border-radius: 50%;
-  animation: pulse 1.4s ease-in-out infinite both;
+  width: 6px; height: 6px; background: var(--color-text-muted);
+  border-radius: 50%; animation: pulse 1.4s ease-in-out infinite both;
 }
-
 .dot:nth-child(2) { animation-delay: 0.16s; }
 .dot:nth-child(3) { animation-delay: 0.32s; }
 
-@keyframes pulse {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
-  40% { opacity: 1; transform: scale(1); }
-}
+@keyframes pulse { 0%,80%,100%{opacity:.3;transform:scale(.8)} 40%{opacity:1;transform:scale(1)} }
 
-.message-footer {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 2px;
-  padding-left: 4px;
-}
-
-.message-time {
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
+/* -- footer -- */
+.message-footer { display: flex; align-items: center; gap: 4px; margin-top: 2px; padding-left: 4px; }
+.message-time { font-size: 11px; color: var(--color-text-muted); }
 
 .copy-btn {
-  padding: 1px 4px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-  opacity: 0;
-  transition: opacity 0.15s;
-  color: var(--color-text-muted);
-  border-radius: 4px;
+  padding: 1px 4px; background: none; border: none; cursor: pointer;
+  font-size: 12px; opacity: 0; transition: opacity 0.15s;
+  color: var(--color-text-muted); border-radius: 4px;
 }
-
-.assistant-message:hover .copy-btn {
-  opacity: 0.7;
-}
-
-.copy-btn:hover {
-  opacity: 1 !important;
-  background: var(--color-surface);
-}
-
-.copy-btn.copied {
-  opacity: 1;
-  color: var(--color-green);
-  font-size: 11px;
-}
+.assistant-message:hover .copy-btn { opacity: 0.7; }
+.copy-btn:hover { opacity: 1 !important; background: var(--color-surface); }
+.copy-btn.copied { opacity: 1; color: var(--color-green); font-size: 11px; }
 </style>

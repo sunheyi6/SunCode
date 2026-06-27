@@ -1,12 +1,13 @@
-import { isIncompleteProgressText } from '@shared/finalization';
 import type {
   Message,
+  RunEvent,
   StreamEvent,
   SubagentProgressDelta,
   SubagentResult,
   TaskPlan,
   ToolCallContent,
   ToolResult,
+  TurnDetail,
 } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
@@ -30,6 +31,8 @@ export interface ChatMessage {
   systemPrompt?: string;
   /** Structured task plan parsed from the model's text output. */
   taskPlan?: TaskPlan;
+  /** Per-turn LLM request/response details (for call trace panel). */
+  turnDetails?: TurnDetail[];
 }
 
 let msgCounter = 0;
@@ -42,8 +45,6 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false);
   const showCallTrace = ref(false);
   let currentAssistantMsg: ChatMessage | null = null;
-  let currentText = '';
-  let currentThinking = '';
   let lastParsedPlanLength = 0;
 
   /** ID of the renderer's currently visible session. */
@@ -129,7 +130,7 @@ export const useChatStore = defineStore('chat', () => {
         if (!data) break;
 
         target.content = data.text || '';
-        // Thinking is NOT stored in the chat message — it goes to CallTracePanel.
+        target.thinking = data.thinking || '';
         target.toolCalls = data.toolCalls || [];
         target.isStreaming = event.type === 'message_update';
         isStreaming.value = event.type === 'message_update';
@@ -154,6 +155,7 @@ export const useChatStore = defineStore('chat', () => {
               thinking: target.thinking,
               toolCalls: target.toolCalls,
               systemPrompt: target.systemPrompt,
+              turnDetails: target.turnDetails,
               finalMessage: event.message,
             }),
           );
@@ -254,6 +256,44 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /** Handle incremental sub-agent progress: thinking deltas and tool calls. */
+  /** Handle run lifecycle events — convert model_request_completed to TurnDetail
+   *  and accumulate on the current assistant message for the call trace panel. */
+  function handleRunEvent(event: RunEvent): void {
+    if (event.type !== 'model_request_completed') return;
+    const msg = activeAssistantMessage();
+    if (!msg) return;
+    if (!msg.turnDetails) msg.turnDetails = [];
+    // Avoid duplicate entries (same turn number can emit twice in error retry)
+    const existing = msg.turnDetails.find((t) => t.turnNumber === event.turnNumber);
+    if (existing) {
+      // Update in place (retry may have different data)
+      Object.assign(existing, turnDetailFromRunEvent(event));
+    } else {
+      msg.turnDetails.push(turnDetailFromRunEvent(event));
+    }
+  }
+
+  /** Convert a model_request_completed RunEvent to a TurnDetail UI object. */
+  function turnDetailFromRunEvent(
+    event: Extract<RunEvent, { type: 'model_request_completed' }>,
+  ): TurnDetail {
+    return {
+      turnNumber: event.turnNumber,
+      systemTokens: event.systemTokens ?? 0,
+      requestMessages: event.requestMessages ?? [],
+      response: {
+        text: event.responseText ?? '',
+        thinking: event.responseThinking ?? '',
+        toolCalls: event.responseToolCalls ?? [],
+        stopReason: event.stopReason,
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+        totalTokens: event.totalTokens,
+        durationMs: event.durationMs,
+      },
+    };
+  }
+
   function handleSubagentProgress(
     _executionId: string,
     _agent: string,
@@ -300,8 +340,6 @@ export const useChatStore = defineStore('chat', () => {
       currentAssistantMsg.isStreaming = false;
     }
     currentAssistantMsg = null;
-    currentText = '';
-    currentThinking = '';
     isStreaming.value = false;
     if (streamingSessionId) {
       pendingAssistantMessages.delete(streamingSessionId);
@@ -321,8 +359,6 @@ export const useChatStore = defineStore('chat', () => {
   function clearMessages(): void {
     messages.value = [];
     currentAssistantMsg = null;
-    currentText = '';
-    currentThinking = '';
     isStreaming.value = false;
   }
 
@@ -364,6 +400,7 @@ export const useChatStore = defineStore('chat', () => {
           timestamp: Date.now(),
           isStreaming: false,
           systemPrompt: message.systemPrompt,
+          turnDetails: message.turnDetails,
           taskPlan,
         };
       });
@@ -375,8 +412,6 @@ export const useChatStore = defineStore('chat', () => {
     if (pending) {
       messages.value.push(pending);
       currentAssistantMsg = pending;
-      currentText = pending.content;
-      currentThinking = pending.thinking || '';
       isStreaming.value = pending.isStreaming;
     }
   }
@@ -394,6 +429,7 @@ export const useChatStore = defineStore('chat', () => {
     addUserMessage,
     startAssistantMessage,
     handleStreamEvent,
+    handleRunEvent,
     startToolExecution,
     endToolExecution,
     handleSubagentProgress,

@@ -81,6 +81,12 @@ export function useAgent() {
     );
 
     cleanups.push(
+      bridge.onRunEvent((event) => {
+        chatStore.handleRunEvent(event);
+      }),
+    );
+
+    cleanups.push(
       bridge.onSubagentProgress((executionId, agent, delta) => {
         chatStore.handleSubagentProgress(
           executionId,

@@ -1,5 +1,5 @@
 import { readdir, stat } from 'node:fs/promises';
-import { join, relative, resolve, isAbsolute } from 'node:path';
+import { join, relative, resolve, isAbsolute, normalize } from 'node:path';
 import { BaseTool, p, obj } from './types';
 
 export function createFindTool(workingDir: string) {
@@ -24,10 +24,10 @@ export function createFindTool(workingDir: string) {
 
       if (!pattern) return this.failure('pattern is required');
 
-      const absPath = isAbsolute(searchPath) ? searchPath : resolve(workingDir, searchPath);
+      const absPath = normalize(isAbsolute(searchPath) ? searchPath : resolve(workingDir, searchPath));
 
       // Security: prevent searching outside working directory
-      const workRoot = resolve(workingDir);
+      const workRoot = normalize(resolve(workingDir));
       if (!absPath.startsWith(workRoot)) {
         return this.failure(`Cannot search outside working directory: ${absPath}`);
       }

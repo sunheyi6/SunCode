@@ -246,6 +246,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       let thinkingText = '';
       let assistantMsgRaw: Record<string, unknown> | null = null;
 
+      // Capture request message summaries for turn_detail event
+      const requestMsgSummaries = lastMsgsForLog.map((m) => {
+        const contentStr =
+          typeof m.content === 'string'
+            ? m.content
+            : m.content
+                .filter((b) => b.type === 'text' || b.type === 'thinking')
+                .map((b) => ('text' in b ? b.text : ''))
+                .join('\n');
+        return {
+          role: m.role,
+          length: contentStr.length,
+          preview: contentStr.slice(0, 200),
+        };
+      });
+
       // Call the LLM with real token-by-token streaming + prompt caching
       const requestStartTime = Date.now();
       const requestAttempt = 1;
@@ -373,21 +389,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           });
         }
 
-        // Handle error stop reason
-        if (assistantMsgRaw?.stopReason === 'error') {
-          requestError =
-            (assistantMsgRaw.errorMessage as string) ||
-            `模型 ${settings.activeProvider}/${settings.activeModel} 请求失败，请检查 API Key 和网络连接。`;
-          console.error(`[AgentLoop] LLM request error: ${requestError}`);
-          diag.log('LLM', 'request_error', { error: requestError.slice(0, 200) });
-          throw new Error(requestError);
-        }
-      } catch (streamErr) {
-        if (!requestError) {
-          requestError = (streamErr as Error).message;
-        }
-        throw streamErr;
-      } finally {
+        // Emit enriched run event with request/response content for call trace panel
         const durationMs = Date.now() - requestStartTime;
         const usage = assistantMsgRaw?.usage as
           | { input?: number; output?: number; totalTokens?: number }
@@ -406,9 +408,20 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           stopReason: assistantMsgRaw?.stopReason as string | undefined,
           error: requestError,
           timestamp: '',
+          requestMessages: requestMsgSummaries,
+          systemTokens: Math.round(systemPrompt.length / 3.5),
+          responseText: assistantText,
+          responseThinking: thinkingText,
+          responseToolCalls: [...toolCalls],
         });
+      } catch (streamErr) {
+        if (!requestError) {
+          requestError = (streamErr as Error).message;
+        }
+        throw streamErr;
       }
 
+      // Check for empty response
       if (!assistantText && toolCalls.length === 0 && !thinkingText) {
         console.error(
           `[AgentLoop] Empty response from ${settings.activeProvider}/${settings.activeModel}` +
@@ -1031,63 +1044,11 @@ function safeParseJson(str: string): unknown {
 }
 
 /**
- * Merge thinking content into the visible answer when the model outputs
- * substantial reasoning but little or no visible text.
+ * Return the assistant text as-is. Thinking content belongs in the CallTracePanel,
+ * not merged into the chat's visible answer.
  */
-function mergeThinkingIntoAnswer(assistantText: string, thinkingText: string): string {
-  const textLen = assistantText.trim().length;
-
-  if (textLen >= 120) return assistantText;
-
-  if (!thinkingText || thinkingText.trim().length === 0) {
-    return assistantText || '已完成。';
-  }
-
-  const cleanThinking = thinkingText.trim();
-  const thinkingLen = cleanThinking.length;
-  const TAIL_EXTRACT_CHARS = 500;
-
-  if (textLen <= 30 && thinkingLen > 100) {
-    const tail = cleanThinking.slice(-TAIL_EXTRACT_CHARS);
-    const boundary = findNaturalBoundary(tail);
-    const excerpt = tail.slice(boundary).trim();
-    if (excerpt) {
-      return assistantText ? `${assistantText}\n\n---\n\n${excerpt}` : `思考结论：\n\n${excerpt}`;
-    }
-  }
-
-  if (thinkingLen <= 2000) {
-    return assistantText ? `${assistantText}\n\n---\n\n${cleanThinking}` : cleanThinking;
-  }
-
-  const tail = cleanThinking.slice(-1500);
-  const boundary = findNaturalBoundary(tail);
-  const excerpt = tail.slice(boundary).trim();
-
-  if (assistantText) {
-    return `${assistantText}\n\n---\n\n${excerpt}`;
-  }
-
-  return `思考结论：\n\n${excerpt}`;
-}
-
-function findNaturalBoundary(text: string): number {
-  const paraIdx = text.indexOf('\n\n');
-  if (paraIdx !== -1 && paraIdx < 300) return paraIdx + 2;
-
-  const sentenceMatch = text.slice(0, 400).match(/[。！？.!?]\n/g);
-  if (sentenceMatch) {
-    const firstMatch = sentenceMatch[0];
-    if (firstMatch) {
-      const idx = text.indexOf(firstMatch);
-      if (idx !== -1) return idx + firstMatch.length;
-    }
-  }
-
-  const nlIdx = text.indexOf('\n');
-  if (nlIdx !== -1 && nlIdx < 300) return nlIdx + 1;
-
-  return 0;
+function mergeThinkingIntoAnswer(assistantText: string, _thinkingText: string): string {
+  return assistantText || '已完成。';
 }
 
 function extractContextWindow(model: unknown): number {

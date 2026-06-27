@@ -25,13 +25,13 @@ export function createGlobTool(workingDir: string) {
 
       if (!pattern) return this.failure('pattern is required');
 
-      const absPath = isAbsolute(basePath) ? basePath : resolve(workingDir, basePath);
+      const absPath = normalize(isAbsolute(basePath) ? basePath : resolve(workingDir, basePath));
 
       // Extract directory prefix from pattern (e.g. "src/main/**" → base + "src/main", pattern → "**")
       const { searchDir, effectivePattern } = extractDirFromPattern(absPath, pattern);
 
       // Security: prevent globbing outside working directory
-      const workRoot = resolve(workingDir);
+      const workRoot = normalize(resolve(workingDir));
       if (!searchDir.startsWith(workRoot)) {
         return this.failure(`Cannot search outside working directory: ${searchDir}`);
       }

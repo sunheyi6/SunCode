@@ -46,6 +46,8 @@ export interface Message {
   toolCalls?: ToolCallContent[];
   /** System prompt for this run (persisted for call trace panel). */
   systemPrompt?: string;
+  /** Per-turn LLM request/response details (persisted for call trace panel). */
+  turnDetails?: TurnDetail[];
 }
 
 // ===== Tool Types =====
@@ -413,6 +415,23 @@ export interface StreamEvent {
 
 // ===== Run Event Types =====
 
+/** Per-turn LLM request/response detail (CallTracePanel rendering). */
+export interface TurnDetail {
+  turnNumber: number;
+  systemTokens: number;
+  requestMessages: Array<{ role: string; length: number; preview: string }>;
+  response: {
+    text: string;
+    thinking: string;
+    toolCalls: ToolCallContent[];
+    stopReason?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    durationMs?: number;
+  };
+}
+
 /** Unique identifier for an agent run. */
 export type RunId = string;
 
@@ -472,6 +491,16 @@ export type RunEvent =
       stopReason?: string;
       error?: string;
       timestamp: string;
+      /** (Call trace) Message summaries sent to the LLM for this turn. */
+      requestMessages?: Array<{ role: string; length: number; preview: string }>;
+      /** (Call trace) System prompt token count for this turn. */
+      systemTokens?: number;
+      /** (Call trace) The LLM's visible text response. */
+      responseText?: string;
+      /** (Call trace) The LLM's thinking/reasoning response. */
+      responseThinking?: string;
+      /** (Call trace) Tool calls the LLM requested. */
+      responseToolCalls?: ToolCallContent[];
     }
   | { type: 'goal_started'; runId: RunId; goal: GoalDefinition; timestamp: string }
   | {
