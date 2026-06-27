@@ -405,6 +405,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       sessionMessages.set(id, []);
       await saveSession(meta, []);
       currentSessionId = id;
+      sendToWorker({ type: 'abort' });
       sendToWorker({ type: 'setMessages', messages: [] });
       sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
       return meta;
@@ -442,6 +443,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
         `[Main] session:load id=${id.slice(-8)} mem=${memCount} disk=${diskCount} result=${resultCount} diskExists=${!!disk}`,
       );
       messages = messages || [];
+      sendToWorker({ type: 'abort' });
       sendToWorker({ type: 'setMessages', messages });
       if (meta) {
         sendToWorker({ type: 'setWorkingDir', path: meta.workingDirectory });
