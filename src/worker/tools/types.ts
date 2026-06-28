@@ -11,6 +11,8 @@ export interface Tool {
   readonly isReadonly: boolean;
   execute(params: Record<string, unknown>): Promise<ToolResult>;
   getDefinition(): ToolDefinition;
+  /** Set before execution to receive real-time output chunks (throttled ~100ms). */
+  onProgress: ((chunk: string) => void) | null;
 }
 
 /**
@@ -21,6 +23,7 @@ export abstract class BaseTool implements Tool {
   abstract readonly description: string;
   abstract readonly parameters: ToolDefinition['parameters'];
   readonly isReadonly: boolean = false;
+  onProgress: ((chunk: string) => void) | null = null;
 
   abstract execute(params: Record<string, unknown>): Promise<ToolResult>;
 
@@ -32,7 +35,7 @@ export abstract class BaseTool implements Tool {
     };
   }
 
-  protected success(output: string, details?: ToolResult['details']): ToolResult {
+  public success(output: string, details?: ToolResult['details']): ToolResult {
     return {
       toolCallId: '',
       name: this.name,
@@ -42,7 +45,7 @@ export abstract class BaseTool implements Tool {
     };
   }
 
-  protected failure(error: string, details?: ToolResult['details']): ToolResult {
+  public failure(error: string, details?: ToolResult['details']): ToolResult {
     return {
       toolCallId: '',
       name: this.name,

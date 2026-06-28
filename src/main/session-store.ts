@@ -2,9 +2,16 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { readFile, writeFile, readdir, unlink, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Message, SessionMeta } from '@shared/types';
+import { getAppDataDir } from './paths';
 
-/** Root directory for session storage, relative to the project. */
-const SESSIONS_DIR = join(process.cwd(), '.suncode', 'sessions');
+/** Root directory for session storage under the standard Electron userData path. */
+function getSessionsDir(): string {
+  const dir = join(getAppDataDir(), 'sessions');
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
 
 interface SessionFile {
   meta: SessionMeta;
@@ -13,31 +20,30 @@ interface SessionFile {
 
 /** Ensure the sessions directory exists. Call once on startup. */
 export function initSessionStore(): void {
-  if (!existsSync(SESSIONS_DIR)) {
-    mkdirSync(SESSIONS_DIR, { recursive: true });
-  }
+  void getSessionsDir();
 }
 
 /** File path for a session. */
 function sessionPath(id: string): string {
-  return join(SESSIONS_DIR, `${id}.json`);
+  return join(getSessionsDir(), `${id}.json`);
 }
 
 /** Temp path used for atomic writes. */
 function tempPath(id: string): string {
-  return join(SESSIONS_DIR, `${id}.json.tmp`);
+  return join(getSessionsDir(), `${id}.json.tmp`);
 }
 
 /** Load all sessions (metadata only, no messages). */
 export async function loadAllSessions(): Promise<SessionMeta[]> {
   try {
-    const entries = await readdir(SESSIONS_DIR);
+    const sessionsDir = getSessionsDir();
+    const entries = await readdir(sessionsDir);
     const jsonFiles = entries.filter((f) => f.endsWith('.json') && !f.endsWith('.tmp'));
 
     const metas: SessionMeta[] = [];
     for (const file of jsonFiles) {
       try {
-        const raw = await readFile(join(SESSIONS_DIR, file), 'utf-8');
+        const raw = await readFile(join(sessionsDir, file), 'utf-8');
         const data = JSON.parse(raw) as SessionFile;
         if (data.meta?.id) {
           metas.push(data.meta);
@@ -122,7 +128,7 @@ export async function deleteSessions(ids: string[]): Promise<void> {
 /** Remove run directories associated with a session. */
 async function deleteRunDirs(sessionId: string): Promise<void> {
   try {
-    const runsDir = join(SESSIONS_DIR, sessionId);
+    const runsDir = join(getSessionsDir(), sessionId);
     if (existsSync(runsDir)) {
       await rmrf(runsDir);
     }

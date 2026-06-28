@@ -3,6 +3,8 @@ import { computed, onMounted, onUnmounted, watch, ref } from 'vue';
 import { useAgent } from '../../composables/useAgent';
 import { useChatStore } from '../../stores/chat';
 import { useSettingsStore } from '../../stores/settings';
+import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
+import { useToast } from '../../composables/useToast';
 import ChatHeader from './ChatHeader.vue';
 import MessageList from './MessageList.vue';
 import ChatInput from './ChatInput.vue';
@@ -11,6 +13,8 @@ import PendingPromptQueue from './PendingPromptQueue.vue';
 const { send, abort, interruptAndSend, isStreaming } = useAgent();
 const chatStore = useChatStore();
 const settingsStore = useSettingsStore();
+const { killAll: killAllBgProcesses } = useBackgroundProcesses();
+const { showToast } = useToast();
 
 const hasMessages = computed(() => chatStore.messages.length > 0);
 
@@ -37,12 +41,20 @@ function handleSend(text: string): void {
 
 function handleStop(): void {
   abort();
+  const killed = killAllBgProcesses();
+  if (killed > 0) {
+    showToast(`已停止 ${killed} 个后台进程`, 'warning');
+  }
 }
 
 // ESC to abort
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && isStreaming.value) {
     abort();
+    const killed = killAllBgProcesses();
+    if (killed > 0) {
+      showToast(`已停止 ${killed} 个后台进程`, 'warning');
+    }
   }
 }
 

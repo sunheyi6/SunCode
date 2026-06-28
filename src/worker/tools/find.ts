@@ -17,7 +17,7 @@ export function createFindTool(workingDir: string) {
       ['pattern'],
     );
 
-    async execute(params: Record<string, unknown>): Promise<ReturnType<BaseTool['execute']>> {
+    async execute(params: Record<string, unknown>): ReturnType<BaseTool['execute']> {
       const pattern = (params.pattern as string) || '';
       const searchPath = (params.path as string) || workingDir;
       const maxResults = (params.maxResults as number) || 50;

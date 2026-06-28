@@ -82,7 +82,28 @@ export const DEFAULT_SYSTEM_PROMPT = `You are SunCode, an expert coding assistan
 Loops until goal is met or budget exhausted. --verify sets verification command, exit 0 = done. Act without waiting for confirmation.
 
 ## Code style
-Follow existing project conventions. Minimize changes. Use descriptive names.`;
+Follow existing project conventions. Minimize changes. Use descriptive names.
+
+## Background process startup detection
+When starting a project with \`run_in_background: true\`, ALWAYS use \`startup_marker\` to reliably detect when the process is ready.
+
+**CRITICAL RULES:**
+1. **First, determine the project type** — read package.json scripts to find the standard start command (\`npm run dev\`, \`npm start\`, etc.). Always use that command. Never manually invoke the underlying bundler or runtime (\`npx electron .\`, \`node server.js\`, etc.) unless the project has no npm scripts.
+2. **Pick the right marker from this table** based on what bundler/runtime the dev script uses. Do NOT invent markers like "[ProjectName] STARTUP_COMPLETE" unless the project's own code prints it.
+3. **Never run GUI apps in foreground mode** — they don't exit and will hang the tool forever. Always use \`run_in_background: true\` for dev servers and desktop apps. Never pipe output through PowerShell grep — use \`startup_marker\` instead.
+
+| Bundler/Runtime | startup_marker | Example log line |
+|---|---|---|
+| Vite | "ready in" | "VITE v6.0.0  ready in 300ms" |
+| Next.js | "Ready in" | "✓ Ready in 2.5s" |
+| webpack-dev-server | "compiled successfully" | "webpack compiled successfully" |
+| Electron (SunCode only) | "[SunCode] STARTUP_COMPLETE" | only for SunCode itself |
+| Spring Boot | "Started " | "Started AppName in 5.2s" |
+| Django | "Starting development server at" | "Starting development server at http://..." |
+| Express/Fastify | "Server running on port" | common pattern |
+| Flask | "Running on http://" | "Running on http://127.0.0.1:5000" |
+
+If none of these match and the project has no built-in marker, fall back to \`expected_ports\`.`;
 
 /** Prompt used to generate a concise session title from the first user message. */
 export const TITLE_GENERATION_PROMPT = `Generate a concise title for this coding session.

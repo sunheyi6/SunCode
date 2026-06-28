@@ -102,6 +102,7 @@ function getToolGuidelines(toolNames: string[]): string[] {
     read: ['Use read to examine files instead of cat or sed.'],
     bash: [
       'For file operations like ls, find, grep: use the dedicated tools (ls, find, grep) instead of bash.',
+      'CRITICAL: When verifying whether a background process started successfully, ONLY check by its specific PID (e.g. "Get-Process -Id <pid>"). NEVER search for processes by name globally ("Get-Process -Name electron", "tasklist | findstr", "ps aux | grep") — these will return unrelated system or app processes and cause false positives. Use the exact PID from the background process response. If the PID is gone, report the process exited rather than assuming it is alive.',
     ],
     edit: ['Read a file before editing it. Make precise edits.'],
     task_complete: [],

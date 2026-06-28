@@ -8,6 +8,7 @@ import ConfirmDialog from '../chat/ConfirmDialog.vue';
 import ConversationSidebar from './ConversationSidebar.vue';
 import GitPanel from './GitPanel.vue';
 import StatusBar from './StatusBar.vue';
+import ToastContainer from './ToastContainer.vue';
 import SettingsPanel from '../settings/SettingsPanel.vue';
 import { useConfirmDialog } from '../../composables/useConfirmDialog';
 
@@ -143,6 +144,9 @@ const traceSystemPrompt = computed(() => {
       @confirm="handleConfirm"
       @deny="handleDeny"
     />
+
+    <!-- Toast Notifications -->
+    <ToastContainer />
   </div>
 </template>
 

@@ -4,6 +4,7 @@ import { dirname, isAbsolute, normalize, resolve } from 'node:path';
 import { withFileMutationQueue } from './file-mutation-queue';
 import { countLineChanges } from './line-diff';
 import { BaseTool, obj, p } from './types';
+import { isSensitiveFile } from './sensitive';
 
 export function createWriteTool(workingDir: string) {
   return new (class WriteTool extends BaseTool {
@@ -39,6 +40,13 @@ export function createWriteTool(workingDir: string) {
       // Security: prevent writing outside working directory
       if (!normalized.startsWith(resolve(workingDir))) {
         return failForTarget(`Cannot write outside working directory: ${normalized}`);
+      }
+
+      // Security: block sensitive files (credentials, keys, etc.)
+      if (isSensitiveFile(normalized)) {
+        return failForTarget(
+          `Cannot write sensitive file: ${normalized}. This file may contain credentials or secrets.`,
+        );
       }
 
       try {

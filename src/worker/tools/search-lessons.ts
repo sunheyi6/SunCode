@@ -26,7 +26,7 @@ export function createSearchLessonsTool(workingDir: string) {
       ['query'],
     );
 
-    async execute(params: Record<string, unknown>): Promise<ReturnType<BaseTool['execute']>> {
+    async execute(params: Record<string, unknown>): ReturnType<BaseTool['execute']> {
       const query = params.query as string;
       const errorType = params.errorType as LessonTriggerType | undefined;
       const limit = (params.limit as number) || 3;

@@ -6,6 +6,7 @@ import { useChatStore } from '../../stores/chat';
 import { bridge } from '../../api/bridge';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
 import { formatElapsedTime, markProcessKilled } from '../../composables/background-process-state';
+import { useToast } from '../../composables/useToast';
 
 const sessionsStore = useSessionsStore();
 const chatStore = useChatStore();
@@ -28,21 +29,24 @@ const panelRef = ref<HTMLElement | null>(null);
 const showAllPlan = ref(false);
 const planStartTime = ref(0);
 const { processes } = useBackgroundProcesses();
+const { showToast } = useToast();
 
 const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
 
 const sortedProcesses = computed(() =>
-  [...processes.value].sort((a, b) => {
-    // Running processes first, then by recency
-    if (a.status === 'running' && b.status !== 'running') return -1;
-    if (a.status !== 'running' && b.status === 'running') return 1;
-    return b.startTime - a.startTime;
-  }),
+  [...processes.value]
+    .filter((p) => !p.killed)
+    .sort((a, b) => {
+      // Running processes first, then by recency
+      if (a.status === 'running' && b.status !== 'running') return -1;
+      if (a.status !== 'running' && b.status === 'running') return 1;
+      return b.startTime - a.startTime;
+    }),
 );
 const runningCount = computed(
-  () => processes.value.filter((process) => process.status === 'running').length,
+  () => processes.value.filter((process) => process.status === 'running' && !process.killed).length,
 );
 
 function formatProcessTime(proc: { status: string; startTime: number; endTime?: number }): string {
@@ -54,8 +58,11 @@ function formatProcessTime(proc: { status: string; startTime: number; endTime?: 
 }
 
 function stopProcess(pid: number): void {
+  const proc = processes.value.find((p) => p.pid === pid);
+  if (!proc) return;
   markProcessKilled(processes.value, pid);
   bridge.killBgProcess(pid);
+  showToast(`已停止进程: ${proc.command.slice(0, 40)}`, 'warning');
 }
 const hasChanges = computed(
   () => gitStatus.value.changedFiles > 0 || gitStatus.value.stagedFiles > 0,
@@ -374,7 +381,7 @@ watch(collapsed, (isCollapsed) => {
       <!-- ═══ Process Section ═══ -->
       <section class="process-section">
         <div class="section-heading">
-          <span>进程</span><span>{{ runningCount }}/{{ processes.length }}</span>
+          <span>进程</span><span>{{ runningCount }}/{{ sortedProcesses.length }}</span>
         </div>
         <div v-if="processes.length > 0" class="process-list">
           <div
@@ -387,6 +394,18 @@ watch(collapsed, (isCollapsed) => {
               {{ proc.status === 'running' ? '●' : proc.status === 'completed' ? '✓' : '×' }}
             </span>
             <span class="process-command-text">{{ proc.command }}</span>
+            <span
+              v-if="proc.expectedPorts && proc.expectedPorts.length > 0"
+              class="process-ports"
+              :class="{ ready: proc.portsReachable && proc.portsReachable.length > 0 }"
+            >
+              <template v-if="proc.portsReachable && proc.portsReachable.length > 0">
+                :{{ proc.portsReachable.join(', ') }}
+              </template>
+              <template v-else>
+                ⟳ :{{ proc.expectedPorts.join(', ') }}
+              </template>
+            </span>
             <span class="process-time">{{ formatProcessTime(proc) }}</span>
             <button
               v-if="proc.status === 'running'"
@@ -496,6 +515,18 @@ watch(collapsed, (isCollapsed) => {
   color: var(--color-text-muted);
   font-size: 11px;
   font-family: var(--font-mono);
+}
+.process-ports {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  margin-left: 4px;
+  opacity: 0.7;
+}
+.process-ports.ready {
+  color: var(--color-success);
+  opacity: 1;
 }
 .status-dot {
   flex-shrink: 0;

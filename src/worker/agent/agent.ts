@@ -52,10 +52,12 @@ export class Agent {
   private onStatus: (status: AgentStatus) => void;
   private onToolStart: (toolCall: ToolCallContent) => void;
   private onToolEnd: (result: ToolResult) => void;
+  private onToolProgress: (toolCallId: string, output: string) => void;
   private onDone: (message: Message) => void;
   private onError: (message: string) => void;
   private onBackgroundStart: (proc: BackgroundProcess) => void;
   private onBackgroundComplete: (pid: number, exitCode: number) => void;
+  private onBackgroundPortsVerified: (pid: number, ports: number[]) => void;
   private onRunEvent: (event: RunEvent) => void;
   private onSubagentEvent: (type: string, data: unknown) => void;
   private onGoalEvent: (event: GoalEvent) => void;
@@ -68,10 +70,12 @@ export class Agent {
     onStatus: (status: AgentStatus) => void,
     onToolStart: (toolCall: ToolCallContent) => void,
     onToolEnd: (result: ToolResult) => void,
+    onToolProgress: (toolCallId: string, output: string) => void,
     onDone: (message: Message) => void,
     onError: (message: string) => void,
     onBackgroundStart: (proc: BackgroundProcess) => void,
     onBackgroundComplete: (pid: number, exitCode: number) => void,
+    onBackgroundPortsVerified: (pid: number, ports: number[]) => void,
     onRunEvent: (event: RunEvent) => void,
     onSubagentEvent: (type: string, data: unknown) => void,
     onGoalEvent: (event: GoalEvent) => void,
@@ -83,10 +87,12 @@ export class Agent {
     this.onStatus = onStatus;
     this.onToolStart = onToolStart;
     this.onToolEnd = onToolEnd;
+    this.onToolProgress = onToolProgress;
     this.onDone = onDone;
     this.onError = onError;
     this.onBackgroundStart = onBackgroundStart;
     this.onBackgroundComplete = onBackgroundComplete;
+    this.onBackgroundPortsVerified = onBackgroundPortsVerified;
     this.onRunEvent = onRunEvent;
     this.onSubagentEvent = onSubagentEvent;
     this.onGoalEvent = onGoalEvent;
@@ -128,6 +134,7 @@ export class Agent {
         {
           onBackgroundStart: (proc) => this.onBackgroundStart(proc),
           onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
+          onBackgroundPortsVerified: (pid, ports) => this.onBackgroundPortsVerified(pid, ports),
         },
         this.settings,
       );
@@ -206,6 +213,7 @@ export class Agent {
       {
         onBackgroundStart: (proc) => this.onBackgroundStart(proc),
         onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
+        onBackgroundPortsVerified: (pid, ports) => this.onBackgroundPortsVerified(pid, ports),
       },
       this.settings,
     );
@@ -379,6 +387,9 @@ export class Agent {
       onToolEnd: (result) => {
         this.onToolEnd(result);
       },
+      onToolProgress: (toolCallId, output) => {
+        this.onToolProgress(toolCallId, output);
+      },
       onRunEvent: (event) => {
         this.onRunEvent(event);
       },
@@ -428,7 +439,7 @@ export class Agent {
       turnCount: result.turnCount,
       timestamp: new Date().toISOString(),
       tokenUsage: result.tokenUsage,
-      taxonomy: result.decision.decision === 'stop' ? result.decision.taxonomy : undefined,
+      taxonomy: result.decision.decision === 'stop' ? (result.decision.taxonomy as any) : undefined,
     });
 
     // Add assistant message to history
@@ -514,6 +525,9 @@ export class Agent {
       },
       onToolEnd: (result: ToolResult) => {
         this.onToolEnd(result);
+      },
+      onToolProgress: (toolCallId: string, output: string) => {
+        this.onToolProgress(toolCallId, output);
       },
       onRunEvent: (event: RunEvent) => {
         this.onRunEvent(event);

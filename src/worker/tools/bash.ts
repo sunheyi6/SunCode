@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { ToolResult } from '@shared/types';
 import { randomBytes } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
@@ -6,6 +6,17 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { BackgroundProcess } from '@shared/types';
 import { BaseTool, obj, p } from './types';
+
+/** Resolve the Windows PowerShell executable path.
+ *  Uses the full System32 path to avoid ENOENT in environments where
+ *  System32 is not in PATH (e.g. Bun/Electron detached processes).
+ *  Forward slashes work fine with Node.js spawn on Windows and avoid
+ *  source-level escape-sequence issues. */
+function getPowerShellPath(): string {
+  if (process.platform !== 'win32') return 'powershell.exe';
+  const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+  return systemRoot + '/System32/WindowsPowerShell/v1.0/powershell.exe';
+}
 
 /** Maximum output lines before tail truncation. */
 const MAX_OUTPUT_LINES = 2000;
@@ -17,6 +28,8 @@ const OVERFLOW_KILL_BYTES = 200_000;
 export interface BashToolCallbacks {
   onBackgroundStart?: (proc: BackgroundProcess) => void;
   onBackgroundComplete?: (pid: number, exitCode: number) => void;
+  /** Fired when background process's expected ports become reachable (may fire after tool result is returned). */
+  onBackgroundPortsVerified?: (pid: number, ports: number[]) => void;
 }
 
 /**
@@ -152,7 +165,7 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
         }
       }
 
-      const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/bash';
+      const shell = process.platform === 'win32' ? getPowerShellPath() : '/bin/bash';
       const shellArgs =
         process.platform === 'win32'
           ? ['-NoProfile', '-NonInteractive', '-Command', command]

@@ -19,7 +19,7 @@ export function createGlobTool(workingDir: string) {
       ['pattern'],
     );
 
-    async execute(params: Record<string, unknown>): Promise<ReturnType<BaseTool['execute']>> {
+    async execute(params: Record<string, unknown>): ReturnType<BaseTool['execute']> {
       const pattern = params.pattern as string;
       const basePath = (params.path as string) || workingDir;
 

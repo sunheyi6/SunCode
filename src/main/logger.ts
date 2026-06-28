@@ -1,8 +1,9 @@
 /**
  * App-level structured logger powered by electron-log.
  *
- * Writes to `<cwd>/.suncode/app.log` — same directory as session data
- * and diagnostic logs, so everything is together under the project folder.
+ * Writes to `<userData>/.suncode/app.log` — same directory as session data
+ * and diagnostic logs, so everything is together under the standard Electron
+ * user data folder.
  *
  * Automatically captures uncaught exceptions and unhandled rejections.
  * Log files rotate when they exceed ~2 MB (archived to app.old.log).
@@ -13,11 +14,12 @@
  *   logger.error('[App] Failed to load', err);
  */
 
-import { join } from 'node:path';
 import log from 'electron-log/main';
+import { getAppDataDir } from './paths';
+import { join } from 'node:path';
 
-// ── Resolve log path to <cwd>/.suncode/app.log ────────────────────────
-const LOG_DIR = join(process.cwd(), '.suncode');
+// ── Resolve log path to <userData>/.suncode/app.log ───────────────────
+const LOG_DIR = getAppDataDir();
 const LOG_PATH = join(LOG_DIR, 'app.log');
 
 log.transports.file.resolvePathFn = () => LOG_PATH;

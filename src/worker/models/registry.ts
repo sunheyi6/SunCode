@@ -37,7 +37,7 @@ export function createModelRegistry() {
     async getModel(provider: string, modelId: string): Promise<unknown> {
       try {
         const { getModel } = await import('@earendil-works/pi-ai');
-        return getModel(provider, modelId);
+        return getModel(provider as any, modelId);
       } catch {
         console.warn(
           '@earendil-works/pi-ai not available. Install it for multi-provider model support.',
@@ -78,8 +78,8 @@ export function createModelRegistry() {
     async getModels(provider: string): Promise<ModelInfo[]> {
       try {
         const { getModels } = await import('@earendil-works/pi-ai');
-        const models = getModels(provider);
-        return models.map((m: Record<string, unknown>) => ({
+        const models = getModels(provider as any);
+        return models.map((m: any) => ({
           id: m.id as string,
           name: m.name as string,
           provider: (m.provider as string) || provider,

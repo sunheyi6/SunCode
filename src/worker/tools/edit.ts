@@ -12,6 +12,7 @@ import {
 import { withFileMutationQueue } from './file-mutation-queue';
 import { countLineChanges } from './line-diff';
 import { BaseTool, obj, p } from './types';
+import { isSensitiveFile } from './sensitive';
 
 export function createEditTool(workingDir: string) {
   return new (class EditTool extends BaseTool {
@@ -77,6 +78,13 @@ export function createEditTool(workingDir: string) {
       // Security: prevent editing outside working directory
       if (!normalized.startsWith(resolve(workingDir))) {
         return failForTarget(`Cannot edit outside working directory: ${normalized}`);
+      }
+
+      // Security: block sensitive files (credentials, keys, etc.)
+      if (isSensitiveFile(normalized)) {
+        return failForTarget(
+          `Cannot edit sensitive file: ${normalized}. This file may contain credentials or secrets.`,
+        );
       }
 
       try {

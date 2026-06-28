@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, nativeTheme, shell } from 'electron';
+import { migrateLegacyDataDir } from './paths';
 import { registerIpcHandlers } from './ipc-handlers';
 import { WindowManager } from './window-manager';
 import { initAutoUpdater } from './auto-updater';
@@ -153,6 +154,9 @@ function createMainWindow(): BrowserWindow {
 }
 
 async function initApp(): Promise<void> {
+  // Migrate legacy data from install directory to standard user data dir
+  migrateLegacyDataDir();
+
   // Create the window manager
   windowManager = new WindowManager();
 
@@ -194,6 +198,12 @@ app.whenReady().then(() => {
   return initApp();
 }).then(() => {
   logger.info('[App] Init complete');
+  // Startup marker — used by parent processes to detect when SunCode is fully ready.
+  // Format: [SunCode] STARTUP_COMPLETE project=<name> ts=<ISO timestamp>
+  // The bash tool's startup_marker parameter scans stdout/stderr for this line.
+  const marker = `[SunCode] STARTUP_COMPLETE project=SunCode ts=${new Date().toISOString()}`;
+  logger.info(marker);
+  console.log(marker);
 }).catch((err) => {
   logger.error('[App] Init failed', err);
 });

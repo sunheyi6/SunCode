@@ -80,6 +80,14 @@ const suncodeAPI = {
   },
 
   /** Listen for tool execution end */
+  /** Listen for tool progress (real-time output streaming) */
+  onToolProgress(callback: (data: { sessionId: string; toolCallId: string; output: string }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; toolCallId: string; output: string }): void =>
+      callback(data);
+    ipcRenderer.on('agent:tool-progress', handler);
+    return () => ipcRenderer.removeListener('agent:tool-progress', handler);
+  },
+
   onToolEnd(callback: (data: { sessionId: string; toolResult: ToolResult }) => void): () => void {
     const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; toolResult: ToolResult }): void =>
       callback(data);
@@ -277,6 +285,14 @@ const suncodeAPI = {
       callback(data);
     ipcRenderer.on('agent:bg-process-completed', handler);
     return () => ipcRenderer.removeListener('agent:bg-process-completed', handler);
+  },
+
+  /** Listen for background process ports verified events */
+  onBgProcessPortsVerified(callback: (data: { sessionId: string; pid: number; ports: number[] }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; pid: number; ports: number[] }): void =>
+      callback(data);
+    ipcRenderer.on('agent:bg-process-ports-verified', handler);
+    return () => ipcRenderer.removeListener('agent:bg-process-ports-verified', handler);
   },
 
   /** Kill a running background process by PID */

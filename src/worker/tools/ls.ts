@@ -17,7 +17,7 @@ export function createLsTool(workingDir: string) {
       [],
     );
 
-    async execute(params: Record<string, unknown>): Promise<ReturnType<BaseTool['execute']>> {
+    async execute(params: Record<string, unknown>): ReturnType<BaseTool['execute']> {
       const dirPath = (params.path as string) || workingDir;
       const recursive = params.recursive === true;
       const limit = (params.limit as number) || 100;

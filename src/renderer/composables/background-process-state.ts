@@ -35,9 +35,28 @@ export function markProcessKilled(
 ): void {
   const process = processes.find((item) => item.pid === pid);
   if (!process) return;
-  process.status = 'error';
-  process.exitCode = -1;
+  process.killed = true;
   process.endTime = Date.now();
+}
+
+/** Remove a process from the array by PID (called after OS confirms kill) */
+export function removeProcess(
+  processes: BackgroundProcess[],
+  pid: number,
+): void {
+  const index = processes.findIndex((item) => item.pid === pid);
+  if (index >= 0) processes.splice(index, 1);
+}
+
+/** Update a process's portsReachable after background port verification. */
+export function updateProcessPorts(
+  processes: BackgroundProcess[],
+  pid: number,
+  ports: number[],
+): void {
+  const process = processes.find((item) => item.pid === pid);
+  if (!process) return;
+  process.portsReachable = ports;
 }
 
 export function formatElapsedTime(elapsedMs: number): string {

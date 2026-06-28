@@ -17,6 +17,7 @@ import type {
   WorkerOutMessage,
 } from '@shared/types';
 import { app, dialog, ipcMain, shell } from 'electron';
+import { getAppDataDir } from './paths';
 import { getGitInfo } from './git-info';
 import { recoverInterruptedSessions } from './recovery';
 import { getLogPath } from './logger';
@@ -41,8 +42,8 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// ===== Settings Persistence — 保存在项目目录 =====
-const CONFIG_DIR = join(process.cwd(), '.suncode');
+// ===== Settings Persistence — 保存在标准用户数据目录 =====
+const CONFIG_DIR = getAppDataDir();
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
 function loadSettings(): AppSettings {
@@ -124,11 +125,17 @@ function getAgentWorker(): Worker {
         case 'toolEnd':
           mainWindow.webContents.send('agent:tool-end', { sessionId: msg.sessionId, toolResult: msg.toolResult });
           break;
+        case 'toolProgress':
+          mainWindow.webContents.send('agent:tool-progress', { sessionId: msg.sessionId, toolCallId: msg.toolCallId, output: msg.output });
+          break;
         case 'bgProcessStarted':
           mainWindow.webContents.send('agent:bg-process-started', { sessionId: msg.sessionId, process: msg.process });
           break;
         case 'bgProcessCompleted':
           mainWindow.webContents.send('agent:bg-process-completed', { sessionId: msg.sessionId, pid: msg.pid, exitCode: msg.exitCode });
+          break;
+        case 'bgProcessPortsVerified':
+          mainWindow.webContents.send('agent:bg-process-ports-verified', { sessionId: msg.sessionId, pid: msg.pid, ports: msg.ports });
           break;
         case 'runEvent': {
           const evt = msg.event;

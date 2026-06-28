@@ -49,6 +49,7 @@ export interface AgentLoopInput {
   onStream: (event: StreamEvent) => void;
   onToolStart: (toolCall: ToolCallContent) => void;
   onToolEnd: (result: ToolResult) => void;
+  onToolProgress: (toolCallId: string, output: string) => void;
   /** Callback for recording run lifecycle events (turns, tools, etc.). */
   onRunEvent: (event: RunEvent) => void;
   initialTurnCount: number;
@@ -112,6 +113,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     onStream,
     onToolStart,
     onToolEnd,
+    onToolProgress,
     onRunEvent,
     initialTurnCount,
     prepareNextTurn,
@@ -742,7 +744,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               const paramsPreview =
                 paramsStr.length > 100 ? `${paramsStr.slice(0, 100)}...` : paramsStr;
               console.log(`[AgentLoop] Tool ${tc.name} executing (params: ${paramsPreview})`);
+              tool.onProgress = (chunk: string) => onToolProgress(tc.id, chunk);
               const result = await tool.execute(params);
+              tool.onProgress = null;
               result.toolCallId = tc.id;
               onToolEnd(result);
               onRunEvent({
@@ -992,7 +996,7 @@ function convertMessage(msg: Message): Record<string, unknown> {
       : [];
 
   return {
-    role: msg.role === 'tool' ? 'user' : msg.role,
+    role: msg.role as string,
     content: [...content, ...toolCalls],
     ...(msg.toolCallId ? { tool_call_id: msg.toolCallId } : {}),
   };

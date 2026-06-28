@@ -12,9 +12,9 @@ import type {
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';
-import { buildPersistedAssistantMessage } from './chat-message-persistence';
 import { parseTaskPlan, stripPlanFromContent } from '../utils/task-plan-parser';
 import { useAgentStore } from './agent';
+import { buildPersistedAssistantMessage } from './chat-message-persistence';
 
 export interface ChatMessage {
   id: string;
@@ -34,6 +34,8 @@ export interface ChatMessage {
   taskPlan?: TaskPlan;
   /** Per-turn LLM request/response details (for call trace panel). */
   turnDetails?: TurnDetail[];
+  /** Real-time output from running bash tools (display only, never persisted). */
+  liveCommandOutput?: string;
 }
 
 let msgCounter = 0;
@@ -191,7 +193,9 @@ export const useChatStore = defineStore('chat', () => {
             isStreaming.value = false;
           }
 
-          // Persist completed message to the session that originated the run
+          // Persist completed message to the session that originated the run.
+          // liveCommandOutput is display-only and must never be persisted.
+          delete target.liveCommandOutput;
           void bridge.saveMessage(
             buildPersistedAssistantMessage({
               visibleContent: target.content,
@@ -216,6 +220,7 @@ export const useChatStore = defineStore('chat', () => {
         if (msg) {
           msg.content += `\n\n❌ Error: ${event.error || 'Unknown error'}`;
           msg.isStreaming = false;
+          delete msg.liveCommandOutput;
         }
         streamingSessionIds.delete(sessionId);
         if (sessionId === activeSessionId) {
@@ -294,6 +299,39 @@ export const useChatStore = defineStore('chat', () => {
           'internalCalls=',
           result.subagentResults?.[0]?.internalCalls?.length,
         );
+      }
+    }
+  }
+
+  /** Max bytes of live bash output to keep in the assistant message body. */
+  const MAX_LIVE_COMMAND_OUTPUT_BYTES = 50_000;
+
+  /** Truncate a UTF-8 string from the tail, keeping the last maxBytes bytes. */
+  function truncateTailBytes(text: string, maxBytes: number): string {
+    const encoder = new TextEncoder();
+    const encoded = encoder.encode(text);
+    if (encoded.length <= maxBytes) return text;
+    let start = encoded.length - maxBytes;
+    // Move to a valid UTF-8 boundary (skip continuation bytes 10xxxxxx).
+    while (start < encoded.length && (encoded[start] & 0xc0) === 0x80) {
+      start++;
+    }
+    return new TextDecoder().decode(encoded.subarray(start));
+  }
+
+  /** Stream real-time output to a running tool call (throttled ~100ms by worker). */
+  function updateToolProgress(toolCallId: string, output: string, sessionId: string): void {
+    const msg = activeAssistantMessage(sessionId);
+    if (!msg?.toolCalls) return;
+    const tc = msg.toolCalls.find((t) => t.id === toolCallId);
+    if (tc && tc.status === 'running') {
+      tc.partialOutput = (tc.partialOutput || '') + output;
+
+      // Also mirror bash output into the assistant message body so the chat
+      // doesn't look frozen during long-running foreground commands.
+      if (tc.name === 'bash') {
+        const live = (msg.liveCommandOutput || '') + output;
+        msg.liveCommandOutput = truncateTailBytes(live, MAX_LIVE_COMMAND_OUTPUT_BYTES);
       }
     }
   }
@@ -496,6 +534,7 @@ export const useChatStore = defineStore('chat', () => {
     handleRunEvent,
     startToolExecution,
     endToolExecution,
+    updateToolProgress,
     handleSubagentProgress,
     finishCurrentResponse,
     clearMessages,

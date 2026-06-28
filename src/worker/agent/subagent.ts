@@ -337,6 +337,9 @@ export class SubagentDispatcher {
           toolResult: result,
         });
       },
+      onToolProgress: (_toolCallId: string, _output: string) => {
+        // Sub-agent tool progress throttled — not propagated
+      },
       onRunEvent: (_event: RunEvent) => {
         // Sub-agent run events don't need to propagate
       },

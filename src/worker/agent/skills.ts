@@ -13,6 +13,7 @@ export interface Skill {
   content: string;
   /** Optional YAML frontmatter metadata */
   metadata?: {
+    name?: string;
     description?: string;
     trigger?: string[];
     priority?: number;
@@ -123,12 +124,12 @@ async function loadSingleSkillFile(
     const metadata = parseFrontmatter(content);
     const body = stripFrontmatter(content);
     return {
-      name: metadata.name || fallbackName,
+      name: metadata?.name || fallbackName,
       path: filePath,
       content: body,
       metadata: {
         ...metadata,
-        description: metadata.description || `Skill from ${source}`,
+        description: metadata?.description || `Skill from ${source}`,
       },
     };
   } catch {
@@ -155,14 +156,14 @@ async function loadSkillsFromDir(dir: string, source: string): Promise<Skill[]> 
           const content = await readFile(skillFile, 'utf-8');
           const metadata = parseFrontmatter(content);
           const body = stripFrontmatter(content);
-          const name = metadata.name || entry.name;
+          const name = metadata?.name || entry.name;
           skills.push({
             name,
             path: skillFile,
             content: body,
             metadata: {
               ...metadata,
-              description: metadata.description || `Skill: ${name} (from ${source})`,
+              description: metadata?.description || `Skill: ${name} (from ${source})`,
             },
           });
         } catch {
@@ -183,7 +184,7 @@ async function loadSkillsFromDir(dir: string, source: string): Promise<Skill[]> 
  */
 function parseFrontmatter(
   content: string,
-): { description?: string; trigger?: string[]; priority?: number } | undefined {
+): { name?: string; description?: string; trigger?: string[]; priority?: number } | undefined {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return undefined;
 

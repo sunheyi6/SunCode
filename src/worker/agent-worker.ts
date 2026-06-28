@@ -91,6 +91,8 @@ function createCallbacks(sessionId: string) {
       post({ type: 'toolStart', sessionId, toolCall }),
     onToolEnd: (toolResult: import('@shared/types').ToolResult) =>
       post({ type: 'toolEnd', sessionId, toolResult }),
+    onToolProgress: (toolCallId: string, output: string) =>
+      post({ type: 'toolProgress', sessionId, toolCallId, output }),
     onDone: (message: import('@shared/types').Message) =>
       post({ type: 'done', sessionId, message }),
     onError: (errorMsg: string) =>
@@ -99,6 +101,8 @@ function createCallbacks(sessionId: string) {
       post({ type: 'bgProcessStarted', sessionId, process: proc }),
     onBgProcessCompleted: (pid: number, exitCode: number) =>
       post({ type: 'bgProcessCompleted', sessionId, pid, exitCode }),
+    onBgProcessPortsVerified: (pid: number, ports: number[]) =>
+      post({ type: 'bgProcessPortsVerified', sessionId, pid, ports }),
     onRunEvent: (event: import('@shared/types').RunEvent) =>
       post({ type: 'runEvent', sessionId, event }),
     onSubagentEvent: (
@@ -183,10 +187,12 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
           cbs.onStatus,
           cbs.onToolStart,
           cbs.onToolEnd,
+          cbs.onToolProgress,
           cbs.onDone,
           cbs.onError,
           cbs.onBgProcessStarted,
           cbs.onBgProcessCompleted,
+          cbs.onBgProcessPortsVerified,
           cbs.onRunEvent,
           cbs.onSubagentEvent,
           cbs.onGoalEvent,

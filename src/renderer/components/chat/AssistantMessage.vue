@@ -10,13 +10,9 @@ const props = defineProps<{
 }>();
 
 const hasContent = computed(() => props.message.content.length > 0);
-const hasToolCalls = computed(() =>
-  (props.message.toolCalls?.length ?? 0) > 0
-);
-const hasThinking = computed(() =>
-  props.message.isStreaming ||
-  Boolean(props.message.thinking) ||
-  hasToolCalls.value
+const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0);
+const hasThinking = computed(
+  () => props.message.isStreaming || Boolean(props.message.thinking) || hasToolCalls.value,
 );
 
 const copied = ref(false);
@@ -34,16 +30,30 @@ function startElapsedTimer(): void {
 }
 
 function stopElapsedTimer(): void {
-  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
 }
 
-watch(() => props.message.isStreaming, (streaming) => {
-  if (streaming) startElapsedTimer();
-  else { elapsedSeconds.value = Math.round((Date.now() - props.message.timestamp) / 1000); stopElapsedTimer(); }
-}, { immediate: true });
+watch(
+  () => props.message.isStreaming,
+  (streaming) => {
+    if (streaming) startElapsedTimer();
+    else {
+      elapsedSeconds.value = Math.round((Date.now() - props.message.timestamp) / 1000);
+      stopElapsedTimer();
+    }
+  },
+  { immediate: true },
+);
 
-onMounted(() => { if (props.message.isStreaming) startElapsedTimer(); });
-onBeforeUnmount(() => { stopElapsedTimer(); });
+onMounted(() => {
+  if (props.message.isStreaming) startElapsedTimer();
+});
+onBeforeUnmount(() => {
+  stopElapsedTimer();
+});
 
 const formattedElapsed = computed(() => {
   const s = elapsedSeconds.value;
@@ -87,7 +97,10 @@ const thinkingSummary = computed(() => {
   if (turn > 0) parts.push(`${turn}次请求`);
   if (elapsedSeconds.value > 0) parts.push(time);
   if (calls.length > 0) {
-    const names = calls.slice(0, 3).map((t) => t.name).join(', ');
+    const names = calls
+      .slice(0, 3)
+      .map((t) => t.name)
+      .join(', ');
     const more = calls.length > 3 ? ` +${calls.length - 3}` : '';
     parts.push(names + more);
   }
@@ -98,7 +111,9 @@ async function copyContent() {
   try {
     await navigator.clipboard.writeText(fullTextForCopy.value);
     copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
+    setTimeout(() => {
+      copied.value = false;
+    }, 1500);
   } catch {
     const textarea = document.createElement('textarea');
     textarea.value = fullTextForCopy.value;
@@ -109,7 +124,9 @@ async function copyContent() {
     document.execCommand('copy');
     document.body.removeChild(textarea);
     copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
+    setTimeout(() => {
+      copied.value = false;
+    }, 1500);
   }
 }
 </script>
@@ -146,8 +163,16 @@ async function copyContent() {
         <StreamingText :text="message.content" :is-streaming="message.isStreaming" />
       </div>
 
+      <!-- Real-time bash output mirrored into the message body so long commands don't look frozen -->
+      <div
+        v-if="message.isStreaming && message.liveCommandOutput"
+        class="message-live-output"
+      >
+        <pre>{{ message.liveCommandOutput }}</pre>
+      </div>
+
       <!-- Waiting for first response -->
-      <div v-if="message.isStreaming && !hasContent && !hasThinking" class="streaming-indicator">
+      <div v-if="message.isStreaming && !hasContent && !hasThinking && !message.liveCommandOutput" class="streaming-indicator">
         <span class="dot" /><span class="dot" /><span class="dot" />
       </div>
     </div>
@@ -241,6 +266,28 @@ details[open] > .thinking-summary-done::before {
   color: var(--color-text-secondary); font-size: 13px; line-height: 1.5;
   padding: 4px 0; border-left: 2px solid var(--color-accent);
   padding-left: 10px; margin: 4px 0;
+}
+
+/* -- live bash output (display only, not persisted) -- */
+.message-live-output {
+  margin: 4px 0;
+  max-width: 100%;
+}
+
+.message-live-output pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+  border-radius: var(--border-radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 /* -- waiting dots -- */

@@ -116,7 +116,7 @@ export function resolveApiKey(provider: string, settings: AppSettings): string |
  * Map provider names to their standard environment variable names.
  */
 function getProviderEnvKey(provider: string): string | undefined {
-  const keyMap: Record<string, string> = {
+  const keyMap: Record<string, string | undefined> = {
     openai: 'OPENAI_API_KEY',
     anthropic: 'ANTHROPIC_API_KEY',
     google: 'GEMINI_API_KEY',
@@ -147,10 +147,10 @@ function getProviderEnvKey(provider: string): string | undefined {
     'opencode-go': 'OPENCODE_API_KEY',
     'azure-openai-responses': 'AZURE_OPENAI_API_KEY',
     zai: 'ZAI_API_KEY',
-    'amazon-bedrock': undefined, // Uses AWS credentials chain
+    'amazon-bedrock': undefined as string | undefined, // Uses AWS credentials chain
   };
 
-  return keyMap[provider];
+  return keyMap[provider as keyof typeof keyMap] || (undefined as string | undefined);
 }
 
 /**

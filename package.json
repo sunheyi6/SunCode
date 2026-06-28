@@ -22,7 +22,8 @@
     "electron:build:mac": "vite build && electron-builder --config electron-builder.yml --mac",
     "electron:build:linux": "vite build && electron-builder --config electron-builder.yml --linux",
     "release": "vite build && electron-builder --config electron-builder.yml --publish always",
-    "test:ai": "bun run scripts/test-ai.ts"
+    "test:ai": "bun run scripts/test-ai.ts",
+    "update:commands": "bun run scripts/fetch-windows-commands.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",

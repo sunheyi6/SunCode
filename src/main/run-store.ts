@@ -2,10 +2,11 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { appendFile, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DayStats, ModelStats, RunEvent, RunId } from '@shared/types';
+import { getAppDataDir } from './paths';
 
 /** Base directory for run event logs. */
 function runsDir(sessionId: string): string {
-  return join(process.cwd(), '.suncode', 'sessions', sessionId, 'runs');
+  return join(getAppDataDir(), 'sessions', sessionId, 'runs');
 }
 
 function runFilePath(sessionId: string, runId: RunId): string {
@@ -14,7 +15,7 @@ function runFilePath(sessionId: string, runId: RunId): string {
 
 /** Aggregated token usage file. Updated incrementally as runs complete. */
 function usageAggregatePath(): string {
-  return join(process.cwd(), '.suncode', 'token-usage.json');
+  return join(getAppDataDir(), 'token-usage.json');
 }
 
 interface UsageAggregate {

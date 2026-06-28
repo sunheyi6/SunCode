@@ -383,6 +383,7 @@ export function createWebFetchTool(workingDir: string): Tool {
       }
     },
 
+  onProgress: null,
     getDefinition(): ToolDefinition {
       return { name: this.name, description: this.description, parameters: this.parameters };
     },

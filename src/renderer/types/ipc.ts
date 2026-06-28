@@ -26,8 +26,10 @@ export interface SessionErrorEvent { sessionId: string; message: string }
 export interface SessionDoneEvent { sessionId: string; message: Message }
 export interface SessionToolStartEvent { sessionId: string; toolCall: ToolCallContent }
 export interface SessionToolEndEvent { sessionId: string; toolResult: ToolResult }
+export interface SessionToolProgressEvent { sessionId: string; toolCallId: string; output: string }
 export interface SessionBgProcessStartedEvent { sessionId: string; process: BackgroundProcess }
 export interface SessionBgProcessCompletedEvent { sessionId: string; pid: number; exitCode: number }
+export interface SessionBgProcessPortsVerifiedEvent { sessionId: string; pid: number; ports: number[] }
 export interface SessionRunEvent { sessionId: string; event: RunEvent }
 export interface SessionSubagentStartEvent { sessionId: string; execution: Record<string, unknown> }
 export interface SessionSubagentEndEvent { sessionId: string; id: string; result: Record<string, unknown> }
@@ -48,6 +50,7 @@ declare global {
       onDone(callback: (data: SessionDoneEvent) => void): () => void;
       onToolStart(callback: (data: SessionToolStartEvent) => void): () => void;
       onToolEnd(callback: (data: SessionToolEndEvent) => void): () => void;
+      onToolProgress(callback: (data: SessionToolProgressEvent) => void): () => void;
 
       // File system
       getFileTree(rootPath?: string): Promise<FileNode[]>;
@@ -110,6 +113,7 @@ declare global {
       // Background Processes
       onBgProcessStarted(callback: (data: SessionBgProcessStartedEvent) => void): () => void;
       onBgProcessCompleted(callback: (data: SessionBgProcessCompletedEvent) => void): () => void;
+      onBgProcessPortsVerified(callback: (data: SessionBgProcessPortsVerifiedEvent) => void): () => void;
       killBgProcess(pid: number): void;
 
       // Window

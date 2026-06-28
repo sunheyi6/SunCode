@@ -228,6 +228,7 @@ export function createWebSearchTool(settings?: AppSettings): Tool {
       }
     },
 
+  onProgress: null,
     getDefinition(): ToolDefinition {
       return { name: this.name, description: this.description, parameters: this.parameters };
     },

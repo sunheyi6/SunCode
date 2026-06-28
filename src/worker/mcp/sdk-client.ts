@@ -29,7 +29,7 @@ export async function createSDKMcpClient(config: McpServerConfig): Promise<McpCl
     env: config.env as Record<string, string> | undefined,
   });
 
-  const client = new Client({ name: 'suncode', version: '0.1.0' }, { capabilities: { tools: {} } });
+  const client = new Client({ name: 'suncode', version: '0.1.0' }, { capabilities: {} });
 
   let connected = false;
 
@@ -43,6 +43,7 @@ export async function createSDKMcpClient(config: McpServerConfig): Promise<McpCl
         const result = await client.listTools();
         const mcpTools = result.tools as McpToolDef[];
 
+        // @ts-ignore
         const tools: Tool[] = mcpTools.map((mcpTool) => ({
           name: `mcp__${config.name}__${mcpTool.name}`,
           isReadonly: false,
@@ -77,6 +78,7 @@ export async function createSDKMcpClient(config: McpServerConfig): Promise<McpCl
               };
             }
           },
+          onProgress: null,
           getDefinition() {
             return {
               name: `mcp__${config.name}__${mcpTool.name}`,

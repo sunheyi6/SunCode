@@ -17,6 +17,8 @@ export interface ToolCallContent {
   arguments: string;
   status?: ToolExecutionStatus;
   result?: ToolResult;
+  /** Real-time partial output streamed during tool execution. */
+  partialOutput?: string;
   /** Offset into the thinking text stream where this tool call appeared (for interleaved rendering). */
   thinkingOffset?: number;
 }
@@ -94,6 +96,10 @@ export interface CommandDetails {
   stderr: string;
   /** Path to temp file with full output when truncated. */
   fullOutputPath?: string;
+  /** Ports the caller expects to become reachable (background processes). */
+  expectedPorts?: number[];
+  /** Ports confirmed reachable at the time the tool result was returned. */
+  portsReachable?: number[];
 }
 
 export type ToolResultDetails = FileEditDetails | CommandDetails;
@@ -121,6 +127,12 @@ export interface BackgroundProcess {
   status: 'running' | 'completed' | 'error';
   exitCode?: number;
   endTime?: number;
+  /** Set when the user manually kills the process (via stop button) */
+  killed?: boolean;
+  /** Ports the caller expects to become reachable after startup */
+  expectedPorts?: number[];
+  /** Ports confirmed reachable via automated TCP check */
+  portsReachable?: number[];
 }
 
 /** Tool implementation interface */
@@ -364,6 +376,8 @@ export type WorkerOutMessage =
   | { type: 'toolEnd'; sessionId: string; toolResult: ToolResult }
   | { type: 'bgProcessStarted'; sessionId: string; process: BackgroundProcess }
   | { type: 'bgProcessCompleted'; sessionId: string; pid: number; exitCode: number }
+  | { type: 'bgProcessPortsVerified'; sessionId: string; pid: number; ports: number[] }
+  | { type: 'toolProgress'; sessionId: string; toolCallId: string; output: string }
   | { type: 'runStarted'; sessionId: string; runId: string }
   | { type: 'runEvent'; sessionId: string; event: RunEvent }
   | { type: 'subagentStart'; sessionId: string; execution: SubagentExecution }

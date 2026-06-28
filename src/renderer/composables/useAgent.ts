@@ -80,6 +80,12 @@ export function useAgent() {
     );
 
     cleanups.push(
+      bridge.onToolProgress((data) => {
+        chatStore.updateToolProgress(data.toolCallId, data.output, data.sessionId);
+      }),
+    );
+
+    cleanups.push(
       bridge.onRunEvent((data) => {
         chatStore.handleRunEvent(data.event, data.sessionId);
       }),

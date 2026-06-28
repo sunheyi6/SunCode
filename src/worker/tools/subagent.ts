@@ -183,6 +183,7 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
       return toolResult;
     },
 
+  onProgress: null,
     getDefinition(): ToolDefinition {
       return { name: this.name, description: this.description, parameters: this.parameters };
     },

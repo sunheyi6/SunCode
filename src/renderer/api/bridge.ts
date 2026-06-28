@@ -24,8 +24,10 @@ import type {
   SessionDoneEvent,
   SessionToolStartEvent,
   SessionToolEndEvent,
+  SessionToolProgressEvent,
   SessionBgProcessStartedEvent,
   SessionBgProcessCompletedEvent,
+  SessionBgProcessPortsVerifiedEvent,
   SessionRunEvent,
   SessionSubagentProgressEvent,
   SessionGoalEvent,
@@ -75,6 +77,10 @@ export const bridge = {
 
   onToolEnd(callback: (data: SessionToolEndEvent) => void): () => void {
     return api().onToolEnd(callback);
+  },
+
+  onToolProgress(callback: (data: SessionToolProgressEvent) => void): () => void {
+    return api().onToolProgress(callback);
   },
 
   // ===== Files =====
@@ -213,6 +219,10 @@ export const bridge = {
 
   onBgProcessCompleted(callback: (data: SessionBgProcessCompletedEvent) => void): () => void {
     return api().onBgProcessCompleted(callback);
+  },
+
+  onBgProcessPortsVerified(callback: (data: SessionBgProcessPortsVerifiedEvent) => void): () => void {
+    return api().onBgProcessPortsVerified(callback);
   },
 
   killBgProcess(pid: number): void {
