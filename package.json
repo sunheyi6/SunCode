@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "biome check src/",
+    "lint:yaml": "node scripts/validate-yaml.js",
     "format": "biome format src/ --write",
     "test": "vitest run",
     "test:watch": "vitest",
