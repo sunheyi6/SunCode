@@ -173,21 +173,22 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
 
       // ── Background mode: spawn and detach ──
       if (runInBg) {
+        // Capture progress callback before async gap — agent-loop nulls
+        // tool.onProgress after execute() resolves, but we keep streaming
+        // output for the lifetime of the background process.
+        const progress = this.onProgress;
+
         return new Promise((resolveResult) => {
           let child: ReturnType<typeof spawn>;
           try {
             // Use stdio: 'pipe' (not 'ignore') — GUI apps (Electron) need
             // valid stdio handles to create visible windows on Windows.
-            // Pipes are drained to prevent backpressure.
             child = spawn(shell, shellArgs, {
               cwd,
               env: process.env,
               stdio: 'pipe',
               detached: true,
             });
-            // Drain pipes to prevent backpressure from filling buffers
-            child.stdout?.resume();
-            child.stderr?.resume();
             // Close stdin — background processes don't read from it,
             // and an open pipe could cause the child to block.
             child.stdin?.end();
@@ -197,6 +198,30 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
             );
             return;
           }
+
+          // ── Real-time output streaming for background processes ──
+          // Throttle to ~100ms to avoid flooding the IPC channel.
+          let progressBuf = '';
+          let progressTimer: ReturnType<typeof setTimeout> | null = null;
+
+          const flushProgress = () => {
+            if (progressBuf && progress) {
+              progress(progressBuf);
+              progressBuf = '';
+            }
+            progressTimer = null;
+          };
+
+          const pushProgress = (text: string) => {
+            if (!progress) return;
+            progressBuf += text;
+            if (!progressTimer) {
+              progressTimer = setTimeout(flushProgress, 100);
+            }
+          };
+
+          child.stdout?.on('data', (data: Buffer) => pushProgress(data.toString()));
+          child.stderr?.on('data', (data: Buffer) => pushProgress(data.toString()));
 
           let startupSettled = false;
           let startedPid: number | undefined;
@@ -211,6 +236,11 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
           const notifyComplete = (exitCode: number) => {
             if (!startedPid || completionNotified) return;
             completionNotified = true;
+            // Flush any remaining buffered output
+            if (progressTimer) {
+              clearTimeout(progressTimer);
+              flushProgress();
+            }
             callbacks?.onBackgroundComplete?.(startedPid, exitCode);
           };
 
@@ -227,13 +257,15 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
               notifyComplete(code ?? -1);
               return;
             }
+            // Flush remaining progress before notifying completion
+            if (progressTimer) {
+              clearTimeout(progressTimer);
+              flushProgress();
+            }
             // Startup succeeded, but the shell process exited.
             // Use exit code as heuristic:
             // - code 0 → command ran to completion (app/dev-server likely started) → keep "running"
             // - code non-zero/null → command failed → notify completion
-            // This correctly handles both cases:
-            //   1. Failed launch (e.g. build error) → non-zero exit → UI shows completed
-            //   2. Successful dev server → zero exit, grandchild lives on → UI shows running
             if (code !== 0) {
               console.log(`[Bash] PID ${startedPid} exited with code ${code} — notifying completion`);
               notifyComplete(code ?? -1);
@@ -293,21 +325,52 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
           killProcessTree(pid);
         };
 
+        // ── Real-time output streaming for foreground commands ──
+        // Throttle to ~100ms to avoid flooding the IPC channel.
+        let progressBuf = '';
+        let progressTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const flushProgress = () => {
+          if (progressBuf && this.onProgress) {
+            this.onProgress(progressBuf);
+            progressBuf = '';
+          }
+          progressTimer = null;
+        };
+
+        const pushProgress = (text: string) => {
+          if (!this.onProgress) return;
+          progressBuf += text;
+          if (!progressTimer) {
+            progressTimer = setTimeout(flushProgress, 100);
+          }
+        };
+
         child.stdout?.on('data', (data: Buffer) => {
-          stdout += data.toString();
+          const text = data.toString();
+          stdout += text;
+          pushProgress(text);
           if (stdout.length > OVERFLOW_KILL_BYTES && child.pid) {
             killWithTree(child.pid);
           }
         });
 
         child.stderr?.on('data', (data: Buffer) => {
-          stderr += data.toString();
+          const text = data.toString();
+          stderr += text;
+          pushProgress(text);
           if (stderr.length > OVERFLOW_KILL_BYTES && child.pid) {
             killWithTree(child.pid);
           }
         });
 
         child.on('close', async (code, signal) => {
+          // Flush any remaining buffered progress output
+          if (progressTimer) {
+            clearTimeout(progressTimer);
+            flushProgress();
+          }
+
           // Apply tail truncation to stdout and stderr separately
           const stdoutTrunc = truncateTail(stdout, MAX_OUTPUT_LINES, MAX_OUTPUT_BYTES);
           const stderrTrunc = truncateTail(stderr, MAX_OUTPUT_LINES, MAX_OUTPUT_BYTES);

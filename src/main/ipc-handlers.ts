@@ -98,6 +98,8 @@ function getAgentWorker(): Worker {
   if (!agentWorker) {
     const workerPath = join(__dirname, '../worker/agent-worker.js');
     console.log('[Main] Creating worker at:', workerPath);
+    // Pass app data directory to worker via env so diagnostics land in user dir
+    process.env.SUNCODE_APP_DATA = getAppDataDir();
     agentWorker = new Worker(workerPath);
 
     agentWorker.on('message', async (msg: WorkerOutMessage) => {

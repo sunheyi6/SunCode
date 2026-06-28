@@ -3,7 +3,7 @@
 ## 项目约束
 
 - 开发服务器端口固定 `5173`，`strictPort: true`，禁止切换端口
-- 启动命令 `npm run dev`，访问 `http://localhost:5173/`
+- 启动命令 `npm run dev`，Electron 窗口自动打开（桌面应用，不是网页）。`npm run dev` 为长期运行服务，后台执行即可。启动后**禁止**额外读取日志文件或 cat 输出做二次确认，窗口弹出即为成功
 - 代码风格遵循已有模式，不引入新范式
 - TypeScript strict 模式，禁止 `any` 除非有注释说明
 - 所有输出使用用户语言，中文对话用中文思考
@@ -13,6 +13,17 @@
 - **先澄清再动手**：需求不明确时主动询问，不要猜测用户意图后直接执行
 - `undefined` 直接传递，不要用条件展开 `...(x ? { y } : {})`
 - 可选属性不需要显式标注 `| undefined`
+- 保持 AGENTS.md 和 CLAUDE.md 内容一致，同步更新
+- 复合指令（如"对比 X 和 Y 保证一致"）应包含执行，文件不一致时主动同步无需等待确认
+
+## 诊断日志
+
+| 日志类型 | 路径 |
+|----------|------|
+| 主进程日志 | `%APPDATA%\SunCode\.suncode\app.log`（自动轮转，≥2MB → `app.old.log`） |
+| Agent 运行时诊断 | `%APPDATA%\SunCode\.suncode\diagnostics\<runId>.log`（每次运行独立文件） |
+| 运行事件 | `%APPDATA%\SunCode\.suncode\run-events\` |
+| Bash 后台输出（harness 层） | `%USERPROFILE%\.zcode\cli\exec\sess_{sessionId}\call_{callId}-stdout.log` |
 
 ## 构建与发布
 

@@ -17,7 +17,10 @@ export class DiagLogger {
   private runStart: number;
 
   constructor(workingDir: string, runId: string) {
-    this.logPath = resolve(workingDir, '.suncode', 'diagnostics', `${runId}.log`);
+    // Prefer user-level app data directory (set by main process); fall back
+    // to project-level .suncode for standalone/headless runs.
+    const baseDir = process.env.SUNCODE_APP_DATA || resolve(workingDir, '.suncode');
+    this.logPath = resolve(baseDir, 'diagnostics', `${runId}.log`);
     this.runStart = Date.now();
     // Ensure the diagnostics directory exists
     try {
