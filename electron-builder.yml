@@ -42,7 +42,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   allowElevation: true
   createDesktopShortcut: always
-  createStartMenuShortcut: always
+  createStartMenuShortcut: true
   shortcutName: SunCode
   uninstallDisplayName: SunCode
   # Keep user data (sessions, settings) when uninstalling.
