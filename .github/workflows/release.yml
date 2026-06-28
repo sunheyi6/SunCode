@@ -187,16 +187,16 @@ jobs:
           if [ -n "$NSIS_EXE" ]; then
             SIZE=$(stat -c%s "$NSIS_EXE" 2>/dev/null || stat -f%z "$NSIS_EXE")
             SHA512=$(sha512sum "$NSIS_EXE" | awk '{print $1}')
-            cat > latest.yml << YAMLEOF
-version: ${VERSION}
-files:
-  - url: ${NSIS_EXE}
-    sha512: ${SHA512}
-    size: ${SIZE}
-path: ${NSIS_EXE}
-sha512: ${SHA512}
-releaseDate: ${RELEASE_DATE}
-YAMLEOF
+            {
+              echo "version: ${VERSION}"
+              echo "files:"
+              echo "  - url: ${NSIS_EXE}"
+              echo "    sha512: ${SHA512}"
+              echo "    size: ${SIZE}"
+              echo "path: ${NSIS_EXE}"
+              echo "sha512: ${SHA512}"
+              echo "releaseDate: ${RELEASE_DATE}"
+            } > latest.yml
             echo "=== latest.yml ==="
             cat latest.yml
             gh release upload "${RELEASE_TAG}" latest.yml --clobber
@@ -207,16 +207,16 @@ YAMLEOF
           if [ -n "$APPIMAGE" ]; then
             SIZE=$(stat -c%s "$APPIMAGE" 2>/dev/null || stat -f%z "$APPIMAGE")
             SHA512=$(sha512sum "$APPIMAGE" | awk '{print $1}')
-            cat > latest-linux.yml << YAMLEOF
-version: ${VERSION}
-files:
-  - url: ${APPIMAGE}
-    sha512: ${SHA512}
-    size: ${SIZE}
-path: ${APPIMAGE}
-sha512: ${SHA512}
-releaseDate: ${RELEASE_DATE}
-YAMLEOF
+            {
+              echo "version: ${VERSION}"
+              echo "files:"
+              echo "  - url: ${APPIMAGE}"
+              echo "    sha512: ${SHA512}"
+              echo "    size: ${SIZE}"
+              echo "path: ${APPIMAGE}"
+              echo "sha512: ${SHA512}"
+              echo "releaseDate: ${RELEASE_DATE}"
+            } > latest-linux.yml
             echo "=== latest-linux.yml ==="
             cat latest-linux.yml
             gh release upload "${RELEASE_TAG}" latest-linux.yml --clobber
@@ -227,16 +227,16 @@ YAMLEOF
           if [ -n "$DMG" ]; then
             SIZE=$(stat -c%s "$DMG" 2>/dev/null || stat -f%z "$DMG")
             SHA512=$(sha512sum "$DMG" | awk '{print $1}')
-            cat > latest-mac.yml << YAMLEOF
-version: ${VERSION}
-files:
-  - url: ${DMG}
-    sha512: ${SHA512}
-    size: ${SIZE}
-path: ${DMG}
-sha512: ${SHA512}
-releaseDate: ${RELEASE_DATE}
-YAMLEOF
+            {
+              echo "version: ${VERSION}"
+              echo "files:"
+              echo "  - url: ${DMG}"
+              echo "    sha512: ${SHA512}"
+              echo "    size: ${SIZE}"
+              echo "path: ${DMG}"
+              echo "sha512: ${SHA512}"
+              echo "releaseDate: ${RELEASE_DATE}"
+            } > latest-mac.yml
             echo "=== latest-mac.yml ==="
             cat latest-mac.yml
             gh release upload "${RELEASE_TAG}" latest-mac.yml --clobber
