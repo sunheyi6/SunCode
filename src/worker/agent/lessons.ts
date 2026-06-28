@@ -80,7 +80,7 @@ export function loadLessonIndex(workingDir: string): LessonIndex {
         tool: m[3]!,
         keywords: m[4]!.split(',').map((k) => k.trim()),
         type,
-        date: '', // populated when read
+        date: m[2]!.replace('.md', '').slice(0, 10), // YYYY-MM-DD from filename prefix
         runId: '',
         problem: '',
         rootCause: '',
@@ -94,10 +94,7 @@ export function loadLessonIndex(workingDir: string): LessonIndex {
 }
 
 /** Load a single lesson file and return the full LessonEntry. */
-export function loadLessonFile(
-  workingDir: string,
-  slug: string,
-): LessonEntry | null {
+export function loadLessonFile(workingDir: string, slug: string): LessonEntry | null {
   const filePath = join(lessonsDir(workingDir), `${slug}.md`);
   if (!existsSync(filePath)) return null;
 
@@ -134,7 +131,10 @@ function parseLessonMarkdown(content: string, slug: string): LessonEntry {
       const arr = JSON.parse(raw);
       return Array.isArray(arr) ? arr : [];
     } catch {
-      return raw.split(',').map((k) => k.trim()).filter(Boolean);
+      return raw
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean);
     }
   };
 
@@ -288,10 +288,7 @@ function rebuildLessonIndex(workingDir: string): void {
   for (const [type, entries] of byType) {
     lines.push(`## ${type} (${entries.length}) — ${typeNames[type] || type}`);
     for (const e of entries) {
-      const slug = `${e.date}-${e.slug}`;
-      lines.push(
-        `- [${e.title}](${slug}.md) | ${e.tool} | ${e.keywords.join(',')}`,
-      );
+      lines.push(`- [${e.title}](${e.slug}.md) | ${e.tool} | ${e.keywords.join(',')}`);
     }
     lines.push('');
   }
@@ -369,7 +366,14 @@ export function searchLessons(
     }
   }
 
-  return results.sort((a, b) => b.score - a.score).slice(0, maxResults);
+  return results
+    .sort((a, b) => {
+      // Primary: score descending
+      if (b.score !== a.score) return b.score - a.score;
+      // Secondary: date descending (newest first)
+      return b.entry.date.localeCompare(a.entry.date);
+    })
+    .slice(0, maxResults);
 }
 
 /**
@@ -404,11 +408,7 @@ function jaccardSimilarity(a: string, b: string): number {
 }
 
 /** Check if a lesson is a duplicate of any existing lesson. */
-export function isDuplicateLesson(
-  workingDir: string,
-  title: string,
-  problem: string,
-): boolean {
+export function isDuplicateLesson(workingDir: string, title: string, problem: string): boolean {
   const index = loadLessonIndex(workingDir);
   const combined = `${title} ${problem}`;
 
@@ -428,10 +428,7 @@ export function isDuplicateLesson(
 const extractionTimestamps = new Map<string, number>();
 
 /** Check if the same triggerType+toolName has been extracted within 24 hours. */
-export function isRateLimited(
-  triggerType: string,
-  toolName: string,
-): boolean {
+export function isRateLimited(triggerType: string, toolName: string): boolean {
   const key = `${triggerType}:${toolName}`;
   const lastTime = extractionTimestamps.get(key);
   if (lastTime && Date.now() - lastTime < 24 * 60 * 60 * 1000) {
@@ -469,10 +466,7 @@ export function buildExtractionContexts(
       // Find corresponding tool result
       const toolMsg = messages
         .slice(i + 1)
-        .find(
-          (m) =>
-            m.role === 'tool' && m.toolCallId === tc.id,
-        );
+        .find((m) => m.role === 'tool' && m.toolCallId === tc.id);
 
       if (toolMsg) {
         const resultText =
@@ -651,16 +645,13 @@ async function extractLessonWithLLM(
     if (!liteModelId) return null;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const getModel = (pi as any).getModel as
-      | ((p: string, m: string) => unknown)
-      | undefined;
+    const getModel = (pi as any).getModel as ((p: string, m: string) => unknown) | undefined;
     if (!getModel) return null;
 
     const model = getModel(provider, liteModelId);
     if (!model) return null;
 
-    const prompt = EXTRACTION_PROMPT
-      .replace('{triggerType}', ctx.triggerType)
+    const prompt = EXTRACTION_PROMPT.replace('{triggerType}', ctx.triggerType)
       .replace('{userGoal}', buildExtractionUserPrompt(ctx))
       .replace('{relevantContext}', ctx.error || '');
 
@@ -712,12 +703,13 @@ async function extractLessonWithLLM(
 
 /** Generate a slug from a title string. */
 export function slugFromTitle(title: string): string {
-  return title
-    .slice(0, 30)
-    .replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase()
-    || 'lesson';
+  return (
+    title
+      .slice(0, 30)
+      .replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase() || 'lesson'
+  );
 }
 
 /**
