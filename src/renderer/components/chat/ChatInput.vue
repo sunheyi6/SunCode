@@ -336,11 +336,29 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
+function focusInput(): void {
+  // Only steal focus when no dropdown is open, so keyboard/menu interactions
+  // are not interrupted.
+  if (modelOpen.value || thinkingOpen.value || permOpen.value || folderOpen.value) return;
+  textareaRef.value?.focus();
+}
+
 onMounted(() => {
   document.addEventListener('click', onDocumentClick);
   void refreshGitInfo();
+  focusInput();
 });
 onUnmounted(() => document.removeEventListener('click', onDocumentClick));
+
+// Refocus after the assistant finishes streaming so the user can keep typing.
+watch(
+  () => props.isStreaming,
+  (streaming, wasStreaming) => {
+    if (wasStreaming && !streaming) {
+      void nextTick().then(focusInput);
+    }
+  },
+);
 </script>
 
 <template>

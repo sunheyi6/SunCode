@@ -1,21 +1,45 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { TokenUsageSummary, DayStats, ModelStats } from '@shared/types';
-import { bridge } from '../../api/bridge';
+import { useStatsStore } from '../../stores/stats';
 
-const stats = ref<TokenUsageSummary | null>(null);
-const loading = ref(true);
+const statsStore = useStatsStore();
 const chartDays = ref(14); // last N days to show
+const animateReady = ref(false);
+
+// Use cached stats from the store; if the user opens this tab before the
+// preload finishes, trigger a load now. This avoids the blank -> data flash.
+const stats = computed<TokenUsageSummary | null>(() => statsStore.tokenUsage);
+const loading = computed(() => statsStore.tokenUsageLoading && !statsStore.hasTokenUsage);
 
 onMounted(async () => {
-  try {
-    stats.value = await bridge.getTokenUsage();
-  } catch {
-    // No stats available
-  } finally {
-    loading.value = false;
+  if (!statsStore.tokenUsageLoaded) {
+    await statsStore.loadTokenUsage();
   }
+  // Defer enabling CSS transitions until after the initial paint to avoid
+  // animating every bar from 0 simultaneously when the tab first appears.
+  void nextTick().then(() => {
+    requestAnimationFrame(() => {
+      animateReady.value = true;
+    });
+  });
 });
+
+// Reset animation readiness when cached data changes after the first load,
+// so subsequent refreshes still animate smoothly instead of jumping.
+watch(
+  () => statsStore.tokenUsage,
+  (value, oldValue) => {
+    if (value && oldValue && animateReady.value) {
+      animateReady.value = false;
+      void nextTick().then(() => {
+        requestAnimationFrame(() => {
+          animateReady.value = true;
+        });
+      });
+    }
+  },
+);
 
 const filteredDaily = computed(() => {
   if (!stats.value) return [];
@@ -112,7 +136,11 @@ function formatDateLabel(date: string): string {
               :key="day.date"
               class="bar-col"
             >
-              <div class="bar-fill" :style="{ height: barHeight(day.total) }">
+              <div
+                class="bar-fill"
+                :class="{ animate: animateReady }"
+                :style="{ height: barHeight(day.total) }"
+              >
                 <span class="bar-tip">{{ formatTokens(day.total) }}</span>
               </div>
               <span class="bar-label">{{ formatDateLabel(day.date) }}</span>
@@ -138,6 +166,7 @@ function formatDateLabel(date: string): string {
             <div class="model-bar-wrap">
               <div
                 class="model-bar-fill"
+                :class="{ animate: animateReady }"
                 :style="{ width: modelBarWidth(m.total, stats.byModel) }"
               />
             </div>
@@ -301,7 +330,11 @@ function formatDateLabel(date: string): string {
   border-radius: 3px 3px 0 0;
   position: relative;
   min-height: 2px;
-  transition: height 0.3s ease;
+  will-change: height;
+}
+
+.bar-fill.animate {
+  transition: height 0.25s ease;
 }
 
 .bar-fill:hover {
@@ -406,7 +439,11 @@ function formatDateLabel(date: string): string {
   height: 100%;
   background: var(--color-accent);
   border-radius: 4px;
-  transition: width 0.3s ease;
+  will-change: width;
+}
+
+.model-bar-fill.animate {
+  transition: width 0.25s ease;
 }
 
 .model-tokens {

@@ -20,7 +20,7 @@ import { app, dialog, ipcMain, shell } from 'electron';
 import { getGitInfo } from './git-info';
 import { recoverInterruptedSessions } from './recovery';
 import { getLogPath } from './logger';
-import { appendEvent, getEvents, listRuns, startRun } from './run-store';
+import { appendEvent, getEvents, getTokenUsageAggregate, listRuns, startRun } from './run-store';
 import {
   deleteSession,
   deleteSessions,
@@ -790,78 +790,92 @@ export function registerIpcHandlers(wm: WindowManager): void {
   });
 
   // ===== Token Usage Stats =====
+  // The aggregate file is updated incrementally every time a run completes,
+  // so opening the settings page only needs to read one small JSON file.
   ipcMain.handle('stats:getTokenUsage', async (): Promise<TokenUsageSummary> => {
     try {
-      const dailyMap = new Map<
-        string,
-        { input: number; output: number; total: number; runs: number }
-      >();
-      const modelMap = new Map<
-        string,
-        { input: number; output: number; total: number; runs: number }
-      >();
+      const aggregate = await getTokenUsageAggregate();
 
-      const diskSessions = await loadAllSessions();
-      for (const session of diskSessions) {
-        const runIds = await listRuns(session.id);
-        let sessionModel = 'unknown';
-
-        for (const runId of runIds) {
-          const events = await getEvents(session.id, runId);
-
-          // Extract model from run_started
-          const started = events.find((e) => e.type === 'run_started');
-          if (started && started.type === 'run_started' && started.modelName) {
-            sessionModel = started.modelName;
-          }
-
-          // Extract token usage from run_completed
-          const completed = events.find((e) => e.type === 'run_completed');
-          if (completed && completed.type === 'run_completed' && completed.tokenUsage) {
-            const { input, output, total } = completed.tokenUsage;
-            const date = completed.timestamp.split('T')[0]!;
-
-            // Aggregate daily
-            const day = dailyMap.get(date) || { input: 0, output: 0, total: 0, runs: 0 };
-            day.input += input;
-            day.output += output;
-            day.total += total;
-            day.runs += 1;
-            dailyMap.set(date, day);
-
-            // Aggregate by model
-            const model = modelMap.get(sessionModel) || { input: 0, output: 0, total: 0, runs: 0 };
-            model.input += input;
-            model.output += output;
-            model.total += total;
-            model.runs += 1;
-            modelMap.set(sessionModel, model);
-          }
-        }
+      // Fallback: if the aggregate is empty (e.g. legacy install without the
+      // aggregate file), build it once from existing run event logs.
+      if (aggregate.totals.runs === 0) {
+        return await buildTokenUsageSummaryFromRuns();
       }
 
-      // Sort and build result
-      const daily: DayStats[] = [...dailyMap.entries()]
-        .map(([date, d]) => ({ date, ...d }))
-        .sort((a, b) => a.date.localeCompare(b.date));
-
-      const byModel: ModelStats[] = [...modelMap.entries()]
-        .map(([modelName, m]) => ({ modelName, ...m }))
-        .sort((a, b) => b.total - a.total);
-
-      const totals = {
-        input: byModel.reduce((s, m) => s + m.input, 0),
-        output: byModel.reduce((s, m) => s + m.output, 0),
-        total: byModel.reduce((s, m) => s + m.total, 0),
-        runs: byModel.reduce((s, m) => s + m.runs, 0),
-      };
-
-      return { daily, byModel, totals };
+      return aggregate;
     } catch (err) {
       console.error('[Main] stats:getTokenUsage failed:', (err as Error).message);
       return { daily: [], byModel: [], totals: { input: 0, output: 0, total: 0, runs: 0 } };
     }
   });
+
+  async function buildTokenUsageSummaryFromRuns(): Promise<TokenUsageSummary> {
+    const dailyMap = new Map<
+      string,
+      { input: number; output: number; total: number; runs: number }
+    >();
+    const modelMap = new Map<
+      string,
+      { input: number; output: number; total: number; runs: number }
+    >();
+
+    const diskSessions = await loadAllSessions();
+    for (const session of diskSessions) {
+      const runIds = await listRuns(session.id);
+      let sessionModel = 'unknown';
+
+      for (const runId of runIds) {
+        const events = await getEvents(session.id, runId);
+
+        // Extract model from run_started
+        const started = events.find((e) => e.type === 'run_started');
+        if (started && started.type === 'run_started' && started.modelName) {
+          sessionModel = started.modelName;
+        }
+
+        // Extract token usage from run_completed
+        const completed = events.find((e) => e.type === 'run_completed');
+        if (completed && completed.type === 'run_completed' && completed.tokenUsage) {
+          const { input, output, total } = completed.tokenUsage;
+          const date = completed.timestamp.split('T')[0]!;
+
+          // Aggregate daily
+          const day = dailyMap.get(date) || { input: 0, output: 0, total: 0, runs: 0 };
+          day.input += input;
+          day.output += output;
+          day.total += total;
+          day.runs += 1;
+          dailyMap.set(date, day);
+
+          // Aggregate by model
+          const model = modelMap.get(sessionModel) || { input: 0, output: 0, total: 0, runs: 0 };
+          model.input += input;
+          model.output += output;
+          model.total += total;
+          model.runs += 1;
+          modelMap.set(sessionModel, model);
+        }
+      }
+    }
+
+    // Sort and build result
+    const daily: DayStats[] = [...dailyMap.entries()]
+      .map(([date, d]) => ({ date, ...d }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const byModel: ModelStats[] = [...modelMap.entries()]
+      .map(([modelName, m]) => ({ modelName, ...m }))
+      .sort((a, b) => b.total - a.total);
+
+    const totals = {
+      input: byModel.reduce((s, m) => s + m.input, 0),
+      output: byModel.reduce((s, m) => s + m.output, 0),
+      total: byModel.reduce((s, m) => s + m.total, 0),
+      runs: byModel.reduce((s, m) => s + m.runs, 0),
+    };
+
+    return { daily, byModel, totals };
+  }
 
   // ===== Auto Update =====
 

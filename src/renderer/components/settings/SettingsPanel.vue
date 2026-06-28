@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import type { AppSettings } from '@shared/types';
 import { useSettingsStore } from '../../stores/settings';
+import { useStatsStore } from '../../stores/stats';
 import { useUpdateStore } from '../../stores/update';
 import { bridge } from '../../api/bridge';
 import ModelSelector from './ModelSelector.vue';
@@ -13,6 +14,7 @@ const emit = defineEmits<{
 
 const settingsStore = useSettingsStore();
 const updateStore = useUpdateStore();
+const statsStore = useStatsStore();
 const appVersion = ref('');
 const logPath = ref('');
 
@@ -37,6 +39,9 @@ onMounted(async () => {
   } catch {
     logPath.value = '';
   }
+  // Preload usage stats in the background so the data is ready before the
+  // user switches to the usage tab.
+  void statsStore.loadTokenUsage();
 });
 
 function openLogFile(): void {
