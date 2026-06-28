@@ -15,10 +15,7 @@ export function createSearchLessonsTool(workingDir: string) {
       '当你遇到工具执行失败、重复出错或不确定正确做法时，使用此工具查找历史经验。';
     readonly parameters = obj(
       {
-        query: p(
-          'string',
-          '搜索关键词，如工具名、错误信息、文件路径、技术术语等',
-        ),
+        query: p('string', '搜索关键词，如工具名、错误信息、文件路径、技术术语等'),
         errorType: p(
           'string',
           '教训类型筛选：tool_failure | user_correction | run_error | goal_repeated_failure',
@@ -41,15 +38,10 @@ export function createSearchLessonsTool(workingDir: string) {
       const results = searchLessons(workingDir, query, errorType, Math.min(limit, 10));
 
       if (results.length === 0) {
-        return this.success(
-          `未找到与 "${query}" 相关的教训记录。`,
-        );
+        return this.success(`未找到与 "${query}" 相关的教训记录。`);
       }
 
-      const lines: string[] = [
-        `找到 ${results.length} 条相关教训：`,
-        '',
-      ];
+      const lines: string[] = [`找到 ${results.length} 条相关教训：`, ''];
 
       const typeLabels: Record<string, string> = {
         tool_failure: '工具执行失败',
@@ -64,7 +56,9 @@ export function createSearchLessonsTool(workingDir: string) {
         const entry = full || sr.entry;
 
         lines.push(`### ${entry.title}`);
-        lines.push(`- 类型: ${entry.type} (${typeLabels[entry.type] || entry.type}) | 工具: ${entry.tool || '无'} | 日期: ${entry.date}`);
+        lines.push(
+          `- 类型: ${entry.type} (${typeLabels[entry.type] || entry.type}) | 工具: ${entry.tool || '无'} | 日期: ${entry.date}`,
+        );
         if (entry.problem) {
           lines.push(`- 问题: ${entry.problem}`);
         }

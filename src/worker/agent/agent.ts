@@ -367,7 +367,11 @@ export class Agent {
         this.emitStatus('executing');
         this.onToolStart(toolCall);
       },
-      onTurnStart: (_turnCount: number, _maxTurns: number, tokens: { input: number; output: number; total: number }) => {
+      onTurnStart: (
+        _turnCount: number,
+        _maxTurns: number,
+        tokens: { input: number; output: number; total: number },
+      ) => {
         this.turnCount = _turnCount;
         this.activeRunTokens = tokens;
         this.emitStatus('thinking', tokens);
@@ -442,10 +446,7 @@ export class Agent {
       (m) => m.role === 'tool' && typeof m.content === 'string' && m.content.startsWith('错误:'),
     );
     if (hasFailures) {
-      const extractionContexts = buildExtractionContexts(
-        this.messages,
-        runId,
-      );
+      const extractionContexts = buildExtractionContexts(this.messages, runId);
       if (extractionContexts.length > 0) {
         extractAndSaveLessons(
           extractionContexts,
@@ -502,7 +503,11 @@ export class Agent {
         this.emitStatus('executing');
         this.onToolStart(toolCall);
       },
-      onTurnStart: (turnCount: number, _maxTurns: number, tokens: { input: number; output: number; total: number }) => {
+      onTurnStart: (
+        turnCount: number,
+        _maxTurns: number,
+        tokens: { input: number; output: number; total: number },
+      ) => {
         this.turnCount = turnCount;
         this.activeRunTokens = tokens;
         this.emitStatus('thinking', tokens);
@@ -600,8 +605,7 @@ export class Agent {
     this.emitStatus('done');
 
     // Extract failure lessons from goal loop (fire-and-forget)
-    const goalFailed =
-      goalResult.state.status !== 'verification_passed';
+    const goalFailed = goalResult.state.status !== 'verification_passed';
     const goalRepeatedFailure =
       goalResult.state.status === 'blocked' && goalResult.state.lastVerificationOutput
         ? {
@@ -610,11 +614,7 @@ export class Agent {
           }
         : undefined;
 
-    const extractionContexts = buildExtractionContexts(
-      this.messages,
-      runId,
-      goalRepeatedFailure,
-    );
+    const extractionContexts = buildExtractionContexts(this.messages, runId, goalRepeatedFailure);
     if (extractionContexts.length > 0 || goalFailed) {
       extractAndSaveLessons(
         extractionContexts,
@@ -675,7 +675,10 @@ export class Agent {
     }
   }
 
-  private emitStatus(state: AgentStatus['state'], currentTokens?: { input: number; output: number; total: number }): void {
+  private emitStatus(
+    state: AgentStatus['state'],
+    currentTokens?: { input: number; output: number; total: number },
+  ): void {
     const runTokens = currentTokens || this.activeRunTokens;
     this.onStatus({
       state,

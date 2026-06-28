@@ -34,9 +34,17 @@ export const RECOMMENDED_MODELS: Array<{ provider: string; model: string; label:
   { provider: 'xai', model: 'grok-code-fast-1', label: 'Grok Code Fast' },
   { provider: 'xai', model: 'grok-4.3', label: 'Grok 4.3' },
   { provider: 'mistral', model: 'mistral.mistral-large-3-675b-instruct', label: 'Mistral Large 3' },
-  { provider: 'groq', model: 'meta-llama/llama-4-maverick-17b-128e-instruct', label: 'Llama 4 Maverick' },
+  {
+    provider: 'groq',
+    model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+    label: 'Llama 4 Maverick',
+  },
   { provider: 'openrouter', model: 'openai/gpt-5.1-codex', label: 'GPT-5.1 Codex (OpenRouter)' },
-  { provider: 'openrouter', model: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (OpenRouter)' },
+  {
+    provider: 'openrouter',
+    model: 'anthropic/claude-sonnet-4-5',
+    label: 'Claude Sonnet 4.5 (OpenRouter)',
+  },
 ];
 
 /**

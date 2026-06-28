@@ -64,7 +64,11 @@ export interface AgentLoopInput {
   requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>;
   /** Optional callback fired on each turn_start to keep external state in sync.
    *  tokenUsage is the accumulated token count for the current run so far. */
-  onTurnStart?: (turnCount: number, maxTurns: number, tokenUsage: { input: number; output: number; total: number }) => void;
+  onTurnStart?: (
+    turnCount: number,
+    maxTurns: number,
+    tokenUsage: { input: number; output: number; total: number },
+  ) => void;
 }
 
 export interface PrepareNextTurnResult {

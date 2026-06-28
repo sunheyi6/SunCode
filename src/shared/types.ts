@@ -368,7 +368,13 @@ export type WorkerOutMessage =
   | { type: 'runEvent'; sessionId: string; event: RunEvent }
   | { type: 'subagentStart'; sessionId: string; execution: SubagentExecution }
   | { type: 'subagentEnd'; sessionId: string; id: string; result: SubagentResult }
-  | { type: 'subagentProgress'; sessionId: string; executionId: string; agent: string; delta: SubagentProgressDelta }
+  | {
+      type: 'subagentProgress';
+      sessionId: string;
+      executionId: string;
+      agent: string;
+      delta: SubagentProgressDelta;
+    }
   | { type: 'goalEvent'; sessionId: string; event: GoalEvent }
   | { type: 'confirmRequest'; sessionId: string; toolCall: ToolCallContent };
 
