@@ -40,9 +40,15 @@ linux:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
+  allowElevation: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: always
   shortcutName: SunCode
+  uninstallDisplayName: SunCode
+  # Keep user data (sessions, settings) when uninstalling.
+  deleteAppDataOnUninstall: false
+  # Embed the version in the installer filename so users can tell builds apart.
+  artifactName: SunCode-Setup-${version}.${ext}
 
 # ===== 发布到 GitHub Releases =====
 publish:

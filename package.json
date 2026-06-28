@@ -1,6 +1,6 @@
 {
   "name": "suncode",
-  "version": "0.1.0",
+  "version": "0.1.16",
   "description": "SunCode - A desktop coding agent client powered by AI",
   "type": "module",
   "main": "dist-electron/main/index.js",
