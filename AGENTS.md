@@ -20,7 +20,7 @@
 |----------|------|
 | 主进程日志 | `%APPDATA%\SunCode\.suncode\app.log`（自动轮转，≥2MB → `app.old.log`） |
 | Agent 运行时诊断 | `%APPDATA%\SunCode\.suncode\diagnostics\<runId>.log`（每次运行独立文件） |
-| 运行事件 | `%APPDATA%\SunCode\.suncode\run-events\` |
+| 运行事件 | `%APPDATA%\SunCode\.suncode\sessions\<sessionId>\runs\<runId>.jsonl`（每次运行独立 JSONL 文件） |
 | Bash 后台输出（harness 层） | `%USERPROFILE%\.zcode\cli\exec\sess_{sessionId}\call_{callId}-stdout.log` |
 
 ## 构建与发布

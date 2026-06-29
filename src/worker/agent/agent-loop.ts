@@ -606,6 +606,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           toolCallId: tc.id,
           toolName: tc.name,
           timestamp: '',
+          arguments: tc.arguments,
         });
 
         const tool = tools.find((t) => t.name === tc.name);
@@ -626,6 +627,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             toolName: tc.name,
             success: false,
             timestamp: '',
+            error: `未知工具: ${tc.name}`,
+            output: '',
           });
           console.warn(`[AgentLoop] Unknown tool: ${tc.name}`);
           continue;
@@ -651,6 +654,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             toolName: tc.name,
             success: false,
             timestamp: '',
+            error: e.error,
+            output: '',
           });
           continue;
         }
@@ -690,6 +695,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               toolName: tc.name,
               success: false,
               timestamp: '',
+              error: formatted,
+              output: '',
             });
             continue;
           }
@@ -719,6 +726,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               toolName: tc.name,
               success: false,
               timestamp: '',
+              error: '用户取消了此操作',
+              output: '',
             });
             continue;
           }
@@ -756,6 +765,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 toolName: tc.name,
                 success: result.success,
                 timestamp: '',
+                output: result.output?.slice(0, 2000),
+                ...(result.error ? { error: result.error.slice(0, 500) } : {}),
               });
               console.log(
                 `[AgentLoop] Tool ${tc.name}: ${result.success ? 'OK' : 'FAIL'}` +
@@ -765,6 +776,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               diag.log('TOOL', `${tc.name} ${result.success ? 'OK' : 'FAIL'}`, {
                 durationMs: Date.now() - tStart,
                 success: result.success,
+                arguments: tc.arguments.slice(0, 500),
+                outputPreview: result.output?.slice(0, 500),
                 ...(result.error ? { error: result.error.slice(0, 80) } : {}),
               });
               return result;
@@ -784,12 +797,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 toolName: tc.name,
                 success: false,
                 timestamp: '',
+                error: e.error?.slice(0, 500) || '',
+                output: '',
               });
               console.log(
                 `[AgentLoop] Tool ${tc.name}: CRASH (${Date.now() - tStart}ms) — ${(error as Error).message.slice(0, 80)}`,
               );
               diag.log('TOOL', `${tc.name} CRASH`, {
                 durationMs: Date.now() - tStart,
+                arguments: tc.arguments.slice(0, 500),
                 error: (error as Error).message.slice(0, 80),
               });
               return e;

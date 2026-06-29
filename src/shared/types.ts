@@ -463,7 +463,7 @@ export type RunEvent =
   | { type: 'run_started'; runId: RunId; timestamp: string; modelName?: string }
   | { type: 'turn_started'; runId: RunId; turnNumber: number; timestamp: string }
   | { type: 'stream_event'; runId: RunId; event: StreamEvent; timestamp: string }
-  | { type: 'tool_started'; runId: RunId; toolCallId: string; toolName: string; timestamp: string }
+  | { type: 'tool_started'; runId: RunId; toolCallId: string; toolName: string; timestamp: string; arguments?: string }
   | {
       type: 'tool_completed';
       runId: RunId;
@@ -471,6 +471,8 @@ export type RunEvent =
       toolName: string;
       success: boolean;
       timestamp: string;
+      output?: string;
+      error?: string;
     }
   | {
       type: 'turn_completed';
