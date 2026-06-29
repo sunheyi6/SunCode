@@ -16,6 +16,27 @@ export function commandSummary(args: Record<string, unknown>): string {
   return command.length > 80 ? `${command.slice(0, 77)}...` : command || '执行命令';
 }
 
+export function toolActionLabel(name: string): string {
+  switch (name) {
+    case 'bash':
+      return '运行命令';
+    case 'read':
+      return '读取';
+    case 'glob':
+      return '查找';
+    case 'grep':
+      return '搜索';
+    case 'edit':
+      return '编辑';
+    case 'write':
+      return '写入';
+    case 'subagent':
+      return '子代理';
+    default:
+      return name;
+  }
+}
+
 export function fileOperationView(call: ToolCallContent): {
   filePath: string;
   label: '编辑中' | '已编辑' | '编辑失败';

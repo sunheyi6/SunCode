@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useModelsStore } from '../../stores/models';
-import { useSettingsStore } from '../../stores/settings';
 import { useSessionsStore } from '../../stores/sessions';
-import { useChatStore } from '../../stores/chat';
 import { getComposerTextareaHeight } from './chat-input';
 import { bridge } from '../../api/bridge';
+import { useDropdownGroup } from '../../composables/useDropdown';
+import WorkspaceSelector from './WorkspaceSelector.vue';
+import ModelSelector from './ModelSelector.vue';
+import PermissionSelector from './PermissionSelector.vue';
+import ThinkingSelector from './ThinkingSelector.vue';
 import type { GitInfo } from '@shared/types';
 
 const props = defineProps<{
@@ -17,19 +19,19 @@ const emit = defineEmits<{
   stop: [];
 }>();
 
-const modelsStore = useModelsStore();
-const settingsStore = useSettingsStore();
 const sessionsStore = useSessionsStore();
 
 const inputText = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const inputRef = ref<HTMLElement | null>(null);
-const modelOpen = ref(false);
-const thinkingOpen = ref(false);
-const permOpen = ref(false);
-const folderOpen = ref(false);
 
-// Workspace / Git info
+// Unified dropdown group: each dropdown keeps its own state but only one can be open.
+const dropdowns = useDropdownGroup();
+const workspaceDropdown = dropdowns.register('workspace');
+const modelDropdown = dropdowns.register('model');
+const permissionDropdown = dropdowns.register('permission');
+const thinkingDropdown = dropdowns.register('thinking');
+
 const gitInfo = ref<GitInfo>({
   isRepo: false,
   addedLines: 0,
@@ -42,16 +44,7 @@ const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
 
-const workspaceName = computed(() => {
-  const dir = activeSession.value?.workingDirectory;
-  if (!dir) return '未选择文件夹';
-  const segments = dir.split(/[\\/]/).filter(Boolean);
-  return segments[segments.length - 1] || dir;
-});
-
 const workspacePath = computed(() => activeSession.value?.workingDirectory || '');
-
-const gitBranch = computed(() => (gitInfo.value.isRepo ? gitInfo.value.branch : null));
 
 async function refreshGitInfo() {
   const dir = workspacePath.value;
@@ -80,150 +73,13 @@ async function refreshGitInfo() {
 
 watch(() => activeSession.value?.workingDirectory, refreshGitInfo, { immediate: true });
 
-/** Unique working directories from all sessions, sorted by recency. */
-const recentFolders = computed(() => {
-  const seen = new Map<string, { path: string; sessionId: string; updated: number }>();
-  for (const s of sessionsStore.sessions) {
-    const dir = s.workingDirectory;
-    if (!dir) continue;
-    const ts = new Date(s.updated).getTime();
-    const entry = seen.get(dir);
-    if (!entry || ts > entry.updated) {
-      seen.set(dir, { path: dir, sessionId: s.id, updated: ts });
-    }
-  }
-  return Array.from(seen.values())
-    .sort((a, b) => b.updated - a.updated)
-    .slice(0, 20); // Cap at 20 entries
-});
-
-async function selectFolder() {
-  folderOpen.value = false;
-  const dir = await bridge.selectDirectory();
-  if (dir) {
-    await sessionsStore.createSession(dir);
-  }
-}
-
-function switchToFolder(item: { path: string; sessionId: string }) {
-  folderOpen.value = false;
-  // Find the active session for this directory (prefer the most recent one)
-  const session = sessionsStore.sessions.find(
-    (s) => s.workingDirectory === item.path,
-  );
-  if (session && session.id !== sessionsStore.activeSessionId) {
-    sessionsStore.selectSession(session.id);
-  }
-}
-
-function toggleFolder(): void {
-  const nextState = !folderOpen.value;
-  closeAll();
-  folderOpen.value = nextState;
-}
-
 const hasInput = computed(() => inputText.value.trim().length > 0);
 const isGoalInput = computed(() => inputText.value.trim().startsWith('/goal'));
-/** Only show models for providers that have an API key configured. */
-const availableModels = computed(() =>
-  modelsStore.recommendedModels.filter((m) => modelsStore.hasKey(m.provider)),
-);
-const currentModelLabel = computed(() => {
-  const model = availableModels.value.find(
-    (option) =>
-      option.model === modelsStore.activeModel && option.provider === modelsStore.activeProvider,
-  );
-  return model?.label ?? `${modelsStore.activeProvider}/${modelsStore.activeModel}`;
-});
-
-const thinkingLevels = [
-  { value: 'minimal' as const, label: '最小' },
-  { value: 'low' as const, label: '低' },
-  { value: 'medium' as const, label: '中' },
-  { value: 'high' as const, label: '高' },
-  { value: 'xhigh' as const, label: '最高' },
-];
-
-const currentThinking = computed(
-  () =>
-    thinkingLevels.find((level) => level.value === settingsStore.settings.thinkingLevel) ??
-    thinkingLevels[2],
-);
-
-const permissionModes = [
-  { value: 'plan' as const, label: '计划模式', icon: '◇', desc: '仅规划，不修改文件' },
-  { value: 'full_access' as const, label: '完全访问', icon: '♢', desc: '无限制访问' },
-  { value: 'auto_edit' as const, label: '自动编辑', icon: '✎', desc: '自动编辑文件' },
-  { value: 'confirm_changes' as const, label: '变更前确认', icon: '✓', desc: '修改前需确认' },
-];
-
-const currentPerm = computed(
-  () =>
-    permissionModes.find(
-      (permission) => permission.value === settingsStore.settings.permissionMode,
-    ) ?? permissionModes[1],
-);
-
-function closeAll(): void {
-  modelOpen.value = false;
-  thinkingOpen.value = false;
-  permOpen.value = false;
-  folderOpen.value = false;
-}
 
 function onDocumentClick(event: MouseEvent): void {
   if (!inputRef.value?.contains(event.target as Node)) {
-    closeAll();
+    dropdowns.closeAll();
   }
-}
-
-function toggleModel(): void {
-  if (props.isStreaming) return; // 回答中禁止切换模型
-  const nextState = !modelOpen.value;
-  closeAll();
-  modelOpen.value = nextState;
-}
-
-function toggleThinking(): void {
-  const nextState = !thinkingOpen.value;
-  closeAll();
-  thinkingOpen.value = nextState;
-}
-
-function togglePerm(): void {
-  const nextState = !permOpen.value;
-  closeAll();
-  permOpen.value = nextState;
-}
-
-async function selectModel(option: { provider: string; model: string }): Promise<void> {
-  // 如果当前会话已有对话历史，切换模型会重新发送全部上下文
-  const chatStore = useChatStore();
-  const msgCount = chatStore.messages.length;
-  if (msgCount > 0) {
-    modelOpen.value = false;
-    const confirmed = await bridge.confirm(
-      '切换模型',
-      `当前对话已有 ${msgCount} 条消息，切换模型会将全部上下文重新导入新模型，可能产生额外 Token 费用。确认切换到 ${option.model}？`,
-    );
-    if (!confirmed) return;
-  }
-  modelsStore.selectModel(option.provider, option.model);
-  modelOpen.value = false;
-  // 在聊天框中显示切换提示
-  if (msgCount > 0) {
-    chatStore.setModelSwitchNotice(`已切换至 ${option.model}，后续对话将使用新模型。`);
-  }
-}
-
-function selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
-  settingsStore.update({ thinkingLevel: level });
-  thinkingOpen.value = false;
-}
-
-function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
-  settingsStore.update({ permissionMode: mode });
-  permOpen.value = false;
 }
 
 function resizeTextarea(): void {
@@ -339,7 +195,7 @@ function handleKeydown(event: KeyboardEvent): void {
 function focusInput(): void {
   // Only steal focus when no dropdown is open, so keyboard/menu interactions
   // are not interrupted.
-  if (modelOpen.value || thinkingOpen.value || permOpen.value || folderOpen.value) return;
+  if (dropdowns.isAnyOpen.value) return;
   textareaRef.value?.focus();
 }
 
@@ -364,54 +220,7 @@ watch(
 <template>
   <div ref="inputRef" class="chat-input">
     <!-- Workspace info bar -->
-    <div class="workspace-bar">
-      <div class="control-dropdown folder-dropdown" :class="{ open: folderOpen }">
-        <button
-          class="workspace-folder"
-          type="button"
-          :aria-expanded="folderOpen"
-          aria-haspopup="menu"
-          @click="toggleFolder"
-        >
-          <span class="folder-icon" aria-hidden="true">📁</span>
-          <span class="workspace-name">{{ workspaceName }}</span>
-          <span class="chevron" aria-hidden="true">⌄</span>
-        </button>
-        <div v-if="folderOpen" class="dropdown-menu folder-menu" role="menu">
-          <button
-            v-for="item in recentFolders"
-            :key="item.path"
-            class="dropdown-item"
-            :class="{ active: item.path === workspacePath }"
-            type="button"
-            role="menuitem"
-            @click="switchToFolder(item)"
-          >
-            <span class="item-folder-icon">📁</span>
-            <span class="item-info">
-              <span class="item-label">{{ item.path.split(/[\\/]/).filter(Boolean).pop() || item.path }}</span>
-              <span class="item-desc">{{ item.path }}</span>
-            </span>
-          </button>
-          <div v-if="recentFolders.length > 0" class="dropdown-divider" />
-          <button
-            class="dropdown-item pick-folder-item"
-            type="button"
-            role="menuitem"
-            @click="selectFolder"
-          >
-            <span class="item-icon-pick">＋</span>
-            <span class="item-info">
-              <span class="item-label">选择其他文件夹...</span>
-            </span>
-          </button>
-        </div>
-      </div>
-      <div v-if="gitBranch" class="git-branch">
-        <span class="branch-icon" aria-hidden="true">⑂</span>
-        <span class="branch-name">{{ gitBranch }}</span>
-      </div>
-    </div>
+    <WorkspaceSelector :git-info="gitInfo" :dropdown="workspaceDropdown" />
 
     <div class="composer" :class="{ streaming: props.isStreaming }">
       <!-- Goal mode indicator -->
@@ -436,36 +245,7 @@ watch(
             <span aria-hidden="true">＋</span>
           </button>
 
-          <div class="control-dropdown permission-dropdown" :class="{ open: permOpen }">
-            <button
-              class="toolbar-btn permission-btn"
-              type="button"
-              :aria-expanded="permOpen"
-              aria-haspopup="menu"
-              @click="togglePerm"
-            >
-              <span class="permission-icon" aria-hidden="true">{{ currentPerm.icon }}</span>
-              <span class="btn-label">{{ currentPerm.label }}</span>
-              <span class="chevron" aria-hidden="true">⌄</span>
-            </button>
-            <div v-if="permOpen" class="dropdown-menu permission-menu" role="menu">
-              <button
-                v-for="permission in permissionModes"
-                :key="permission.value"
-                class="dropdown-item"
-                :class="{ active: permission.value === settingsStore.settings.permissionMode }"
-                type="button"
-                role="menuitem"
-                @click="selectPerm(permission.value)"
-              >
-                <span class="item-icon">{{ permission.icon }}</span>
-                <span class="item-info">
-                  <span class="item-label">{{ permission.label }}</span>
-                  <span class="item-desc">{{ permission.desc }}</span>
-                </span>
-              </button>
-            </div>
-          </div>
+          <PermissionSelector :dropdown="permissionDropdown" />
         </div>
 
         <div class="toolbar-group toolbar-right">
@@ -475,66 +255,8 @@ watch(
             aria-hidden="true"
           />
 
-          <div class="control-dropdown model-dropdown" :class="{ open: modelOpen }">
-            <button
-              class="toolbar-btn model-btn"
-              type="button"
-              :class="{ 'model-btn-disabled': props.isStreaming }"
-              :aria-expanded="modelOpen"
-              aria-haspopup="menu"
-              :title="props.isStreaming ? '回答中无法切换模型' : '切换模型'"
-              @click="toggleModel"
-            >
-              <span class="btn-label">{{ currentModelLabel }}</span>
-              <span class="chevron" aria-hidden="true">⌄</span>
-            </button>
-            <div v-if="modelOpen" class="dropdown-menu model-menu" role="menu">
-              <button
-                v-for="model in availableModels"
-                :key="`${model.provider}/${model.model}`"
-                class="dropdown-item"
-                :class="{
-                  active:
-                    model.model === modelsStore.activeModel &&
-                    model.provider === modelsStore.activeProvider,
-                }"
-                type="button"
-                role="menuitem"
-                @click="selectModel(model)"
-              >
-                <span class="item-label">{{ model.label }}</span>
-                <span class="item-provider">{{ model.provider }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="control-dropdown thinking-dropdown" :class="{ open: thinkingOpen }">
-            <button
-              class="toolbar-btn thinking-btn"
-              type="button"
-              :aria-expanded="thinkingOpen"
-              aria-haspopup="menu"
-              @click="toggleThinking"
-            >
-              <span class="thinking-icon" aria-hidden="true">♧</span>
-              <span class="btn-label">{{ currentThinking.label }}</span>
-              <span class="chevron" aria-hidden="true">⌄</span>
-            </button>
-            <div v-if="thinkingOpen" class="dropdown-menu thinking-menu" role="menu">
-              <button
-                v-for="level in thinkingLevels"
-                :key="level.value"
-                class="dropdown-item"
-                :class="{ active: level.value === settingsStore.settings.thinkingLevel }"
-                type="button"
-                role="menuitem"
-                @click="selectThinking(level.value)"
-              >
-                <span>{{ level.label }}</span>
-                <span v-if="level.value === 'xhigh'" class="item-hint">最深度</span>
-              </button>
-            </div>
-          </div>
+          <ModelSelector :is-streaming="props.isStreaming" :dropdown="modelDropdown" />
+          <ThinkingSelector :dropdown="thinkingDropdown" />
 
           <!-- Stop button (visible during streaming) -->
           <button

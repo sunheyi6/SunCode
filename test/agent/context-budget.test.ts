@@ -88,7 +88,7 @@ describe('pruneStaleToolResults', () => {
 
     const { messages, prunedCount, tokensSaved } = pruneStaleToolResults(
       msgs,
-      defaultPolicy({ minRecentTurns: 0, minRecentTurnsFull: 0 }),
+      defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 0 } }),
     );
     expect(prunedCount).toBeGreaterThan(0);
     expect(tokensSaved).toBeGreaterThan(0);
@@ -155,7 +155,7 @@ describe('pruneStaleToolResults', () => {
 
     const { prunedCount } = pruneStaleToolResults(
       msgs,
-      defaultPolicy({ minRecentTurns: 0, minRecentTurnsFull: 0 }),
+      defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 0 } }),
     );
     expect(prunedCount).toBe(0); // Already pruned, shouldn't double-count
   });
@@ -214,7 +214,7 @@ describe('pruneStaleToolResults', () => {
     ];
     const { prunedCount } = pruneStaleToolResults(
       msgs,
-      defaultPolicy({ minRecentTurns: 0, minRecentTurnsFull: 0 }),
+      defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 0 } }),
     );
     // Non-string content is skipped (pruning only applies to string content)
     expect(prunedCount).toBe(0);

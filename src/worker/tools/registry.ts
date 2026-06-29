@@ -2,7 +2,7 @@ import { BaseTool, type Tool } from './types';
 import { createReadTool } from './read';
 import { createWriteTool } from './write';
 import { createEditTool } from './edit';
-import { createBashTool, type BashToolCallbacks } from './bash';
+import { createBashTool, type BashToolCallbacks, type BashToolOptions } from './bash';
 import { createGrepTool } from './grep';
 import { createGlobTool } from './glob';
 import { createLsTool } from './ls';
@@ -82,13 +82,14 @@ export function createToolRegistry(
   workingDir: string,
   callbacks?: BashToolCallbacks,
   settings?: AppSettings,
+  bashOptions?: BashToolOptions,
 ): ToolRegistry {
   const registry = new ToolRegistry();
 
   registry.register(createReadTool(workingDir));
   registry.register(createWriteTool(workingDir));
   registry.register(createEditTool(workingDir));
-  registry.register(createBashTool(workingDir, callbacks));
+  registry.register(createBashTool(workingDir, callbacks, bashOptions));
   registry.register(createGrepTool(workingDir));
   registry.register(createGlobTool(workingDir));
   registry.register(createLsTool(workingDir));

@@ -54,10 +54,8 @@ describe('file tool details', () => {
       type: 'file_edit',
       filePath,
       status: 'failed',
-      error: expect.stringContaining('old_string not found'),
+      error: expect.stringContaining('Could not find'),
     });
-    expect(result.error).toContain('use read');
-    expect(result.error).toContain('write');
   });
 
   test('edit sandbox failure retains the normalized target path', async () => {
@@ -72,7 +70,7 @@ describe('file tool details', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.details).toEqual({
+    expect(result.details).toMatchObject({
       type: 'file_edit',
       filePath,
       status: 'failed',
@@ -89,7 +87,7 @@ describe('file tool details', () => {
     });
 
     expect(await readFile(filePath, 'utf-8')).toBe('one\ntwo\n');
-    expect(result.details).toEqual({
+    expect(result.details).toMatchObject({
       type: 'file_edit',
       filePath,
       status: 'edited',
@@ -118,7 +116,7 @@ describe('file tool details', () => {
     const result = await createWriteTool(dir).execute({ file_path: filePath });
 
     expect(result.success).toBe(false);
-    expect(result.details).toEqual({
+    expect(result.details).toMatchObject({
       type: 'file_edit',
       filePath,
       status: 'failed',

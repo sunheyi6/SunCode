@@ -13,10 +13,11 @@ import type {
 } from '@shared/types';
 
 import type { Tool } from '../tools/types';
-import { quickMatchLesson } from './lessons';
 import { DiagLogger } from '../utils/diag-logger';
 import { buildSystemPrompt } from './system-prompt';
 import { computeNeedsFollowUp } from './turn-decision';
+import { handleStream } from './stream-handler';
+import { executeTools } from './tool-executor';
 
 /** Context passed to prepareNextTurn so implementors can trim or adjust. */
 export interface PrepareNextTurnContext {
@@ -126,6 +127,26 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     throw new Error('未配置模型。请在设置中选择一个模型并配置 API Key。');
   }
 
+  const streamSimpleFn: (
+    model: unknown,
+    context: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ) => AsyncIterable<AssistantMessageEvent> = await (async () => {
+    try {
+      const pi = await import('@earendil-works/pi-ai');
+      const fn = pi.streamSimple as unknown as typeof streamSimpleFn;
+      if (!fn) {
+        throw new Error('streamSimple not found in pi-ai exports');
+      }
+      return fn;
+    } catch (importErr) {
+      console.error('[AgentLoop] Failed to import pi-ai:', importErr);
+      throw new Error(
+        `无法加载 AI 库：${(importErr as Error).message}。请确保已安装 @earendil-works/pi-ai。`,
+      );
+    }
+  })();
+
   const contextMessages: Message[] = [...initialMessages];
   let turnCount = initialTurnCount;
   const tokenUsage = { input: 0, output: 0, total: 0 };
@@ -181,24 +202,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     input.onTurnStart?.(turnCount, settings.maxTurns || MAX_TURNS, { ...tokenUsage });
 
     try {
-      // Import pi-ai dynamically
-      let streamSimpleFn: (
-        model: unknown,
-        context: Record<string, unknown>,
-        options?: Record<string, unknown>,
-      ) => AsyncIterable<AssistantMessageEvent>;
-      try {
-        const pi = await import('@earendil-works/pi-ai');
-        streamSimpleFn = pi.streamSimple as unknown as typeof streamSimpleFn;
-        if (!streamSimpleFn) {
-          throw new Error('streamSimple not found in pi-ai exports');
-        }
-      } catch (importErr) {
-        console.error('[AgentLoop] Failed to import pi-ai:', importErr);
-        throw new Error(
-          `无法加载 AI 库：${(importErr as Error).message}。请确保已安装 @earendil-works/pi-ai。`,
-        );
-      }
 
       // Build context for pi-ai
       const piContext = {
@@ -222,33 +225,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const lastMsgsForLog = contextMessages.filter((m) => m.role !== 'system').slice(-3);
       for (let mi = 0; mi < lastMsgsForLog.length; mi++) {
         const m = lastMsgsForLog[mi];
-        const contentStr =
-          typeof m.content === 'string'
-            ? m.content
-            : m.content
-                .filter((b) => b.type === 'text' || b.type === 'thinking')
-                .map((b) => ('text' in b ? b.text : ''))
-                .join('\n');
+        const contentStr = getMessageTextContent(m);
         diag.log('LLM_REQUEST_INPUT', `[msg-${mi}] role=${m.role} len=${contentStr.length}`, {
           content: contentStr,
         });
       }
 
-      // Accumulate content as it streams in
-      let assistantText = '';
-      const toolCalls: ToolCallContent[] = [];
-      let thinkingText = '';
-      let assistantMsgRaw: Record<string, unknown> | null = null;
-
       // Capture request message summaries for turn_detail event
       const requestMsgSummaries = lastMsgsForLog.map((m) => {
-        const contentStr =
-          typeof m.content === 'string'
-            ? m.content
-            : m.content
-                .filter((b) => b.type === 'text' || b.type === 'thinking')
-                .map((b) => ('text' in b ? b.text : ''))
-                .join('\n');
+        const contentStr = getMessageTextContent(m);
         return {
           role: m.role,
           length: contentStr.length,
@@ -270,164 +255,31 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         timestamp: '',
       });
 
-      let requestError: string | undefined;
+      const stream = streamSimpleFn(model, piContext, {
+        reasoning: settings.thinkingLevel,
+        signal: abortSignal,
+        cacheRetention: 'long',
+        sessionId,
+      });
 
-      try {
-        const stream = streamSimpleFn(model, piContext, {
-          reasoning: settings.thinkingLevel,
-          signal: abortSignal,
-          cacheRetention: 'long',
-          sessionId,
-        });
+      const streamResult = await handleStream({
+        stream,
+        onStream,
+        onRunEvent: (event) => onRunEvent(event),
+        diag,
+        settings: settings,
+        systemPrompt,
+        runId,
+        turnCount,
+        requestAttempt,
+        requestStartTime,
+        requestMsgSummaries,
+      });
 
-        // Emit message_start once at the beginning
-        onStream({ type: 'message_start' });
-
-        for await (const event of stream) {
-          switch (event.type) {
-            case 'start':
-            case 'text_start':
-            case 'thinking_start':
-            case 'thinking_end':
-              // No-op: we emit assembled state via message_update
-              break;
-            case 'text_delta':
-              assistantText += event.delta;
-              onStream({
-                type: 'message_update',
-                data: {
-                  text: assistantText,
-                  thinking: thinkingText,
-                  toolCalls: [...toolCalls],
-                },
-              });
-              break;
-            case 'text_end':
-              break;
-            case 'thinking_delta':
-              thinkingText += event.delta;
-              onStream({
-                type: 'message_update',
-                data: {
-                  text: assistantText,
-                  thinking: thinkingText,
-                  toolCalls: [...toolCalls],
-                },
-              });
-              break;
-            case 'toolcall_start':
-              // No-op: toolcall is added/updated on toolcall_end
-              break;
-            case 'toolcall_delta':
-              // No-op: arguments are accumulated locally
-              break;
-            case 'toolcall_end': {
-              const tc: ToolCallContent = {
-                type: 'tool_call',
-                id: event.toolCall.id,
-                name: event.toolCall.name,
-                arguments: JSON.stringify(event.toolCall.arguments),
-              };
-              toolCalls.push(tc);
-              onStream({
-                type: 'message_update',
-                data: {
-                  text: assistantText,
-                  thinking: thinkingText,
-                  toolCalls: [...toolCalls],
-                },
-              });
-              break;
-            }
-            case 'done':
-              assistantMsgRaw = event.message as unknown as Record<string, unknown>;
-              if (event.message.usage) {
-                tokenUsage.input += event.message.usage.input || 0;
-                tokenUsage.output += event.message.usage.output || 0;
-                tokenUsage.total += event.message.usage.totalTokens || 0;
-              }
-              break;
-            case 'error': {
-              if (event.reason === 'aborted') {
-                const err = new Error('已中止') as Error & { name: string };
-                err.name = 'AbortError';
-                throw err;
-              }
-              const errMsg =
-                ((event.error as unknown as Record<string, unknown>)?.errorMessage as string) ||
-                'LLM stream error';
-              throw new Error(errMsg);
-            }
-          }
-        }
-
-        console.log(`[AgentLoop] Stream done:`, {
-          assistantTextLen: assistantText.length,
-          thinkingTextLen: thinkingText.length,
-          toolCalls: toolCalls.length,
-          stopReason: assistantMsgRaw?.stopReason,
-        });
-        diag.exit(
-          'LLM',
-          `${assistantText.length}chars ${thinkingText.length}thinking ${toolCalls.length}tools`,
-          { stopReason: assistantMsgRaw?.stopReason },
-        );
-
-        // Log full assistant text and thinking for post-mortem
-        if (assistantText) {
-          diag.log('LLM_RESPONSE_TEXT', `len=${assistantText.length}`, { content: assistantText });
-        }
-        if (thinkingText) {
-          diag.log('LLM_RESPONSE_THINKING', `len=${thinkingText.length}`, {
-            content: thinkingText,
-          });
-        }
-
-        // Emit enriched run event with request/response content for call trace panel
-        const durationMs = Date.now() - requestStartTime;
-        const usage = assistantMsgRaw?.usage as
-          | { input?: number; output?: number; totalTokens?: number }
-          | undefined;
-        onRunEvent({
-          type: 'model_request_completed',
-          runId,
-          turnNumber: turnCount,
-          attempt: requestAttempt,
-          provider: settings.activeProvider,
-          model: settings.activeModel,
-          durationMs,
-          inputTokens: usage?.input,
-          outputTokens: usage?.output,
-          totalTokens: usage?.totalTokens,
-          stopReason: assistantMsgRaw?.stopReason as string | undefined,
-          error: requestError,
-          timestamp: '',
-          requestMessages: requestMsgSummaries,
-          systemTokens: Math.round(systemPrompt.length / 3.5),
-          responseText: assistantText,
-          responseThinking: thinkingText,
-          responseToolCalls: [...toolCalls],
-        });
-      } catch (streamErr) {
-        if (!requestError) {
-          requestError = (streamErr as Error).message;
-        }
-        throw streamErr;
-      }
-
-      // Check for empty response
-      if (!assistantText && toolCalls.length === 0 && !thinkingText) {
-        console.error(
-          `[AgentLoop] Empty response from ${settings.activeProvider}/${settings.activeModel}` +
-            ` on turn ${turnCount}. assistantTextLen=${assistantText.length}` +
-            ` toolCalls=${toolCalls.length} thinkingLen=${thinkingText.length}` +
-            ` stopReason=${assistantMsgRaw?.stopReason || 'none'}`,
-        );
-        diag.log('LLM', 'empty_response', { stopReason: assistantMsgRaw?.stopReason });
-        throw new Error(
-          `模型 ${settings.activeProvider}/${settings.activeModel} 返回了空响应（stopReason=${assistantMsgRaw?.stopReason || 'none'}），请检查 API Key、额度和模型权限。`,
-        );
-      }
+      const { assistantText, thinkingText, toolCalls, assistantMsgRaw } = streamResult;
+      tokenUsage.input += streamResult.tokenUsage.input;
+      tokenUsage.output += streamResult.tokenUsage.output;
+      tokenUsage.total += streamResult.tokenUsage.total;
 
       // ===== Turn Decision =====
       // Compute whether we need another turn based on tool calls and signals.
@@ -580,280 +432,26 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         };
       }
 
-      // Execute tool calls (parallel when multiple independent calls)
-      console.log(`[AgentLoop] Executing ${toolCalls.length} tool calls`);
-
       if (abortSignal.aborted) {
         const err2 = new Error('已中止') as Error & { name: string };
         err2.name = 'AbortError';
         throw err2;
       }
 
-      // Phase 1: Validate all tools synchronously, emit start events
-      interface ValidatedCall {
-        tc: (typeof toolCalls)[number];
-        tool: Tool;
-        params: Record<string, unknown>;
-      }
-      const toolResults: ToolResult[] = [];
-      const toExecute: ValidatedCall[] = [];
-
-      for (const tc of toolCalls) {
-        onToolStart(tc);
-        onRunEvent({
-          type: 'tool_started',
-          runId,
-          toolCallId: tc.id,
-          toolName: tc.name,
-          timestamp: '',
-          arguments: tc.arguments,
-        });
-
-        const tool = tools.find((t) => t.name === tc.name);
-        if (!tool) {
-          const e: ToolResult = {
-            toolCallId: tc.id,
-            name: tc.name,
-            success: false,
-            error: `未知工具: ${tc.name}`,
-            output: '',
-          };
-          toolResults.push(e);
-          onToolEnd(e);
-          onRunEvent({
-            type: 'tool_completed',
-            runId,
-            toolCallId: tc.id,
-            toolName: tc.name,
-            success: false,
-            timestamp: '',
-            error: `未知工具: ${tc.name}`,
-            output: '',
-          });
-          console.warn(`[AgentLoop] Unknown tool: ${tc.name}`);
-          continue;
-        }
-
-        let params: Record<string, unknown>;
-        try {
-          params = JSON.parse(tc.arguments);
-        } catch {
-          const e: ToolResult = {
-            toolCallId: tc.id,
-            name: tc.name,
-            success: false,
-            error: `Validation failed for tool "${tc.name}": JSON parse error in arguments.\n\nReceived arguments:\n${tc.arguments}`,
-            output: '',
-          };
-          toolResults.push(e);
-          onToolEnd(e);
-          onRunEvent({
-            type: 'tool_completed',
-            runId,
-            toolCallId: tc.id,
-            toolName: tc.name,
-            success: false,
-            timestamp: '',
-            error: e.error,
-            output: '',
-          });
-          continue;
-        }
-
-        // Validate required parameters
-        {
-          const def = tool.getDefinition();
-          const required = (def.parameters as { required?: string[] }).required ?? [];
-          const props =
-            (def.parameters as { properties?: Record<string, { type: string }> }).properties ?? {};
-          let missing: string | null = null;
-          for (const key of required) {
-            if (params[key] === undefined || params[key] === null) {
-              missing = key;
-              break;
-            }
-            if (props[key]?.type === 'integer' && typeof params[key] === 'string') {
-              const n = Number(params[key]);
-              if (Number.isFinite(n)) params[key] = n;
-            }
-          }
-          if (missing) {
-            const formatted = `Validation failed for tool "${tc.name}":\n  - ${missing}: Required property\n\nReceived arguments:\n${JSON.stringify(params, null, 2)}`;
-            const e: ToolResult = {
-              toolCallId: tc.id,
-              name: tc.name,
-              success: false,
-              error: formatted,
-              output: '',
-            };
-            toolResults.push(e);
-            onToolEnd(e);
-            onRunEvent({
-              type: 'tool_completed',
-              runId,
-              toolCallId: tc.id,
-              toolName: tc.name,
-              success: false,
-              timestamp: '',
-              error: formatted,
-              output: '',
-            });
-            continue;
-          }
-        }
-
-        // -- Permission: confirm destructive tools --
-        if (
-          settings.permissionMode === 'confirm_changes' &&
-          !tool.isReadonly &&
-          requestConfirmation
-        ) {
-          const confirmed = await requestConfirmation(tc);
-          if (!confirmed) {
-            const skipped: ToolResult = {
-              toolCallId: tc.id,
-              name: tc.name,
-              success: false,
-              error: '用户取消了此操作',
-              output: '',
-            };
-            toolResults.push(skipped);
-            onToolEnd(skipped);
-            onRunEvent({
-              type: 'tool_completed',
-              runId,
-              toolCallId: tc.id,
-              toolName: tc.name,
-              success: false,
-              timestamp: '',
-              error: '用户取消了此操作',
-              output: '',
-            });
-            continue;
-          }
-        }
-
-        toExecute.push({ tc, tool, params });
-      }
-
-      // Phase 2: Execute all valid tools in parallel
-      if (toExecute.length > 0) {
-        const mode = toExecute.length > 1 ? 'parallel' : 'single';
-        const toolExecStartTime = Date.now();
-        console.log(
-          `[AgentLoop] Executing ${toExecute.length} tools in ${mode}:` +
-            ` [${toExecute.map((t) => t.tc.name).join(', ')}]`,
-        );
-
-        const settled = await Promise.allSettled(
-          toExecute.map(async ({ tc, tool, params }) => {
-            const tStart = Date.now();
-            try {
-              const paramsStr = JSON.stringify(params);
-              const paramsPreview =
-                paramsStr.length > 100 ? `${paramsStr.slice(0, 100)}...` : paramsStr;
-              console.log(`[AgentLoop] Tool ${tc.name} executing (params: ${paramsPreview})`);
-              tool.onProgress = (chunk: string) => onToolProgress(tc.id, chunk);
-              const result = await tool.execute(params);
-              tool.onProgress = null;
-              result.toolCallId = tc.id;
-              onToolEnd(result);
-              onRunEvent({
-                type: 'tool_completed',
-                runId,
-                toolCallId: tc.id,
-                toolName: tc.name,
-                success: result.success,
-                timestamp: '',
-                output: result.output?.slice(0, 2000),
-                ...(result.error ? { error: result.error.slice(0, 500) } : {}),
-              });
-              console.log(
-                `[AgentLoop] Tool ${tc.name}: ${result.success ? 'OK' : 'FAIL'}` +
-                  ` (${Date.now() - tStart}ms)` +
-                  `${result.error ? ` — ${result.error.slice(0, 80)}` : ''}`,
-              );
-              diag.log('TOOL', `${tc.name} ${result.success ? 'OK' : 'FAIL'}`, {
-                durationMs: Date.now() - tStart,
-                success: result.success,
-                arguments: tc.arguments.slice(0, 500),
-                outputPreview: result.output?.slice(0, 500),
-                ...(result.error ? { error: result.error.slice(0, 80) } : {}),
-              });
-              return result;
-            } catch (error) {
-              const e: ToolResult = {
-                toolCallId: tc.id,
-                name: tc.name,
-                success: false,
-                error: (error as Error).message,
-                output: '',
-              };
-              onToolEnd(e);
-              onRunEvent({
-                type: 'tool_completed',
-                runId,
-                toolCallId: tc.id,
-                toolName: tc.name,
-                success: false,
-                timestamp: '',
-                error: e.error?.slice(0, 500) || '',
-                output: '',
-              });
-              console.log(
-                `[AgentLoop] Tool ${tc.name}: CRASH (${Date.now() - tStart}ms) — ${(error as Error).message.slice(0, 80)}`,
-              );
-              diag.log('TOOL', `${tc.name} CRASH`, {
-                durationMs: Date.now() - tStart,
-                arguments: tc.arguments.slice(0, 500),
-                error: (error as Error).message.slice(0, 80),
-              });
-              return e;
-            }
-          }),
-        );
-
-        for (const s of settled) {
-          if (s.status === 'fulfilled') {
-            toolResults.push(s.value);
-          } else {
-            toolResults.push({
-              toolCallId: '',
-              name: 'unknown',
-              success: false,
-              error: `内部错误: ${s.reason}`,
-              output: '',
-            });
-          }
-        }
-
-        console.log(
-          `[AgentLoop] Tools done: ${toolResults.filter((t) => t.success).length}/${toolResults.length} OK` +
-            ` (total ${Date.now() - toolExecStartTime}ms)`,
-        );
-        diag.exit(
-          'TOOLS',
-          `${toolResults.filter((t) => t.success).length}/${toolResults.length} OK`,
-          { durationMs: Date.now() - toolExecStartTime },
-        );
-
-        // Enhance failed tool results with lesson hints
-        for (const tr of toolResults) {
-          if (!tr.success && tr.error) {
-            try {
-              const match = quickMatchLesson(workingDir, tr.name, tr.error);
-              if (match) {
-                tr.output = `⚠️ 相关教训：[${match.entry.date}] ${match.entry.title}
-   使用 search_lessons 工具查看详情。
-
-${tr.output}`;
-              }
-            } catch {
-              // Never let lesson matching break tool execution
-            }
-          }
-        }
-      }
+      const toolResult = await executeTools({
+        toolCalls,
+        tools,
+        settings: settings,
+        workingDir,
+        runId,
+        onToolStart,
+        onToolEnd,
+        onToolProgress,
+        onRunEvent: (event) => onRunEvent(event),
+        diag,
+        requestConfirmation,
+      });
+      const toolResults = toolResult.results;
 
       // Add assistant + tool results to context
       const assistantBlocks: ContentBlock[] = [];
@@ -1054,4 +652,14 @@ function extractContextWindow(model: unknown): number {
     if (typeof val === 'number' && val > 0) return val;
   }
   return 128_000;
+}
+
+function getMessageTextContent(msg: Message): string {
+  if (typeof msg.content === 'string') {
+    return msg.content;
+  }
+  return msg.content
+    .filter((b) => b.type === 'text' || b.type === 'thinking')
+    .map((b) => ('text' in b ? b.text : ''))
+    .join('\n');
 }

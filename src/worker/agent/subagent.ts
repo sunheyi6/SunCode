@@ -50,6 +50,7 @@ export interface SubagentDispatchOptions {
   depth: number;
   ancestorStack: string[];
   callbacks: SubagentCallbacks;
+  memoryContent?: string;
 }
 
 const MAX_DEPTH = 3;
@@ -72,6 +73,11 @@ export class SubagentDispatcher {
   /** Update dispatch options (called when working dir or settings change). */
   updateOptions(partial: Partial<SubagentDispatchOptions>): void {
     Object.assign(this.opts, partial);
+  }
+
+  /** Update memory content for sub-agent runs. */
+  updateMemoryContent(memoryContent: string): void {
+    this.opts.memoryContent = memoryContent;
   }
 
   /** Dispatch one or more sub-agent calls in parallel with a concurrency cap. */
@@ -298,7 +304,7 @@ export class SubagentDispatcher {
       workingDir: this.opts.workingDir,
       skillsContent: '',
       agentsMdContent: '',
-      memoryContent: '',
+      memoryContent: this.opts.memoryContent || '',
       abortSignal: signal,
       runId: executionId,
       // Use parent session + agent name for cache affinity across subagent invocations

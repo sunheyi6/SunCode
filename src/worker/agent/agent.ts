@@ -137,6 +137,7 @@ export class Agent {
           onBackgroundPortsVerified: (pid, ports) => this.onBackgroundPortsVerified(pid, ports),
         },
         this.settings,
+        { protectedPids: [process.ppid] },
       );
       // Register subagent tool separately (after dispatcher is created)
       // to avoid circular import between tools/registry.ts and agent/subagent.ts
@@ -216,6 +217,7 @@ export class Agent {
         onBackgroundPortsVerified: (pid, ports) => this.onBackgroundPortsVerified(pid, ports),
       },
       this.settings,
+      { protectedPids: [process.ppid] },
     );
     if (this.dispatcher) {
       registry.register(createSubagentTool(this.dispatcher));
@@ -347,8 +349,17 @@ export class Agent {
     // Load .agents.md (Codex convention): project-level, then user-level
     const agentsMdContent = await loadAgentsMd(this.workingDir);
 
-    // Load auto-generated memories from prior sessions
-    const memoryContent = loadMemories(this.workingDir);
+    // Load auto-generated memories from prior sessions (with semantic search)
+    const lastUserMsg = this.messages.find((m) => m.role === 'user');
+    const userQuery = lastUserMsg
+      ? typeof lastUserMsg.content === 'string'
+        ? lastUserMsg.content
+        : lastUserMsg.content.filter((b) => b.type === 'text').map((b) => ('text' in b ? b.text : '')).join(' ')
+      : '';
+    const memoryContent = await loadMemories(this.workingDir, userQuery);
+
+    // Share memory with sub-agents
+    this.dispatcher?.updateMemoryContent(memoryContent);
 
     // Build context budget policy from settings + model info
     const contextBudgetPolicy = buildContextBudgetPolicy(
@@ -450,7 +461,7 @@ export class Agent {
     this.emitStatus('done');
 
     // Persist a memory entry so future sessions recall what we did
-    this.saveSessionMemory();
+    await this.saveSessionMemory();
 
     // Extract failure lessons (fire-and-forget)
     const hasFailures = this.messages.some(
@@ -490,7 +501,11 @@ export class Agent {
     const skillsLoader = createSkillsLoader(this.workingDir, this.settings.skills);
     const skillsContent = await skillsLoader.loadAll();
     const agentsMdContent = await loadAgentsMd(this.workingDir);
-    const memoryContent = loadMemories(this.workingDir);
+    const memoryContent = await loadMemories(this.workingDir, goalDef.description);
+
+    // Share memory with sub-agents
+    this.dispatcher?.updateMemoryContent(memoryContent);
+
     const contextBudgetPolicy = buildContextBudgetPolicy(
       this.settings,
       contextWindowFromModel(model),
@@ -640,11 +655,11 @@ export class Agent {
       });
     }
 
-    this.saveSessionMemory();
+    await this.saveSessionMemory();
   }
 
   /** Save a summary of the current session to .suncode/memories/. */
-  private saveSessionMemory(): void {
+  private async saveSessionMemory(): Promise<void> {
     try {
       const lastUserMsg = [...this.messages].reverse().find((m) => m.role === 'user');
       if (!lastUserMsg) return;
@@ -657,7 +672,6 @@ export class Agent {
               .map((b) => ('text' in b ? b.text : ''))
               .join(' ');
 
-      // Count tools used across all assistant messages
       const toolsUsed: Record<string, number> = {};
       for (const m of this.messages) {
         if (m.role === 'assistant' && m.toolCalls) {
@@ -667,7 +681,6 @@ export class Agent {
         }
       }
 
-      // Slug from the first 40 chars of the user request
       const slug =
         userRequest
           .slice(0, 40)
@@ -680,10 +693,10 @@ export class Agent {
         slug,
         userRequest: userRequest.slice(0, 200),
         toolsUsed,
-        summary: '', // future: LLM-generated summary
+        summary: '',
       };
 
-      saveMemory(this.workingDir, entry);
+      await saveMemory(this.workingDir, entry, this.settings.activeProvider, this.settings.activeModel);
     } catch {
       // Best-effort — never let memory failures break the agent
     }

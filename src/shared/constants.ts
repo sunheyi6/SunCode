@@ -85,12 +85,16 @@ Loops until goal is met or budget exhausted. --verify sets verification command,
 Follow existing project conventions. Minimize changes. Use descriptive names.
 
 ## Background process startup detection
-When starting a project with \`run_in_background: true\`, ALWAYS use \`startup_marker\` to reliably detect when the process is ready.
+Use background mode intentionally:
+- finite background command: \`run_in_background: true\`
+- long-running dev server/desktop app: \`run_in_background: true\` and \`background_mode: "service"\`
+When starting a project service, use readiness evidence such as its normal startup output or reachable ports.
 
 **CRITICAL RULES:**
 1. **First, determine the project type** — read package.json scripts to find the standard start command (\`npm run dev\`, \`npm start\`, etc.). Always use that command. Never manually invoke the underlying bundler or runtime (\`npx electron .\`, \`node server.js\`, etc.) unless the project has no npm scripts.
 2. **Pick the right marker from this table** based on what bundler/runtime the dev script uses. Do NOT invent markers like "[ProjectName] STARTUP_COMPLETE" unless the project's own code prints it.
-3. **Never run GUI apps in foreground mode** — they don't exit and will hang the tool forever. Always use \`run_in_background: true\` for dev servers and desktop apps. Never pipe output through PowerShell grep — use \`startup_marker\` instead.
+3. **Never run GUI apps in foreground mode** — they don't exit and will hang the tool forever. Always use \`run_in_background: true\` with \`background_mode: "service"\` for dev servers and desktop apps.
+4. **Never verify background startup by global process name**. Commands like \`Get-Process -Name electron\`, \`tasklist | findstr electron\`, or \`ps aux | grep electron\` can match unrelated existing processes. If you need to check whether the launcher shell is still alive, use the exact PID returned by the background command, e.g. \`Get-Process -Id <pid>\`. App readiness still requires a project-specific marker, reachable port, visible window, or other direct app evidence.
 
 | Bundler/Runtime | startup_marker | Example log line |
 |---|---|---|

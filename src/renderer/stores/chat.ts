@@ -16,12 +16,20 @@ import { parseTaskPlan, stripPlanFromContent } from '../utils/task-plan-parser';
 import { useAgentStore } from './agent';
 import { buildPersistedAssistantMessage } from './chat-message-persistence';
 
+export interface ChatMessageBlock {
+  id: string;
+  type: 'thinking' | 'tool_call';
+  thinking?: string;
+  toolCall?: ToolCallContent;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   thinking?: string;
   toolCalls?: ToolCallContent[];
+  blocks?: ChatMessageBlock[];
   timestamp: number;
   isStreaming: boolean;
   /** Current turn number (updated by turn_start events). */
@@ -34,13 +42,33 @@ export interface ChatMessage {
   taskPlan?: TaskPlan;
   /** Per-turn LLM request/response details (for call trace panel). */
   turnDetails?: TurnDetail[];
-  /** Real-time output from running bash tools (display only, never persisted). */
-  liveCommandOutput?: string;
 }
 
 let msgCounter = 0;
 function nextId(): string {
   return `msg_${Date.now()}_${++msgCounter}`;
+}
+
+let blockCounter = 0;
+function nextBlockId(): string {
+  return `block_${Date.now()}_${++blockCounter}`;
+}
+
+function appendThinkingBlock(target: ChatMessage, thinkingDelta: string): void {
+  if (!thinkingDelta) return;
+  if (!target.blocks) target.blocks = [];
+
+  const lastBlock = target.blocks[target.blocks.length - 1];
+  if (lastBlock?.type === 'thinking') {
+    lastBlock.thinking = (lastBlock.thinking || '') + thinkingDelta;
+    return;
+  }
+
+  target.blocks.push({
+    id: nextBlockId(),
+    type: 'thinking',
+    thinking: thinkingDelta,
+  });
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -49,6 +77,8 @@ export const useChatStore = defineStore('chat', () => {
   const showCallTrace = ref(false);
   let currentAssistantMsg: ChatMessage | null = null;
   let lastParsedPlanLength = 0;
+  let lastThinkingLength = 0;
+  let lastToolCallCount = 0;
 
   /** ID of the renderer's currently visible session. */
   let activeSessionId: string | null = null;
@@ -73,10 +103,13 @@ export const useChatStore = defineStore('chat', () => {
       role: 'assistant',
       content: '',
       thinking: '',
+      blocks: [],
       timestamp: Date.now(),
       isStreaming: true,
     };
     lastParsedPlanLength = 0;
+    lastThinkingLength = 0;
+    lastToolCallCount = 0;
     messages.value.push(assistantMessage);
     // Vue wraps objects inserted into a reactive array. Keep the wrapped
     // instance so stream mutations update the rendered message.
@@ -155,22 +188,56 @@ export const useChatStore = defineStore('chat', () => {
 
         target.content = data.text || '';
         target.thinking = data.thinking || '';
-        // Accumulate tool calls across turns — the model reports only the current
-        // turn's calls in each message_update, so we merge by ID to avoid duplicates.
+
+        if (!target.blocks) target.blocks = [];
+
+        // Check if thinking has NEW content (length increased)
+        const currentThinkingLen = data.thinking?.length ?? 0;
+        if (currentThinkingLen > lastThinkingLength) {
+          appendThinkingBlock(target, data.thinking?.slice(lastThinkingLength) || '');
+          lastThinkingLength = currentThinkingLen;
+        }
+
+        // Check if there are NEW tool calls
         const incoming = data.toolCalls || [];
+        if (incoming.length > lastToolCallCount) {
+          // Find the new tool calls
+          const existingIds = new Set(target.toolCalls?.map((t) => t.id) ?? []);
+          for (const tc of incoming) {
+            if (!existingIds.has(tc.id)) {
+              // Create a new block for this tool call
+              target.blocks.push({
+                id: nextBlockId(),
+                type: 'tool_call',
+                toolCall: tc,
+              });
+            }
+          }
+        }
+
+        // Accumulate tool calls across turns
         if (incoming.length > 0) {
           const existing = target.toolCalls ?? [];
           const existingIds = new Set(existing.map((t) => t.id));
           const merged = [...existing];
+
           for (const tc of incoming) {
             const idx = existing.findIndex((t) => t.id === tc.id);
             if (idx >= 0) {
-              merged[idx] = tc; // update in place (status/result may have changed)
+              merged[idx] = tc;
+              // Update existing block's toolCall
+              const blockIdx = target.blocks.findIndex(
+                (b) => b.type === 'tool_call' && b.toolCall?.id === tc.id,
+              );
+              if (blockIdx >= 0) {
+                target.blocks[blockIdx].toolCall = tc;
+              }
             } else if (!existingIds.has(tc.id)) {
               merged.push(tc);
             }
           }
           target.toolCalls = merged;
+          lastToolCallCount = merged.length;
         }
         target.isStreaming = event.type === 'message_update';
         if (sessionId === activeSessionId) {
@@ -194,8 +261,6 @@ export const useChatStore = defineStore('chat', () => {
           }
 
           // Persist completed message to the session that originated the run.
-          // liveCommandOutput is display-only and must never be persisted.
-          delete target.liveCommandOutput;
           void bridge.saveMessage(
             buildPersistedAssistantMessage({
               visibleContent: target.content,
@@ -220,7 +285,6 @@ export const useChatStore = defineStore('chat', () => {
         if (msg) {
           msg.content += `\n\n❌ Error: ${event.error || 'Unknown error'}`;
           msg.isStreaming = false;
-          delete msg.liveCommandOutput;
         }
         streamingSessionIds.delete(sessionId);
         if (sessionId === activeSessionId) {
@@ -303,22 +367,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  /** Max bytes of live bash output to keep in the assistant message body. */
-  const MAX_LIVE_COMMAND_OUTPUT_BYTES = 50_000;
-
-  /** Truncate a UTF-8 string from the tail, keeping the last maxBytes bytes. */
-  function truncateTailBytes(text: string, maxBytes: number): string {
-    const encoder = new TextEncoder();
-    const encoded = encoder.encode(text);
-    if (encoded.length <= maxBytes) return text;
-    let start = encoded.length - maxBytes;
-    // Move to a valid UTF-8 boundary (skip continuation bytes 10xxxxxx).
-    while (start < encoded.length && (encoded[start] & 0xc0) === 0x80) {
-      start++;
-    }
-    return new TextDecoder().decode(encoded.subarray(start));
-  }
-
   /** Stream real-time output to a running tool call (throttled ~100ms by worker). */
   function updateToolProgress(toolCallId: string, output: string, sessionId: string): void {
     const msg = activeAssistantMessage(sessionId);
@@ -326,13 +374,6 @@ export const useChatStore = defineStore('chat', () => {
     const tc = msg.toolCalls.find((t) => t.id === toolCallId);
     if (tc && tc.status === 'running') {
       tc.partialOutput = (tc.partialOutput || '') + output;
-
-      // Also mirror bash output into the assistant message body so the chat
-      // doesn't look frozen during long-running foreground commands.
-      if (tc.name === 'bash') {
-        const live = (msg.liveCommandOutput || '') + output;
-        msg.liveCommandOutput = truncateTailBytes(live, MAX_LIVE_COMMAND_OUTPUT_BYTES);
-      }
     }
   }
 

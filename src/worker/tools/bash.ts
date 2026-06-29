@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { ToolResult } from '@shared/types';
 import { randomBytes } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
@@ -15,7 +15,7 @@ import { BaseTool, obj, p } from './types';
 function getPowerShellPath(): string {
   if (process.platform !== 'win32') return 'powershell.exe';
   const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
-  return systemRoot + '/System32/WindowsPowerShell/v1.0/powershell.exe';
+  return `${systemRoot}/System32/WindowsPowerShell/v1.0/powershell.exe`;
 }
 
 /** Maximum output lines before tail truncation. */
@@ -32,6 +32,10 @@ export interface BashToolCallbacks {
   onBackgroundPortsVerified?: (pid: number, ports: number[]) => void;
 }
 
+export interface BashToolOptions {
+  protectedPids?: number[];
+}
+
 /**
  * Kill a process and all its children (cross-platform).
  */
@@ -43,8 +47,8 @@ export function killProcessTree(pid: number): void {
         detached: true,
         windowsHide: true,
       });
-    } catch {
-      // Ignore errors
+    } catch (error) {
+      console.warn(`[Bash] Failed to taskkill PID ${pid}:`, (error as Error).message);
     }
   } else {
     try {
@@ -52,8 +56,8 @@ export function killProcessTree(pid: number): void {
     } catch {
       try {
         process.kill(pid, 'SIGKILL');
-      } catch {
-        // Process already dead
+      } catch (error) {
+        console.warn(`[Bash] Failed to kill PID ${pid}:`, (error as Error).message);
       }
     }
   }
@@ -112,11 +116,124 @@ function truncateTail(
   return { text: prefix + outputLines.join('\n'), truncated };
 }
 
-export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks) {
+export function rewriteKillCommand(command: string, protectedPids: number[]): { rewritten: string; modified: boolean; blocked: boolean; message?: string } {
+  if (!protectedPids || protectedPids.length === 0) {
+    return { rewritten: command, modified: false, blocked: false };
+  }
+
+  const protectedPidsStr = protectedPids.join(',');
+
+  const winGetProcessPipeStop = /Get-Process\s+-Name\s+(['"])([^'"]+)\1([^|]*)\|\s*Stop-Process/i;
+  if (winGetProcessPipeStop.test(command)) {
+    const match = command.match(winGetProcessPipeStop);
+    if (match) {
+      const processName = match[2];
+      const rewritten = `$__sc_protect=@(${protectedPidsStr}); Get-Process -Name '${processName}' | Where-Object { $__sc_protect -notcontains $_.Id } | Stop-Process${match[3]}`;
+      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+    }
+  }
+
+  const winStopProcessByName = /Stop-Process\s+-Name\s+(['"])([^'"]+)\1/i;
+  if (winStopProcessByName.test(command)) {
+    const match = command.match(winStopProcessByName);
+    if (match) {
+      const processName = match[2];
+      const rewritten = command.replace(
+        winStopProcessByName,
+        `$__sc_protect=@(${protectedPidsStr}); Get-Process -Name '${processName}' | Where-Object { $__sc_protect -notcontains $_.Id } | Stop-Process`,
+      );
+      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+    }
+  }
+
+  const winStopProcessId = /Stop-Process\s+-Id\s+(\d+)/i;
+  if (winStopProcessId.test(command)) {
+    const match = command.match(winStopProcessId);
+    if (match) {
+      const targetPid = parseInt(match[1], 10);
+      if (protectedPids.includes(targetPid)) {
+        return { rewritten: command, modified: false, blocked: true, message: `cannot kill protected PID ${targetPid}` };
+      }
+    }
+  }
+
+  const winTaskkillIM = /taskkill\s+\/IM\s+(\S+)/i;
+  if (winTaskkillIM.test(command)) {
+    const match = command.match(winTaskkillIM);
+    if (match) {
+      const processName = match[1].replace(/\.exe$/i, '');
+      const rewritten = `$__sc_protect=@(${protectedPidsStr}); Get-Process -Name '${processName}' | Where-Object { $__sc_protect -notcontains $_.Id } | ForEach-Object { taskkill /F /T /PID $_.Id }`;
+      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+    }
+  }
+
+  const winTaskkillPID = /taskkill\s+\/PID\s+(\d+)/i;
+  if (winTaskkillPID.test(command)) {
+    const match = command.match(winTaskkillPID);
+    if (match) {
+      const targetPid = parseInt(match[1], 10);
+      if (protectedPids.includes(targetPid)) {
+        return { rewritten: command, modified: false, blocked: true, message: `cannot kill protected PID ${targetPid}` };
+      }
+    }
+  }
+
+  const unixKillAll = /killall\s+(\S+)/i;
+  if (unixKillAll.test(command)) {
+    const match = command.match(unixKillAll);
+    if (match) {
+      const processName = match[1];
+      const rewritten = `for pid in $(pgrep '${processName}'); do if [ ! " ${protectedPidsStr} " =~ " \\$pid " ]; then kill -9 \\$pid; fi; done`;
+      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+    }
+  }
+
+  const unixPkill = /pkill\s+(\S+)/i;
+  if (unixPkill.test(command)) {
+    const match = command.match(unixPkill);
+    if (match) {
+      const processName = match[1];
+      const rewritten = `for pid in $(pgrep '${processName}'); do if [ ! " ${protectedPidsStr} " =~ " \\$pid " ]; then kill -9 \\$pid; fi; done`;
+      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+    }
+  }
+
+  const unixKill = /kill\s+(-9\s+)?(\d+)/i;
+  if (unixKill.test(command)) {
+    const match = command.match(unixKill);
+    if (match) {
+      const targetPid = parseInt(match[2], 10);
+      if (protectedPids.includes(targetPid)) {
+        return { rewritten: command, modified: false, blocked: true, message: `cannot kill protected PID ${targetPid}` };
+      }
+    }
+  }
+
+  return { rewritten: command, modified: false, blocked: false };
+}
+
+export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks, options?: BashToolOptions) {
+  const protectedPids = options?.protectedPids || [];
+
   return new (class BashTool extends BaseTool {
     readonly name = 'bash';
-    readonly description =
-      'Executes a shell command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds.\n\nIMPORTANT: Each invocation runs in a fresh shell. Use && to chain commands (works on PowerShell and bash).\n\nOn Windows this runs PowerShell (powershell.exe, always preinstalled). PowerShell supports: && for chaining, double quotes for strings with spaces, single quotes for literals, Select-String for searching files (instead of grep), Get-ChildItem for directory listing (instead of ls).\n\nOn Linux/macOS this runs bash.\n\nGit examples that work cross-platform:\n- `git add . && git commit -m "feat(scope): message" && git push`\n- `git status && git log --oneline -5`\n\nSet run_in_background: true for long-running processes (dev servers, etc.). Background processes will keep running and their status is shown in the UI.\n\nOutput is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file.\n\nSecurity: Commands that are obviously destructive (rm -rf /, etc.) will be blocked.';
+    readonly description = `Executes a shell command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds.
+
+IMPORTANT: Each invocation runs in a fresh shell. Use && to chain commands (works on PowerShell and bash).
+
+On Windows this runs PowerShell (powershell.exe, always preinstalled). PowerShell supports: && for chaining, double quotes for strings with spaces, single quotes for literals, Select-String for searching files (instead of grep), Get-ChildItem for directory listing (instead of ls).
+
+On Linux/macOS this runs bash.
+
+Git examples that work cross-platform:
+- \`git add . && git commit -m "feat(scope): message" && git push\`
+- \`git status && git log --oneline -5\`
+
+Set run_in_background: true for background processes. Background mode defaults to a finite task: when the shell exits, the UI marks it completed or failed. For long-running services/dev servers/GUI launchers, set background_mode: "service"; this only confirms the launch command was started. App readiness still requires a project-specific marker, reachable port, or other direct evidence.
+
+Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file.
+
+Security: Commands that are obviously destructive (rm -rf /, etc.) will be blocked.`;
     readonly parameters = obj(
       {
         command: p('string', 'The bash command to execute'),
@@ -127,7 +244,11 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
         ),
         run_in_background: p(
           'boolean',
-          'Set to true to run this command in the background (e.g. for dev servers). The command will keep running across turns.',
+          'Set to true to run this command in the background. By default, completion is tracked when the shell exits.',
+        ),
+        background_mode: p(
+          'string',
+          'Optional background behavior: "task" for finite background commands (default), or "service" for long-running dev servers/GUI launchers.',
         ),
       },
       ['command'],
@@ -137,6 +258,7 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
       const command = (params.command as string) || '';
       const timeout = Math.min((params.timeout as number) || 60000, 300000);
       const runInBg = Boolean(params.run_in_background);
+      const backgroundMode = params.background_mode === 'service' ? 'service' : 'task';
       const cwd = resolve(workingDir);
       const commandFailure = (message: string) =>
         this.failure(message, {
@@ -165,11 +287,20 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
         }
       }
 
+      const killResult = rewriteKillCommand(command, protectedPids);
+      if (killResult.blocked) {
+        return commandFailure(`Command blocked for security reasons: ${killResult.message}`);
+      }
+      if (killResult.modified) {
+        console.log(`[Bash] Rewrote kill command to protect host process: "${command}" → "${killResult.rewritten}"`);
+      }
+      const effectiveCommand = killResult.rewritten;
+
       const shell = process.platform === 'win32' ? getPowerShellPath() : '/bin/bash';
       const shellArgs =
         process.platform === 'win32'
-          ? ['-NoProfile', '-NonInteractive', '-Command', command]
-          : ['-c', command];
+          ? ['-NoProfile', '-NonInteractive', '-Command', effectiveCommand]
+          : ['-c', effectiveCommand];
 
       // ── Background mode: spawn and detach ──
       if (runInBg) {
@@ -262,16 +393,8 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
               clearTimeout(progressTimer);
               flushProgress();
             }
-            // Startup succeeded, but the shell process exited.
-            // Use exit code as heuristic:
-            // - code 0 → command ran to completion (app/dev-server likely started) → keep "running"
-            // - code non-zero/null → command failed → notify completion
-            if (code !== 0) {
-              console.log(`[Bash] PID ${startedPid} exited with code ${code} — notifying completion`);
-              notifyComplete(code ?? -1);
-            } else {
-              console.log(`[Bash] PID ${startedPid} exited with code 0 — keeping as running (app likely started)`);
-            }
+            console.log(`[Bash] PID ${startedPid} exited with code ${code} - notifying completion`);
+            notifyComplete(code ?? -1);
           });
 
           child.once('spawn', () => {
@@ -293,8 +416,13 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
             };
             callbacks?.onBackgroundStart?.(proc);
 
+            const output =
+              backgroundMode === 'service'
+                ? `Background service launch command started (PID: ${pid})\nCommand: ${command}\nThis only confirms the launcher shell started; it does not confirm the app is ready. Verify readiness with a project-specific marker, reachable port, or direct app evidence.`
+                : `Background process started (PID: ${pid})\nCommand: ${command}`;
+
             resolveResult(
-              this.success(`Background process started (PID: ${pid})\nCommand: ${command}`, {
+              this.success(output, {
                 type: 'command',
                 command,
                 cwd,
@@ -392,8 +520,8 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
                 stream.end(() => resolveWrite());
                 stream.on('error', reject);
               });
-            } catch {
-              // Ignore temp file write errors
+            } catch (error) {
+              console.warn(`[Bash] Failed to write full output to temp file:`, (error as Error).message);
             }
           }
 

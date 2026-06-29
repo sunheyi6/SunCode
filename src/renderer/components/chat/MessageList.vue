@@ -38,10 +38,13 @@ function lastMessageContentKey(): string {
   // Only trigger on ~100 char chunks, not every character
   const thinkLen = Math.floor((last.thinking?.length ?? 0) / 100);
   const contentLen = Math.floor((last.content?.length ?? 0) / 100);
-  const liveOutputLen = Math.floor((last.liveCommandOutput?.length ?? 0) / 100);
+  const toolOutputLen = Math.floor(
+    (last.toolCalls?.reduce((sum, toolCall) => sum + (toolCall.partialOutput?.length ?? 0), 0) ??
+      0) / 100,
+  );
   const tcLen = last.toolCalls?.length ?? 0;
   const tcRunning = last.toolCalls?.filter((t) => t.status === 'running').length ?? 0;
-  return `${thinkLen}|${contentLen}|${liveOutputLen}|${tcLen}|${tcRunning}`;
+  return `${thinkLen}|${contentLen}|${toolOutputLen}|${tcLen}|${tcRunning}`;
 }
 
 function onUserScroll(): void {

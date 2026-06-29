@@ -92,3 +92,59 @@ describe('bash tool foreground progress', () => {
     expect(progressChunks.join('')).toContain('something went wrong');
   });
 });
+
+describe('bash tool background completion', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function fakeBackgroundChild(pid: number): ChildProcess {
+    const child = new EventEmitter() as ChildProcess;
+    child.stdout = new EventEmitter() as NodeJS.ReadableStream;
+    child.stderr = new EventEmitter() as NodeJS.ReadableStream;
+    child.stdin = { end: vi.fn() } as unknown as NodeJS.WritableStream;
+    child.pid = pid;
+    child.unref = vi.fn();
+    return child;
+  }
+
+  it('notifies completion when a default background task exits with code 0', async () => {
+    const mockSpawn = vi.mocked(spawn);
+    const fakeChild = fakeBackgroundChild(22334);
+    mockSpawn.mockReturnValue(fakeChild);
+    const completed: Array<{ pid: number; exitCode: number }> = [];
+
+    const executePromise = createBashTool('/tmp', {
+      onBackgroundComplete: (pid, exitCode) => completed.push({ pid, exitCode }),
+    }).execute({ command: 'echo done', run_in_background: true });
+
+    fakeChild.emit('spawn');
+    await executePromise;
+    fakeChild.emit('close', 0, null);
+
+    expect(completed).toEqual([{ pid: 22334, exitCode: 0 }]);
+  });
+
+  it('notifies completion when a service launcher shell exits with code 0', async () => {
+    const mockSpawn = vi.mocked(spawn);
+    const fakeChild = fakeBackgroundChild(22335);
+    mockSpawn.mockReturnValue(fakeChild);
+    const completed: Array<{ pid: number; exitCode: number }> = [];
+
+    const executePromise = createBashTool('/tmp', {
+      onBackgroundComplete: (pid, exitCode) => completed.push({ pid, exitCode }),
+    }).execute({
+      command: 'start dev server',
+      run_in_background: true,
+      background_mode: 'service',
+    });
+
+    fakeChild.emit('spawn');
+    const result = await executePromise;
+    fakeChild.emit('close', 0, null);
+
+    expect(result.output).toContain('launch command started');
+    expect(result.output).toContain('does not confirm the app is ready');
+    expect(completed).toEqual([{ pid: 22335, exitCode: 0 }]);
+  });
+});

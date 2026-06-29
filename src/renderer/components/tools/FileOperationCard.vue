@@ -35,24 +35,7 @@ const isEditing = computed(() => view.value.label === '编辑中');
 </script>
 
 <template>
-  <!-- Editing: show diff inline -->
-  <div v-if="isEditing" class="file-operation" :class="statusClass">
-    <span class="file-icon">▤</span>
-    <span class="file-path" :title="view.filePath">{{ view.filePath }}</span>
-    <span class="file-status">{{ view.label }}</span>
-    <span v-if="view.addedLines !== undefined" class="added">+{{ view.addedLines }}</span>
-    <span v-if="view.removedLines !== undefined" class="removed">-{{ view.removedLines }}</span>
-    <p v-if="view.error" class="file-error">{{ view.error }}</p>
-    <DiffViewer
-      v-if="showDiff"
-      :old-code="oldCode"
-      :new-code="newCode"
-      :filename="view.filePath"
-    />
-  </div>
-
-  <!-- Done: collapsible summary line, click to expand diff -->
-  <details v-else class="file-operation-details" :class="statusClass">
+  <details class="file-operation-details" :class="statusClass">
     <summary class="file-summary">
       <span class="file-icon">▤</span>
       <span class="file-path" :title="view.filePath">{{ view.filePath }}</span>
@@ -72,17 +55,30 @@ const isEditing = computed(() => view.value.label === '编辑中');
 </template>
 
 <style scoped>
-.file-operation {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-xs) var(--spacing-md);
+.file-operation-details {
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   background: var(--color-surface);
   font-size: 12px;
-  flex-wrap: wrap;
   transition: border-color 0.15s ease;
+}
+
+.file-operation-details .file-error {
+  margin: 4px 8px;
+}
+
+.file-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.file-summary::-webkit-details-marker {
+  display: none;
 }
 
 .file-icon {
@@ -116,10 +112,6 @@ const isEditing = computed(() => view.value.label === '编辑中');
   color: var(--color-green);
 }
 
-.status-failed {
-  border-color: rgba(243, 139, 168, 0.3);
-}
-
 .status-failed .file-status {
   color: var(--color-red);
 }
@@ -136,42 +128,6 @@ const isEditing = computed(() => view.value.label === '编辑中');
   color: var(--color-red);
   font-family: var(--font-mono);
   font-size: 11px;
-}
-
-.file-error {
-  width: 100%;
-  margin: 0;
-  font-size: 11px;
-  color: var(--color-red);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* Collapsible done-state card */
-.file-operation-details {
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  background: var(--color-surface);
-  font-size: 12px;
-  transition: border-color 0.15s ease;
-}
-
-.file-operation-details .file-error {
-  margin: 4px 8px;
-}
-
-.file-summary {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-xs) var(--spacing-md);
-  cursor: pointer;
-  user-select: none;
-  list-style: none;
-}
-
-.file-summary::-webkit-details-marker {
-  display: none;
 }
 
 .expand-hint {

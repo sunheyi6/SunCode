@@ -37,25 +37,20 @@ describe('structure', () => {
 
   it('static sections appear before dynamic sections', () => {
     const prompt = buildSystemPrompt(baseInput());
-    const toolGuidelinesIdx = prompt.indexOf('## Tool Usage Guidelines');
-    const permissionIdx = prompt.indexOf('## Permission Mode');
+    const guidelinesIdx = prompt.indexOf('## Guidelines');
     const toolsIdx = prompt.indexOf('## Available Tools');
 
-    // Static sections come first
-    expect(toolGuidelinesIdx).toBeGreaterThan(0);
-    // Semi-static sections come after static
-    expect(permissionIdx).toBeGreaterThan(toolGuidelinesIdx);
-    // Tools come after environment
-    expect(toolsIdx).toBeGreaterThan(permissionIdx);
+    // Guidelines comes first
+    expect(guidelinesIdx).toBeGreaterThan(0);
+    // Tools comes after guidelines
+    expect(toolsIdx).toBeGreaterThan(guidelinesIdx);
   });
 
   it('includes all required sections', () => {
     const prompt = buildSystemPrompt(baseInput());
-    expect(prompt).toContain('## Tool Usage Guidelines');
-    expect(prompt).toContain('## Permission Mode');
-    expect(prompt).toContain('## Environment');
+    expect(prompt).toContain('## Guidelines');
     expect(prompt).toContain('## Available Tools');
-    expect(prompt).toContain('## CRITICAL: Git Push Rule');
+    expect(prompt).toContain('Current working directory:');
   });
 });
 
@@ -64,12 +59,10 @@ describe('structure', () => {
 // ═══════════════════════════════════════════════════
 
 describe('cache stability', () => {
-  it('does NOT include a date string anywhere in the prompt', () => {
-    // The date was removed to ensure the system prompt is cache-stable
-    // across midnight boundaries.
+  it('includes date in the footer (not cache-stable across days)', () => {
+    // Date is now included at the end for LLM context awareness
     const prompt = buildSystemPrompt(baseInput());
-    // Matches ISO date patterns like 2026-06-25
-    expect(prompt).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(prompt).toMatch(/Current date: \d{4}-\d{2}-\d{2}/);
   });
 
   it('static prefix is identical across two builds', () => {
@@ -125,17 +118,15 @@ describe('cache stability', () => {
 describe('environment', () => {
   it('includes working directory', () => {
     const prompt = buildSystemPrompt(baseInput({ workingDir: '/custom/path' }));
-    expect(prompt).toContain('Working directory: /custom/path');
+    expect(prompt).toContain('Current working directory: /custom/path');
   });
 
-  it('includes OS and shell info', () => {
+  it('includes date', () => {
     const prompt = buildSystemPrompt(baseInput());
-    expect(prompt).toContain('Operating system:');
-    expect(prompt).toContain('Shell:');
-    expect(prompt).toContain('Maximum turns: 50');
+    expect(prompt).toContain('Current date:');
   });
 
-  it('does NOT contain Date line', () => {
+  it('does NOT contain Date: (old format)', () => {
     const prompt = buildSystemPrompt(baseInput());
     expect(prompt).not.toContain('Date:');
   });
@@ -149,26 +140,34 @@ describe('tools', () => {
     expect(prompt).toContain('- **write**');
   });
 
-  it('handles zero tools gracefully', () => {
+  it('warns against verifying background processes by global process name', () => {
+    const prompt = DEFAULT_SYSTEM_PROMPT;
+
+    expect(prompt).toContain('Get-Process -Id <pid>');
+    expect(prompt).toMatch(/Never verify background startup by global process name/i);
+    expect(prompt).toContain('Get-Process -Name electron');
+  });
+
+  it('omits Available Tools section when no tools provided', () => {
     const prompt = buildSystemPrompt(baseInput({ tools: [] }));
-    expect(prompt).toContain('## Available Tools');
+    expect(prompt).not.toContain('## Available Tools');
   });
 });
 
 describe('permission mode', () => {
-  it('renders full_access mode', () => {
-    const prompt = buildSystemPrompt(baseInput({ permissionMode: 'full_access' }));
-    expect(prompt).toContain('完全访问');
-  });
-
-  it('renders auto_edit mode', () => {
-    const prompt = buildSystemPrompt(baseInput({ permissionMode: 'auto_edit' }));
-    expect(prompt).toContain('自动编辑');
-  });
-
-  it('renders plan mode', () => {
+  it('renders plan mode with read-only notice', () => {
     const prompt = buildSystemPrompt(baseInput({ permissionMode: 'plan' }));
-    expect(prompt).toContain('计划模式');
+    expect(prompt).toContain('## Mode: plan — read-only tools only');
+  });
+
+  it('full_access mode has no permission restriction notice', () => {
+    const prompt = buildSystemPrompt(baseInput({ permissionMode: 'full_access' }));
+    expect(prompt).not.toContain('## Mode: plan');
+  });
+
+  it('auto_edit mode has no permission restriction notice', () => {
+    const prompt = buildSystemPrompt(baseInput({ permissionMode: 'auto_edit' }));
+    expect(prompt).not.toContain('## Mode: plan');
   });
 });
 

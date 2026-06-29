@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { readFile, writeFile, readdir, unlink, rename } from 'node:fs/promises';
+import { open, readFile, writeFile, readdir, unlink, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Message, SessionMeta } from '@shared/types';
 import { getAppDataDir } from './paths';
@@ -17,6 +17,10 @@ interface SessionFile {
   meta: SessionMeta;
   messages: Message[];
 }
+
+const SESSION_META_READ_CHUNK = 4096;
+const SESSION_META_MAX_PREFIX = 64 * 1024;
+const SESSION_META_READ_CONCURRENCY = 24;
 
 /** Ensure the sessions directory exists. Call once on startup. */
 export function initSessionStore(): void {
@@ -37,26 +41,138 @@ function tempPath(id: string): string {
 export async function loadAllSessions(): Promise<SessionMeta[]> {
   try {
     const sessionsDir = getSessionsDir();
-    const entries = await readdir(sessionsDir);
-    const jsonFiles = entries.filter((f) => f.endsWith('.json') && !f.endsWith('.tmp'));
-
-    const metas: SessionMeta[] = [];
-    for (const file of jsonFiles) {
-      try {
-        const raw = await readFile(join(sessionsDir, file), 'utf-8');
-        const data = JSON.parse(raw) as SessionFile;
-        if (data.meta?.id) {
-          metas.push(data.meta);
-        }
-      } catch {
-        // Skip corrupt or unreadable session files
-        console.warn(`[SessionStore] Skipping unreadable session file: ${file}`);
-      }
-    }
-    return metas.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
+    return await loadSessionMetasFromDir(sessionsDir);
   } catch {
     return [];
   }
+}
+
+export async function loadSessionMetasFromDir(sessionsDir: string): Promise<SessionMeta[]> {
+  const entries = await readdir(sessionsDir);
+  const jsonFiles = entries.filter((f) => f.endsWith('.json') && !f.endsWith('.tmp'));
+  const metas = await mapWithConcurrency(jsonFiles, SESSION_META_READ_CONCURRENCY, async (file) => {
+    try {
+      return await readSessionMetaFile(join(sessionsDir, file));
+    } catch {
+      console.warn(`[SessionStore] Skipping unreadable session file: ${file}`);
+      return null;
+    }
+  });
+
+  return metas
+    .filter((meta): meta is SessionMeta => meta !== null)
+    .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
+}
+
+async function readSessionMetaFile(path: string): Promise<SessionMeta | null> {
+  const file = await open(path, 'r');
+  try {
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+    const buffer = Buffer.allocUnsafe(SESSION_META_READ_CHUNK);
+    let position = 0;
+
+    while (position < SESSION_META_MAX_PREFIX) {
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+
+      chunks.push(decoder.decode(buffer.subarray(0, bytesRead), { stream: true }));
+      position += bytesRead;
+
+      const meta = extractSessionMeta(chunks.join(''));
+      if (meta) return meta;
+    }
+
+    chunks.push(decoder.decode());
+    return extractSessionMeta(chunks.join(''));
+  } finally {
+    await file.close();
+  }
+}
+
+function extractSessionMeta(raw: string): SessionMeta | null {
+  const keyIndex = raw.indexOf('"meta"');
+  if (keyIndex < 0) return null;
+
+  const colonIndex = raw.indexOf(':', keyIndex + 6);
+  if (colonIndex < 0) return null;
+
+  const objectStart = raw.indexOf('{', colonIndex + 1);
+  if (objectStart < 0) return null;
+
+  const objectEnd = findJsonObjectEnd(raw, objectStart);
+  if (objectEnd < 0) return null;
+
+  try {
+    const parsed = JSON.parse(raw.slice(objectStart, objectEnd + 1)) as Partial<SessionMeta>;
+    return isSessionMeta(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function findJsonObjectEnd(raw: string, objectStart: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = objectStart; i < raw.length; i++) {
+    const char = raw[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === '{') {
+      depth++;
+    } else if (char === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+
+  return -1;
+}
+
+function isSessionMeta(value: Partial<SessionMeta>): value is SessionMeta {
+  return (
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.created === 'string' &&
+    typeof value.updated === 'string' &&
+    typeof value.messageCount === 'number' &&
+    typeof value.workingDirectory === 'string'
+  );
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex++;
+      results[index] = await mapper(items[index]!);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 /** Load a full session including messages. */

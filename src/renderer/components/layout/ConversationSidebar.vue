@@ -5,6 +5,7 @@ import { useSessionsStore } from '../../stores/sessions';
 import { useChatStore } from '../../stores/chat';
 import { useUpdateStore } from '../../stores/update';
 import { bridge } from '../../api/bridge';
+import { getVisibleSessionGroups } from './session-list';
 
 const sessionsStore = useSessionsStore();
 const chatStore = useChatStore();
@@ -16,6 +17,7 @@ const selectedIds = ref<Set<string>>(new Set());
 
 /** Track which folder groups are collapsed. */
 const collapsedGroups = ref<Set<string>>(new Set());
+const expandedSessionGroups = ref<Set<string>>(new Set());
 
 function toggleGroup(path: string) {
   const next = new Set(collapsedGroups.value);
@@ -25,6 +27,12 @@ function toggleGroup(path: string) {
     next.add(path);
   }
   collapsedGroups.value = next;
+}
+
+function showAllSessions(path: string): void {
+  const next = new Set(expandedSessionGroups.value);
+  next.add(path);
+  expandedSessionGroups.value = next;
 }
 
 onMounted(() => {
@@ -86,9 +94,13 @@ const groupedSessions = computed(() => {
   return [...groups.values()];
 });
 
+const visibleGroupedSessions = computed(() =>
+  getVisibleSessionGroups(groupedSessions.value, expandedSessionGroups.value),
+);
+
 const allDisplayedIds = computed(() => {
   const ids: string[] = [];
-  for (const group of groupedSessions.value) {
+  for (const group of visibleGroupedSessions.value) {
     for (const s of group.sessions) {
       ids.push(s.id);
     }
@@ -248,7 +260,7 @@ function formatTime(value: string): string {
         <span>{{ allSelected ? '取消全选' : '全选' }}</span>
       </label>
 
-      <section v-for="group in groupedSessions" :key="group.path" class="project-group">
+      <section v-for="group in visibleGroupedSessions" :key="group.path" class="project-group">
         <div
           class="project-heading"
           :class="{ collapsed: collapsedGroups.has(group.path) }"
@@ -258,7 +270,7 @@ function formatTime(value: string): string {
           <span class="project-chevron">{{ collapsedGroups.has(group.path) ? '▶' : '▼' }}</span>
           <span class="project-icon">◇</span>
           <span class="project-name">{{ projectName(group.path) }}</span>
-          <span class="project-count">{{ group.sessions.length }}</span>
+          <span class="project-count">{{ group.totalCount }}</span>
         </div>
 
         <template v-if="!collapsedGroups.has(group.path)">
@@ -301,6 +313,15 @@ function formatTime(value: string): string {
               ×
             </button>
           </div>
+
+          <button
+            v-if="group.hiddenCount > 0"
+            class="show-more-sessions"
+            type="button"
+            @click="showAllSessions(group.path)"
+          >
+            显示其余 {{ group.hiddenCount }} 个对话
+          </button>
         </template>
       </section>
 
@@ -607,6 +628,22 @@ function formatTime(value: string): string {
 
 .conversation-row.active {
   background: color-mix(in srgb, var(--color-accent) 11%, var(--color-surface));
+}
+
+.show-more-sessions {
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--border-radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 12px;
+  text-align: left;
+}
+
+.show-more-sessions:hover {
+  background: var(--color-surface-hover);
 }
 
 .conversation-item.active {

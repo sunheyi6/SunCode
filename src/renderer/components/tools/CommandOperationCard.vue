@@ -60,7 +60,6 @@ const exitCodeLabel = computed(() => {
         <span>退出码：{{ exitCodeLabel }}</span>
         <span v-if="details?.signal">终止信号：{{ details.signal }}</span>
       </div>
-      <!-- Streaming output during execution -->
       <section v-if="isRunning && streamingOutput" class="command-section streaming">
         <h4>实时输出</h4>
         <pre ref="streamingPre">{{ streamingOutput }}</pre>

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBashTool } from './bash';
+import { createBashTool, rewriteKillCommand } from './bash';
 
 describe('bash tool details', () => {
   test('returns command metadata and stdout', async () => {
@@ -149,5 +149,98 @@ describe('bash tool details', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('kill command protection', () => {
+  const protectedPids = [1234, 5678];
+
+  test('does not modify non-kill commands', () => {
+    const result = rewriteKillCommand('echo hello', protectedPids);
+    expect(result.rewritten).toBe('echo hello');
+    expect(result.modified).toBe(false);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('rewrites Stop-Process by name to exclude protected PIDs', () => {
+    const result = rewriteKillCommand("Stop-Process -Name 'electron' -Force", protectedPids);
+    expect(result.modified).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.rewritten).toContain('Where-Object');
+    expect(result.rewritten).toContain('1234');
+    expect(result.rewritten).toContain('5678');
+  });
+
+  test('rewrites Get-Process | Stop-Process pipeline', () => {
+    const result = rewriteKillCommand("Get-Process -Name 'node' | Stop-Process", protectedPids);
+    expect(result.modified).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.rewritten).toContain('Where-Object');
+  });
+
+  test('rewrites the exact crash command with ErrorAction SilentlyContinue', () => {
+    const crashCommand = `Get-Process -Name "electron" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue`;
+    const result = rewriteKillCommand(crashCommand, protectedPids);
+    expect(result.modified).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.rewritten).toContain('Where-Object');
+    expect(result.rewritten).toContain('1234');
+    expect(result.rewritten).toContain('5678');
+  });
+
+  test('blocks Stop-Process by protected PID', () => {
+    const result = rewriteKillCommand('Stop-Process -Id 1234 -Force', protectedPids);
+    expect(result.blocked).toBe(true);
+    expect(result.message).toBe('cannot kill protected PID 1234');
+  });
+
+  test('allows Stop-Process by non-protected PID', () => {
+    const result = rewriteKillCommand('Stop-Process -Id 9999 -Force', protectedPids);
+    expect(result.modified).toBe(false);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('rewrites taskkill /IM by name', () => {
+    const result = rewriteKillCommand('taskkill /IM electron.exe /F', protectedPids);
+    expect(result.modified).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.rewritten).toContain('Where-Object');
+  });
+
+  test('blocks taskkill /PID for protected PID', () => {
+    const result = rewriteKillCommand('taskkill /PID 5678 /F', protectedPids);
+    expect(result.blocked).toBe(true);
+    expect(result.message).toBe('cannot kill protected PID 5678');
+  });
+
+  test('rewrites killall on Unix', () => {
+    const result = rewriteKillCommand('killall node', protectedPids);
+    expect(result.modified).toBe(true);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('rewrites pkill on Unix', () => {
+    const result = rewriteKillCommand('pkill chrome', protectedPids);
+    expect(result.modified).toBe(true);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('blocks kill by protected PID on Unix', () => {
+    const result = rewriteKillCommand('kill -9 1234', protectedPids);
+    expect(result.blocked).toBe(true);
+    expect(result.message).toBe('cannot kill protected PID 1234');
+  });
+
+  test('allows kill by non-protected PID on Unix', () => {
+    const result = rewriteKillCommand('kill 9999', protectedPids);
+    expect(result.modified).toBe(false);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('does nothing when protectedPids is empty', () => {
+    const result = rewriteKillCommand("Stop-Process -Name 'electron'", []);
+    expect(result.rewritten).toBe("Stop-Process -Name 'electron'");
+    expect(result.modified).toBe(false);
+    expect(result.blocked).toBe(false);
   });
 });
