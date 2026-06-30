@@ -1,6 +1,6 @@
 // @ts-expect-error Bun provides this module at test runtime; the repo has no Bun type package.
 import { describe, expect, test } from 'bun:test';
-import { getComposerTextareaHeight } from './chat-input';
+import { getChatInputClasses, getComposerTextareaHeight } from './chat-input';
 
 describe('getComposerTextareaHeight', () => {
   test('uses the minimum height for short input', () => {
@@ -13,5 +13,10 @@ describe('getComposerTextareaHeight', () => {
 
   test('caps tall input at the maximum height', () => {
     expect(getComposerTextareaHeight(280)).toBe(200);
+  });
+
+  test('adds an empty conversation class for the floating start state', () => {
+    expect(getChatInputClasses(true)).toContain('chat-input-empty');
+    expect(getChatInputClasses(false)).not.toContain('chat-input-empty');
   });
 });

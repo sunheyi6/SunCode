@@ -3,39 +3,97 @@
  * All event callbacks receive a wrapper with sessionId for multi-session routing.
  */
 import type {
+  AgentStatus,
+  AppSettings,
   BackgroundProcess,
+  FileNode,
+  GitBranch,
+  GitCheckoutResult,
   GitInfo,
   GoalEvent,
-  RunEvent,
-  StreamEvent,
-  AgentStatus,
   Message,
+  RunEvent,
+  SessionMeta,
+  StreamEvent,
+  TokenUsageSummary,
   ToolCallContent,
   ToolResult,
-  FileNode,
-  AppSettings,
-  SessionMeta,
-  TokenUsageSummary,
   UpdateStatus,
 } from '@shared/types';
 
 /** Wrapper types for IPC events that carry sessionId for multi-session routing. */
-export interface SessionStreamEvent { sessionId: string; event: StreamEvent }
-export interface SessionStatusEvent { sessionId: string; status: AgentStatus }
-export interface SessionErrorEvent { sessionId: string; message: string }
-export interface SessionDoneEvent { sessionId: string; message: Message }
-export interface SessionToolStartEvent { sessionId: string; toolCall: ToolCallContent }
-export interface SessionToolEndEvent { sessionId: string; toolResult: ToolResult }
-export interface SessionToolProgressEvent { sessionId: string; toolCallId: string; output: string }
-export interface SessionBgProcessStartedEvent { sessionId: string; process: BackgroundProcess }
-export interface SessionBgProcessCompletedEvent { sessionId: string; pid: number; exitCode: number }
-export interface SessionBgProcessPortsVerifiedEvent { sessionId: string; pid: number; ports: number[] }
-export interface SessionRunEvent { sessionId: string; event: RunEvent }
-export interface SessionSubagentStartEvent { sessionId: string; execution: Record<string, unknown> }
-export interface SessionSubagentEndEvent { sessionId: string; id: string; result: Record<string, unknown> }
-export interface SessionSubagentProgressEvent { sessionId: string; executionId: string; agent: string; delta: Record<string, unknown> }
-export interface SessionGoalEvent { sessionId: string; event: GoalEvent }
-export interface SessionConfirmRequestEvent { sessionId: string; toolCallId: string; toolName: string; description: string }
+export interface SessionStreamEvent {
+  sessionId: string;
+  event: StreamEvent;
+}
+export interface SessionStatusEvent {
+  sessionId: string;
+  status: AgentStatus;
+}
+export interface SessionErrorEvent {
+  sessionId: string;
+  message: string;
+}
+export interface SessionDoneEvent {
+  sessionId: string;
+  message: Message;
+}
+export interface SessionToolStartEvent {
+  sessionId: string;
+  toolCall: ToolCallContent;
+}
+export interface SessionToolEndEvent {
+  sessionId: string;
+  toolResult: ToolResult;
+}
+export interface SessionToolProgressEvent {
+  sessionId: string;
+  toolCallId: string;
+  output: string;
+}
+export interface SessionBgProcessStartedEvent {
+  sessionId: string;
+  process: BackgroundProcess;
+}
+export interface SessionBgProcessCompletedEvent {
+  sessionId: string;
+  pid: number;
+  exitCode: number;
+}
+export interface SessionBgProcessPortsVerifiedEvent {
+  sessionId: string;
+  pid: number;
+  ports: number[];
+}
+export interface SessionRunEvent {
+  sessionId: string;
+  event: RunEvent;
+}
+export interface SessionSubagentStartEvent {
+  sessionId: string;
+  execution: Record<string, unknown>;
+}
+export interface SessionSubagentEndEvent {
+  sessionId: string;
+  id: string;
+  result: Record<string, unknown>;
+}
+export interface SessionSubagentProgressEvent {
+  sessionId: string;
+  executionId: string;
+  agent: string;
+  delta: Record<string, unknown>;
+}
+export interface SessionGoalEvent {
+  sessionId: string;
+  event: GoalEvent;
+}
+export interface SessionConfirmRequestEvent {
+  sessionId: string;
+  toolCallId: string;
+  toolName: string;
+  description: string;
+}
 
 declare global {
   interface Window {
@@ -104,6 +162,8 @@ declare global {
 
       // Git
       getGitInfo(workingDir: string): Promise<GitInfo>;
+      listGitBranches(workingDir: string): Promise<GitBranch[]>;
+      checkoutGitBranch(workingDir: string, branch: string): Promise<GitCheckoutResult>;
       getStagedDiff(workingDir: string): Promise<string>;
       gitCommit(
         workingDir: string,
@@ -114,22 +174,20 @@ declare global {
       // Background Processes
       onBgProcessStarted(callback: (data: SessionBgProcessStartedEvent) => void): () => void;
       onBgProcessCompleted(callback: (data: SessionBgProcessCompletedEvent) => void): () => void;
-      onBgProcessPortsVerified(callback: (data: SessionBgProcessPortsVerifiedEvent) => void): () => void;
+      onBgProcessPortsVerified(
+        callback: (data: SessionBgProcessPortsVerifiedEvent) => void,
+      ): () => void;
       killBgProcess(pid: number): void;
 
       // Window
       setTitleBarOverlayText(text: string): void;
       // Subagent
-      onSubagentProgress(
-        callback: (data: SessionSubagentProgressEvent) => void,
-      ): () => void;
+      onSubagentProgress(callback: (data: SessionSubagentProgressEvent) => void): () => void;
       // Goal
       onGoalEvent(callback: (data: SessionGoalEvent) => void): () => void;
 
       // Permission confirmation
-      onConfirmRequest(
-        callback: (data: SessionConfirmRequestEvent) => void,
-      ): () => void;
+      onConfirmRequest(callback: (data: SessionConfirmRequestEvent) => void): () => void;
       respondConfirm(toolCallId: string, confirmed: boolean, sessionId?: string): void;
 
       // Session updates (e.g. AI-generated title)

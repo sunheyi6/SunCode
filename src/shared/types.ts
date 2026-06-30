@@ -124,6 +124,8 @@ export interface ToolResult {
 /** Info about a background process started by Bash tool */
 export interface BackgroundProcess {
   pid: number;
+  /** PID actually monitored for liveness. Defaults to pid. Useful when a launcher hands off to an app process. */
+  monitorPid?: number;
   command: string;
   startTime: number;
   status: 'running' | 'completed' | 'error';
@@ -1036,6 +1038,17 @@ export interface GitInfo {
   deletedLines: number;
   changedFiles: number;
   stagedFiles: number;
+}
+
+export interface GitBranch {
+  name: string;
+  current: boolean;
+}
+
+export interface GitCheckoutResult {
+  success: boolean;
+  branch?: string;
+  error?: string;
 }
 
 // ===== Auto Update Types =====

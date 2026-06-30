@@ -151,19 +151,11 @@ function exitSelectMode(): void {
 }
 
 async function deleteSingle(id: string): Promise<void> {
-  const confirmed = await bridge.confirm('删除对话', '确定要删除这个对话吗？此操作不可撤销。');
-  if (!confirmed) return;
   await sessionsStore.deleteSession(id);
 }
 
 async function deleteSelected(): Promise<void> {
   if (selectedIds.value.size === 0) return;
-  const count = selectedIds.value.size;
-  const confirmed = await bridge.confirm(
-    '批量删除对话',
-    `确定要删除选中的 ${count} 个对话吗？此操作不可撤销。`,
-  );
-  if (!confirmed) return;
   await sessionsStore.deleteSessions([...selectedIds.value]);
   exitSelectMode();
 }
@@ -626,7 +618,7 @@ function formatTime(value: string): string {
   width: 100%;
   align-items: center;
   gap: 9px;
-  padding: 8px 9px 8px 12px;
+  padding: 8px 9px 8px 22px;
   border: 1px solid transparent;
   border-left: 2px solid transparent;
   background: transparent;

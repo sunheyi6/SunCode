@@ -9,6 +9,7 @@ import ChatHeader from './ChatHeader.vue';
 import MessageList from './MessageList.vue';
 import ChatInput from './ChatInput.vue';
 import PendingPromptQueue from './PendingPromptQueue.vue';
+import { getFantasyWelcomeMessage } from './chat-panel';
 
 const { send, abort, interruptAndSend, isStreaming } = useAgent();
 const chatStore = useChatStore();
@@ -17,6 +18,7 @@ const { killAll: killAllBgProcesses } = useBackgroundProcesses();
 const { showToast } = useToast();
 
 const hasMessages = computed(() => chatStore.messages.length > 0);
+const welcomeMessage = computed(() => getFantasyWelcomeMessage());
 
 const chatZoom = computed(() => settingsStore.settings.fontSize / 14);
 
@@ -69,7 +71,7 @@ onUnmounted(() => {
 <template>
   <div class="chat-panel" :style="{ zoom: chatZoom }">
     <!-- Header -->
-    <ChatHeader />
+    <ChatHeader v-if="hasMessages" />
 
     <!-- Messages (with welcome when empty) -->
     <template v-if="hasMessages">
@@ -90,23 +92,45 @@ onUnmounted(() => {
     <!-- Empty state: centered welcome content only (input stays at bottom) -->
     <template v-else>
       <div class="welcome-empty">
+        <div class="welcome-mark" aria-hidden="true">
+          <svg viewBox="0 0 360 260" fill="none">
+            <path
+              d="M102 28H218L190 64H72L102 28Z"
+              stroke="currentColor"
+              stroke-width="1.4"
+            />
+            <path
+              d="M190 64C173 82 147 90 112 90H72"
+              stroke="currentColor"
+              stroke-width="1.4"
+            />
+            <path
+              d="M252 28H338L162 232H76L252 28Z"
+              stroke="currentColor"
+              stroke-width="1.4"
+            />
+          </svg>
+        </div>
         <div class="welcome-content">
-          <div class="welcome-logo" aria-hidden="true">
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-              <circle cx="24" cy="24" r="8" stroke="currentColor" stroke-width="1.5" />
-              <path d="M24 2v6M24 40v6M2 24h6M40 24h6M10.3 10.3l4.2 4.2M33.5 33.5l4.2 4.2M10.3 37.7l4.2-4.2M33.5 14.5l4.2-4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            </svg>
-          </div>
-          <h2>SunCode</h2>
-          <p>AI 编程助手</p>
+          <h2>{{ welcomeMessage }}</h2>
+          <PendingPromptQueue @send-now="interruptAndSend" />
+          <ChatInput
+            @send="handleSend"
+            @stop="handleStop"
+            :is-streaming="isStreaming"
+            :is-empty-conversation="true"
+          />
         </div>
       </div>
     </template>
 
     <!-- Input always at the bottom -->
-    <div class="input-area">
-      <PendingPromptQueue v-if="!hasMessages" @send-now="interruptAndSend" />
-      <ChatInput @send="handleSend" @stop="handleStop" :is-streaming="isStreaming" />
+    <div v-if="hasMessages" class="input-area">
+      <ChatInput
+        @send="handleSend"
+        @stop="handleStop"
+        :is-streaming="isStreaming"
+      />
     </div>
   </div>
 </template>
@@ -127,36 +151,57 @@ onUnmounted(() => {
 
 /* Empty state: fills flex space, content centered, input stays at bottom */
 .welcome-empty {
+  position: relative;
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--spacing-xl) var(--spacing-xl) 12px;
+  min-height: 260px;
+  padding: 44px var(--spacing-xl);
   overflow-y: auto;
+  background: var(--color-bg);
+  /* Drag region for frameless window — ChatHeader is hidden on welcome screen */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.welcome-empty button,
+.welcome-empty input,
+.welcome-empty textarea {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.welcome-mark {
+  position: absolute;
+  top: clamp(28px, 8vh, 78px);
+  left: 50%;
+  width: min(480px, 58vw);
+  color: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.welcome-mark svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .welcome-content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
   text-align: center;
-  max-width: 480px;
-}
-
-.welcome-logo {
-  color: var(--color-text-muted);
-  margin-bottom: 8px;
+  margin-top: min(120px, 14vh);
 }
 
 .welcome-content h2 {
-  font-size: 20px;
-  font-weight: 500;
+  font-size: 32px;
+  font-weight: 400;
   color: var(--color-text);
-  margin: 0 0 4px;
-  letter-spacing: 0.02em;
-}
-
-.welcome-content > p {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  margin: 0;
+  margin: 0 0 34px;
+  letter-spacing: 0;
 }
 
 /* Model switch notice banner */

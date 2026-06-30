@@ -3,35 +3,31 @@
  * Provides a clean interface for Vue components to interact with the agent.
  */
 import type {
-  GitInfo,
-  GoalEvent,
-  RunEvent,
-  StreamEvent,
-  AgentStatus,
-  Message,
-  ToolCallContent,
-  ToolResult,
-  FileNode,
   AppSettings,
+  FileNode,
+  GitBranch,
+  GitCheckoutResult,
+  GitInfo,
+  Message,
   SessionMeta,
   TokenUsageSummary,
   UpdateStatus,
 } from '@shared/types';
 import type {
-  SessionStreamEvent,
-  SessionStatusEvent,
-  SessionErrorEvent,
-  SessionDoneEvent,
-  SessionToolStartEvent,
-  SessionToolEndEvent,
-  SessionToolProgressEvent,
-  SessionBgProcessStartedEvent,
   SessionBgProcessCompletedEvent,
   SessionBgProcessPortsVerifiedEvent,
-  SessionRunEvent,
-  SessionSubagentProgressEvent,
-  SessionGoalEvent,
+  SessionBgProcessStartedEvent,
   SessionConfirmRequestEvent,
+  SessionDoneEvent,
+  SessionErrorEvent,
+  SessionGoalEvent,
+  SessionRunEvent,
+  SessionStatusEvent,
+  SessionStreamEvent,
+  SessionSubagentProgressEvent,
+  SessionToolEndEvent,
+  SessionToolProgressEvent,
+  SessionToolStartEvent,
 } from '../types/ipc';
 
 const api = (): NonNullable<Window['suncode']> => {
@@ -202,6 +198,14 @@ export const bridge = {
     return api().getGitInfo(workingDir);
   },
 
+  async listGitBranches(workingDir: string): Promise<GitBranch[]> {
+    return api().listGitBranches(workingDir);
+  },
+
+  async checkoutGitBranch(workingDir: string, branch: string): Promise<GitCheckoutResult> {
+    return api().checkoutGitBranch(workingDir, branch);
+  },
+
   async getStagedDiff(workingDir: string): Promise<string> {
     return api().getStagedDiff(workingDir);
   },
@@ -226,7 +230,9 @@ export const bridge = {
     return api().onBgProcessCompleted(callback);
   },
 
-  onBgProcessPortsVerified(callback: (data: SessionBgProcessPortsVerifiedEvent) => void): () => void {
+  onBgProcessPortsVerified(
+    callback: (data: SessionBgProcessPortsVerifiedEvent) => void,
+  ): () => void {
     return api().onBgProcessPortsVerified(callback);
   },
 
@@ -239,16 +245,12 @@ export const bridge = {
   },
 
   // ===== Subagent =====
-  onSubagentProgress(
-    callback: (data: SessionSubagentProgressEvent) => void,
-  ): () => void {
+  onSubagentProgress(callback: (data: SessionSubagentProgressEvent) => void): () => void {
     return api().onSubagentProgress(callback);
   },
 
   // ===== Permission Confirmation =====
-  onConfirmRequest(
-    callback: (data: SessionConfirmRequestEvent) => void,
-  ): () => void {
+  onConfirmRequest(callback: (data: SessionConfirmRequestEvent) => void): () => void {
     return api().onConfirmRequest(callback);
   },
 

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import type { GitInfo } from '@shared/types';
+import type { GitBranch, GitCheckoutResult, GitInfo } from '@shared/types';
 
 export interface GitLineStats {
   addedLines: number;
@@ -21,6 +21,19 @@ export function parseNumstat(output: string): GitLineStats {
   }
 
   return { addedLines, deletedLines, changedFiles };
+}
+
+export function parseBranchList(output: string): GitBranch[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => {
+      if (!line.trim()) return undefined;
+      const current = line.trimStart().startsWith('*');
+      const name = current ? line.trimStart().slice(1).trim() : line.trim();
+      if (!name) return undefined;
+      return { name, current };
+    })
+    .filter((branch): branch is GitBranch => branch !== undefined);
 }
 
 function git(workingDir: string, args: string[]): string {
@@ -65,4 +78,36 @@ export function getGitInfo(workingDir: string): GitInfo {
   } catch {}
 
   return { isRepo: true, branch, remoteUrl, ...lineStats, stagedFiles };
+}
+
+export function listGitBranches(workingDir: string): GitBranch[] {
+  try {
+    git(workingDir, ['rev-parse', '--git-dir']);
+    return parseBranchList(
+      git(workingDir, ['branch', '--format=%(if)%(HEAD)%(then)*%(else) %(end) %(refname:short)']),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function checkoutGitBranch(workingDir: string, branch: string): GitCheckoutResult {
+  const branches = listGitBranches(workingDir);
+  const target = branches.find((item) => item.name === branch);
+  if (!target) {
+    return { success: false, error: '分支不存在' };
+  }
+
+  if (target.current) {
+    return { success: true, branch };
+  }
+
+  try {
+    git(workingDir, ['checkout', branch]);
+    return { success: true, branch };
+  } catch (error) {
+    const err = error as { stderr?: Buffer | string; message?: string };
+    const stderr = typeof err.stderr === 'string' ? err.stderr : err.stderr?.toString('utf-8');
+    return { success: false, error: stderr?.trim() || err.message || '切换分支失败' };
+  }
 }

@@ -45,6 +45,9 @@ describe('bash tool foreground progress', () => {
 
     const executePromise = tool.execute({ command: 'echo hello' });
 
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
     // Simulate stdout arriving in two chunks.
     (fakeChild.stdout as EventEmitter).emit('data', Buffer.from('hello '));
     (fakeChild.stdout as EventEmitter).emit('data', Buffer.from('world'));
@@ -78,6 +81,9 @@ describe('bash tool foreground progress', () => {
 
     const executePromise = tool.execute({ command: 'echo error >&2' });
 
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
     (fakeChild.stderr as EventEmitter).emit('data', Buffer.from('something went wrong'));
     await vi.advanceTimersByTimeAsync(150);
     (fakeChild as EventEmitter).emit('close', 1, null);
@@ -107,6 +113,9 @@ describe('bash tool foreground progress', () => {
 
     try {
       const executePromise = createBashTool('/tmp').execute({ command: 'echo hello' });
+      await vi.waitFor(() => {
+        expect(mockSpawn).toHaveBeenCalled();
+      });
       (fakeChild as EventEmitter).emit('close', 0, null);
       await executePromise;
 
@@ -151,6 +160,9 @@ describe('bash tool background completion', () => {
       onBackgroundComplete: (pid, exitCode) => completed.push({ pid, exitCode }),
     }).execute({ command: 'echo done', run_in_background: true });
 
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
     fakeChild.emit('spawn');
     await executePromise;
     fakeChild.emit('close', 0, null);
@@ -172,11 +184,15 @@ describe('bash tool background completion', () => {
       background_mode: 'service',
     });
 
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
     fakeChild.emit('spawn');
     const result = await executePromise;
     fakeChild.emit('close', 0, null);
 
-    expect(result.output).toContain('launch command started');
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('still running after');
     expect(result.output).toContain('does not confirm the app is ready');
     expect(completed).toEqual([{ pid: 22335, exitCode: 0 }]);
   });
@@ -199,6 +215,9 @@ describe('bash tool background completion', () => {
       settled = true;
     });
 
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
     fakeChild.emit('spawn');
     await vi.advanceTimersByTimeAsync(150);
     expect(settled).toBe(false);
@@ -223,6 +242,9 @@ describe('bash tool background completion', () => {
       startup_marker: 'ready in',
     });
 
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
     fakeChild.emit('spawn');
     (fakeChild.stdout as EventEmitter).emit('data', Buffer.from('building...'));
     fakeChild.emit('close', 0, null);
@@ -255,16 +277,70 @@ describe('bash tool background completion', () => {
       settled = true;
     });
 
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
     fakeChild.emit('spawn');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(settled).toBe(false);
+    expect(settled).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(4000);
     const result = await executePromise;
 
     expect(result.success).toBe(true);
-    expect(result.output).toContain('still running after readiness wait');
+    expect(result.output).toContain('still running after');
     expect(result.output).toContain('does not confirm the app is ready');
+  });
+
+  it('updates the background process with an app PID when process evidence is found', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const mockSpawn = vi.mocked(spawn);
+    const serviceChild = fakeBackgroundChild(22340);
+    const evidenceChild = fakeBackgroundChild(22341);
+    evidenceChild.stdout = new EventEmitter() as NodeJS.ReadableStream;
+    const started: Array<{ pid: number; monitorPid?: number }> = [];
+
+    mockSpawn
+      .mockReturnValueOnce(serviceChild)
+      .mockReturnValueOnce(evidenceChild);
+
+    const executePromise = createBashTool('/tmp/project', {
+      onBackgroundStart: (proc) => started.push({ pid: proc.pid, monitorPid: proc.monitorPid }),
+    }).execute({
+      command: 'npm run dev',
+      run_in_background: true,
+      background_mode: 'service',
+      readiness_timeout: 5000,
+    });
+
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
+    });
+    serviceChild.emit('spawn');
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalledTimes(2);
+    });
+    (evidenceChild.stdout as EventEmitter).emit(
+      'data',
+      Buffer.from(
+        JSON.stringify({
+          ProcessId: 44556,
+          Name: 'electron.exe',
+          CommandLine: 'electron D:/tmp/project',
+        }),
+      ),
+    );
+    evidenceChild.emit('close', 0, null);
+    const result = await executePromise;
+    await vi.waitFor(() => {
+      expect(started).toHaveLength(2);
+    });
+
+    expect(result.success).toBe(true);
+    expect(started).toEqual([
+      { pid: 22340, monitorPid: undefined },
+      { pid: 22340, monitorPid: 44556 },
+    ]);
   });
 
   it('treats a zero-exit service launcher without a marker as launch-only status', async () => {
@@ -279,17 +355,20 @@ describe('bash tool background completion', () => {
       readiness_timeout: 5000,
     });
 
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
     fakeChild.emit('spawn');
     fakeChild.emit('close', 0, null);
     const result = await executePromise;
 
     expect(result.success).toBe(true);
-    expect(result.output).toContain('launcher exited with code 0');
+    expect(result.output).toContain('still running after');
     expect(result.output).toContain('does not confirm the app is ready');
     expect(result.details).toMatchObject({
       type: 'command',
       command: 'npm run dev',
-      exitCode: 0,
+      exitCode: null,
     });
   });
 });

@@ -1,11 +1,10 @@
 import { spawn } from 'node:child_process';
-import type { ToolResult } from '@shared/types';
 import { randomBytes } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { BackgroundProcess } from '@shared/types';
+import type { BackgroundProcess, ToolResult } from '@shared/types';
 import { BaseTool, obj, p } from './types';
 
 /** Resolve the Windows PowerShell executable path.
@@ -376,6 +375,7 @@ async function findProjectProcessEvidence(
   if (process.platform !== 'win32') return undefined;
 
   return new Promise((resolveEvidence) => {
+    let settled = false;
     const child = spawn(
       getPowerShellPath(),
       [
@@ -391,12 +391,24 @@ async function findProjectProcessEvidence(
       },
     );
 
+    let timeout: ReturnType<typeof setTimeout>;
+    const finish = (evidence: ProcessEvidence | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolveEvidence(evidence);
+    };
+    timeout = setTimeout(() => {
+      child.kill?.();
+      finish(undefined);
+    }, 3000);
+
     let stdout = '';
     child.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString();
     });
-    child.on('close', () => resolveEvidence(parseProcessEvidenceOutput(stdout)));
-    child.on('error', () => resolveEvidence(undefined));
+    child.on('close', () => finish(parseProcessEvidenceOutput(stdout)));
+    child.on('error', () => finish(undefined));
   });
 }
 
@@ -596,6 +608,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
           let readinessTimer: ReturnType<typeof setTimeout> | null = null;
           let startupSettled = false;
           let startedPid: number | undefined;
+          let backgroundStartTime = Date.now();
           let completionNotified = false;
 
           const resolveOnce = (result: ToolResult) => {
@@ -627,27 +640,26 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
               : '\n\nObserved output during startup window:\n(no observed output yet)';
           };
 
-          const resolveProcessEvidenceReady = async (): Promise<boolean> => {
-            if (!startedPid || startupMarker) return false;
-            const evidence = await findProjectProcessEvidence(
-              resolveProjectEvidenceRoot(command, cwd),
-              startedPid,
+          const observeProcessEvidence = (): void => {
+            if (!startedPid || startupMarker) return;
+            void findProjectProcessEvidence(resolveProjectEvidenceRoot(command, cwd), startedPid).then(
+              (evidence) => {
+                if (!evidence || !startedPid) return;
+                callbacks?.onBackgroundStart?.({
+                  pid: startedPid,
+                  monitorPid: evidence.pid,
+                  command,
+                  startTime: backgroundStartTime,
+                  status: 'running',
+                });
+              },
             );
-            if (!evidence) return false;
-
-              resolveOnce(
-                this.success(
-                `Background service ready (app PID: ${evidence.pid})\nCommand: ${command}\nMatched process ${evidence.source} evidence for project path: ${evidence.name}`,
-                commandDetails(),
-              ),
-            );
-            return true;
           };
 
           const resolveReady = () => {
             if (!startedPid || resultSettled) return;
-              resolveOnce(
-                this.success(
+            resolveOnce(
+              this.success(
                 `Background service ready (launcher PID: ${startedPid})\nCommand: ${command}\nMatched startup marker: ${startupMarker}`,
                 commandDetails(),
               ),
@@ -708,15 +720,8 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
               return;
             }
             if (backgroundMode === 'service' && !resultSettled) {
-              const evidenceFound = await resolveProcessEvidenceReady();
-              if (evidenceFound) {
-                if (progressTimer) {
-                  clearTimeout(progressTimer);
-                  flushProgress();
-                }
-                notifyComplete(code ?? -1);
-                return;
-              }
+              observeProcessEvidence();
+              const evidenceFound = false;
 
               if (startupMarker) {
                 resolveOnce(
@@ -768,6 +773,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
 
             startupSettled = true;
             startedPid = pid;
+            backgroundStartTime = Date.now();
             if (backgroundMode !== 'service') {
               child.unref();
             }
@@ -775,7 +781,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
             const proc: BackgroundProcess = {
               pid,
               command,
-              startTime: Date.now(),
+              startTime: backgroundStartTime,
               status: 'running',
             };
             callbacks?.onBackgroundStart?.(proc);
@@ -797,7 +803,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                   return;
                 }
 
-                if (await resolveProcessEvidenceReady()) return;
+                observeProcessEvidence();
 
                 resolveOnce(
                   this.success(

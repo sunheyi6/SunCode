@@ -215,6 +215,8 @@ export const useChatStore = defineStore('chat', () => {
           msg.turnCount = event.turnCount ?? 0;
           msg.maxTurns = event.maxTurns ?? 0;
         }
+        lastThinkingLength = 0;
+        lastToolCallCount = 0;
         break;
 
       case 'turn_end':

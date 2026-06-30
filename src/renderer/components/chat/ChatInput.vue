@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useSessionsStore } from '../../stores/sessions';
 import { useChatStore } from '../../stores/chat';
-import { getComposerTextareaHeight } from './chat-input';
+import { getChatInputClasses, getComposerTextareaHeight } from './chat-input';
 import { bridge } from '../../api/bridge';
 import { useDropdownGroup } from '../../composables/useDropdown';
 import WorkspaceSelector from './WorkspaceSelector.vue';
@@ -14,9 +14,15 @@ import type { GitInfo } from '@shared/types';
 import type { SlashCommand } from '@shared/commands';
 import { parseCommandFromInput } from '@shared/commands';
 
-const props = defineProps<{
-  isStreaming: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    isStreaming: boolean;
+    isEmptyConversation?: boolean;
+  }>(),
+  {
+    isEmptyConversation: false,
+  },
+);
 
 const emit = defineEmits<{
   send: [text: string];
@@ -185,6 +191,12 @@ watch(inputText, () => {
 
 const hasInput = computed(() => inputText.value.trim().length > 0);
 const isGoalInput = computed(() => inputText.value.trim().startsWith('/goal'));
+const chatInputClasses = computed(() => getChatInputClasses(props.isEmptyConversation));
+const placeholderText = computed(() =>
+  props.isEmptyConversation
+    ? '向 SunCode 提问，输入 @ 提及文件或子智能体，/ 使用命令，$ 使用技能，# 关联对话'
+    : '提出后续修改要求',
+);
 
 function onDocumentClick(event: MouseEvent): void {
   if (!inputRef.value?.contains(event.target as Node)) {
@@ -360,7 +372,7 @@ watch(
 </script>
 
 <template>
-  <div ref="inputRef" class="chat-input">
+  <div ref="inputRef" :class="chatInputClasses">
     <!-- Workspace info bar -->
     <WorkspaceSelector :git-info="gitInfo" :dropdown="workspaceDropdown" />
 
@@ -390,7 +402,7 @@ watch(
         ref="textareaRef"
         v-model="inputText"
         class="input-field"
-        placeholder="提出后续修改要求"
+        :placeholder="placeholderText"
         rows="1"
         @input="resizeTextarea"
         @keydown="handleKeydown"
@@ -449,6 +461,18 @@ watch(
   padding: 10px 20px 16px;
   background: var(--color-bg-secondary);
   flex-shrink: 0;
+}
+
+.chat-input-empty {
+  width: min(800px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 0;
+  overflow: visible;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--color-bg-secondary) 88%, white);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.1),
+    0 1px 1px rgba(255, 255, 255, 0.7) inset;
 }
 
 /* Workspace info bar */
@@ -532,6 +556,16 @@ watch(
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
+}
+
+.chat-input-empty .composer {
+  padding: 14px 16px;
+  border-color: color-mix(in srgb, var(--border-color-strong) 72%, white);
+  border-radius: 17px;
+  background: var(--color-bg);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.86) inset,
+    0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
 .composer:has(.goal-indicator) {
@@ -621,6 +655,12 @@ watch(
   box-shadow: none;
 }
 
+.chat-input-empty .input-field {
+  height: 62px;
+  min-height: 62px;
+  padding-top: 1px;
+}
+
 .input-field:focus {
   border: 0;
 }
@@ -667,6 +707,27 @@ watch(
   justify-content: center;
   border: 0;
   background: transparent;
+}
+
+.chat-input-empty .send-btn {
+  border-radius: 10px;
+}
+
+.chat-input-empty :deep(.workspace-bar) {
+  margin: 0;
+  padding: 13px 20px 10px;
+}
+
+.chat-input-empty :deep(.workspace-folder),
+.chat-input-empty :deep(.git-branch) {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.chat-input-empty :deep(.workspace-folder:hover) {
+  background: color-mix(in srgb, var(--color-surface-hover) 64%, transparent);
 }
 
 .icon-btn {
@@ -949,6 +1010,11 @@ watch(
   .chat-input {
     padding-right: 12px;
     padding-left: 12px;
+  }
+
+  .chat-input-empty {
+    width: calc(100% - 20px);
+    padding: 0;
   }
 
   .composer {

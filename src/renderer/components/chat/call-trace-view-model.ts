@@ -443,6 +443,9 @@ function inlineToolLabel(
   hasFailed: boolean,
   language: UiLanguage,
 ): string {
+  const mixedResultLabel = inlineMixedResultLabel(toolCalls, hasRunning, language);
+  if (mixedResultLabel) return mixedResultLabel;
+
   const status = localizedStatus(hasRunning, hasFailed, language);
   if (toolCalls.length > 1) {
     return formatCount(status, toolCalls.length, toolGroupKind(toolCalls[0]), language);
@@ -451,6 +454,38 @@ function inlineToolLabel(
   const toolCall = toolCalls[0];
   if (!toolCall) return status;
   return formatCount(status, 1, toolGroupKind(toolCall), language);
+}
+
+function inlineMixedResultLabel(
+  toolCalls: ToolCallContent[],
+  hasRunning: boolean,
+  language: UiLanguage,
+): string | undefined {
+  if (hasRunning || toolCalls.length <= 1) return undefined;
+
+  const succeeded = toolCalls.filter(isSuccessfulToolCall).length;
+  const failed = toolCalls.filter(isFailedToolCall).length;
+  if (succeeded === 0 || failed === 0) return undefined;
+
+  const totalLabel = formatCount(
+    localizedStatus(false, false, language),
+    toolCalls.length,
+    toolGroupKind(toolCalls[0]),
+    language,
+  );
+  if (language === 'en') {
+    return `${totalLabel}, ${succeeded} succeeded, ${failed} failed`;
+  }
+  return `${totalLabel}，成功 ${succeeded}，失败 ${failed}`;
+}
+
+function isSuccessfulToolCall(toolCall: ToolCallContent): boolean {
+  if (toolCall.status === 'error' || toolCall.result?.success === false) return false;
+  return toolCall.status === 'done' || toolCall.result?.success === true;
+}
+
+function isFailedToolCall(toolCall: ToolCallContent): boolean {
+  return toolCall.status === 'error' || toolCall.result?.success === false;
 }
 
 function toolGroupKind(toolCall: ToolCallContent | undefined): 'command' | 'agent' | 'tool' {

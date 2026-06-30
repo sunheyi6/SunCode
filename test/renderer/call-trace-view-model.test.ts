@@ -381,6 +381,46 @@ describe('buildInlineCallTrace', () => {
     ]);
   });
 
+  test('summarizes mixed command results without marking every command failed', () => {
+    const message: ChatMessage = {
+      id: 'a-mixed-commands',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      isStreaming: false,
+      uiLanguage: 'en',
+      blocks: [
+        {
+          id: 'b1',
+          type: 'tool_call',
+          toolCall: { type: 'tool_call', id: 'tc1', name: 'bash', arguments: '{"command":"one"}' },
+        },
+        {
+          id: 'b2',
+          type: 'tool_call',
+          toolCall: { type: 'tool_call', id: 'tc2', name: 'bash', arguments: '{"command":"two"}' },
+        },
+      ],
+      toolCalls: [
+        { type: 'tool_call', id: 'tc1', name: 'bash', arguments: '{"command":"one"}', status: 'done' },
+        {
+          type: 'tool_call',
+          id: 'tc2',
+          name: 'bash',
+          arguments: '{"command":"two"}',
+          status: 'error',
+          result: { toolCallId: 'tc2', name: 'bash', success: false, output: '', error: 'failed' },
+        },
+      ],
+    };
+
+    const trace = buildInlineCallTrace(message);
+
+    expect(trace.entries).toMatchObject([
+      { kind: 'tools', label: 'Ran 2 commands, 1 succeeded, 1 failed' },
+    ]);
+  });
+
   test('falls back to message-level thinking and tool calls without blocks', () => {
     const message: ChatMessage = {
       id: 'a-fallback',

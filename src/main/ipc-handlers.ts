@@ -4,7 +4,12 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { DEFAULT_SETTINGS, LITE_MODELS, RECOMMENDED_MODELS, TITLE_GENERATION_PROMPT } from '@shared/constants';
+import {
+  DEFAULT_SETTINGS,
+  LITE_MODELS,
+  RECOMMENDED_MODELS,
+  TITLE_GENERATION_PROMPT,
+} from '@shared/constants';
 import type {
   AppSettings,
   DayStats,
@@ -17,10 +22,17 @@ import type {
   WorkerOutMessage,
 } from '@shared/types';
 import { app, dialog, ipcMain, shell } from 'electron';
-import { getAppDataDir } from './paths';
-import { getGitInfo } from './git-info';
-import { recoverInterruptedSessions } from './recovery';
+import {
+  checkForUpdates,
+  downloadUpdate,
+  getUpdateStatus,
+  installUpdate,
+  skipVersion,
+} from './auto-updater';
+import { checkoutGitBranch, getGitInfo, listGitBranches } from './git-info';
 import { getLogPath } from './logger';
+import { getAppDataDir } from './paths';
+import { recoverInterruptedSessions } from './recovery';
 import { appendEvent, getEvents, getTokenUsageAggregate, listRuns, startRun } from './run-store';
 import {
   deleteSession,
@@ -31,13 +43,6 @@ import {
   saveSession,
 } from './session-store';
 import type { WindowManager } from './window-manager';
-import {
-  getUpdateStatus,
-  checkForUpdates,
-  downloadUpdate,
-  installUpdate,
-  skipVersion,
-} from './auto-updater';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -109,35 +114,68 @@ function getAgentWorker(): Worker {
 
       switch (msg.type) {
         case 'stream':
-          mainWindow.webContents.send('agent:stream', { sessionId: msg.sessionId, event: msg.event });
+          mainWindow.webContents.send('agent:stream', {
+            sessionId: msg.sessionId,
+            event: msg.event,
+          });
           break;
         case 'status':
-          mainWindow.webContents.send('agent:status', { sessionId: msg.sessionId, status: msg.status });
+          mainWindow.webContents.send('agent:status', {
+            sessionId: msg.sessionId,
+            status: msg.status,
+          });
           break;
         case 'error':
           console.error('[Main] Worker error:', msg.message, 'session=', msg.sessionId.slice(-8));
-          mainWindow.webContents.send('agent:error', { sessionId: msg.sessionId, message: msg.message });
+          mainWindow.webContents.send('agent:error', {
+            sessionId: msg.sessionId,
+            message: msg.message,
+          });
           break;
         case 'done':
-          mainWindow.webContents.send('agent:done', { sessionId: msg.sessionId, message: msg.message });
+          mainWindow.webContents.send('agent:done', {
+            sessionId: msg.sessionId,
+            message: msg.message,
+          });
           break;
         case 'toolStart':
-          mainWindow.webContents.send('agent:tool-start', { sessionId: msg.sessionId, toolCall: msg.toolCall });
+          mainWindow.webContents.send('agent:tool-start', {
+            sessionId: msg.sessionId,
+            toolCall: msg.toolCall,
+          });
           break;
         case 'toolEnd':
-          mainWindow.webContents.send('agent:tool-end', { sessionId: msg.sessionId, toolResult: msg.toolResult });
+          mainWindow.webContents.send('agent:tool-end', {
+            sessionId: msg.sessionId,
+            toolResult: msg.toolResult,
+          });
           break;
         case 'toolProgress':
-          mainWindow.webContents.send('agent:tool-progress', { sessionId: msg.sessionId, toolCallId: msg.toolCallId, output: msg.output });
+          mainWindow.webContents.send('agent:tool-progress', {
+            sessionId: msg.sessionId,
+            toolCallId: msg.toolCallId,
+            output: msg.output,
+          });
           break;
         case 'bgProcessStarted':
-          mainWindow.webContents.send('agent:bg-process-started', { sessionId: msg.sessionId, process: msg.process });
+          mainWindow.webContents.send('agent:bg-process-started', {
+            sessionId: msg.sessionId,
+            process: msg.process,
+          });
           break;
         case 'bgProcessCompleted':
-          mainWindow.webContents.send('agent:bg-process-completed', { sessionId: msg.sessionId, pid: msg.pid, exitCode: msg.exitCode });
+          mainWindow.webContents.send('agent:bg-process-completed', {
+            sessionId: msg.sessionId,
+            pid: msg.pid,
+            exitCode: msg.exitCode,
+          });
           break;
         case 'bgProcessPortsVerified':
-          mainWindow.webContents.send('agent:bg-process-ports-verified', { sessionId: msg.sessionId, pid: msg.pid, ports: msg.ports });
+          mainWindow.webContents.send('agent:bg-process-ports-verified', {
+            sessionId: msg.sessionId,
+            pid: msg.pid,
+            ports: msg.ports,
+          });
           break;
         case 'runEvent': {
           const evt = msg.event;
@@ -152,19 +190,31 @@ function getAgentWorker(): Worker {
           break;
         }
         case 'subagentStart':
-          mainWindow.webContents.send('agent:subagent-start', { sessionId: msg.sessionId, execution: msg.execution });
+          mainWindow.webContents.send('agent:subagent-start', {
+            sessionId: msg.sessionId,
+            execution: msg.execution,
+          });
           break;
         case 'subagentEnd':
-          mainWindow.webContents.send('agent:subagent-end', { sessionId: msg.sessionId, id: msg.id, result: msg.result });
+          mainWindow.webContents.send('agent:subagent-end', {
+            sessionId: msg.sessionId,
+            id: msg.id,
+            result: msg.result,
+          });
           break;
         case 'subagentProgress':
-          mainWindow.webContents.send(
-            'agent:subagent-progress',
-            { sessionId: msg.sessionId, executionId: msg.executionId, agent: msg.agent, delta: msg.delta },
-          );
+          mainWindow.webContents.send('agent:subagent-progress', {
+            sessionId: msg.sessionId,
+            executionId: msg.executionId,
+            agent: msg.agent,
+            delta: msg.delta,
+          });
           break;
         case 'goalEvent':
-          mainWindow.webContents.send('agent:goal-event', { sessionId: msg.sessionId, event: msg.event });
+          mainWindow.webContents.send('agent:goal-event', {
+            sessionId: msg.sessionId,
+            event: msg.event,
+          });
           break;
         case 'confirmRequest':
           // Forward to renderer for in-app Vue confirmation dialog
@@ -311,20 +361,27 @@ export function registerIpcHandlers(wm: WindowManager): void {
   });
 
   // Tool confirmation response from renderer → worker
-  ipcMain.on('agent:confirm-response', (_event, toolCallId: string, confirmed: boolean, sessionId?: string) => {
-    try {
-      const sid = sessionId || currentSessionId;
-      if (!sid) { console.error('[Main] confirm-response: no sessionId'); return; }
-      sendToWorker({ type: 'confirmResponse', sessionId: sid, toolCallId, confirmed });
-    } catch (err) {
-      console.error('[Main] agent:confirm-response failed:', (err as Error).message);
-    }
-  });
+  ipcMain.on(
+    'agent:confirm-response',
+    (_event, toolCallId: string, confirmed: boolean, sessionId?: string) => {
+      try {
+        const sid = sessionId || currentSessionId;
+        if (!sid) {
+          console.error('[Main] confirm-response: no sessionId');
+          return;
+        }
+        sendToWorker({ type: 'confirmResponse', sessionId: sid, toolCallId, confirmed });
+      } catch (err) {
+        console.error('[Main] agent:confirm-response failed:', (err as Error).message);
+      }
+    },
+  );
 
   // Kill background process from renderer → worker
   ipcMain.on('agent:kill-bg-process', (_event, pid: number) => {
     try {
-      if (currentSessionId) sendToWorker({ type: 'killBgProcess', sessionId: currentSessionId, pid });
+      if (currentSessionId)
+        sendToWorker({ type: 'killBgProcess', sessionId: currentSessionId, pid });
     } catch (err) {
       console.error('[Main] agent:kill-bg-process failed:', (err as Error).message);
     }
@@ -472,45 +529,48 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
-  ipcMain.handle('session:saveMessage', async (_event, message: Message, targetSessionId?: string) => {
-    try {
-      // Role-based session targeting:
-      // - User messages always go to currentSessionId (the session the user is viewing).
-      // - Assistant/system messages use the explicit targetSessionId (from the renderer event),
-      //   falling back to promptSessionId for backward compatibility.
-      const targetSession =
-        message.role === 'user'
-          ? currentSessionId
-          : targetSessionId || promptSessionId || currentSessionId;
-      if (!targetSession) {
-        console.log('[Main] saveMessage: SKIP (no session)');
-        return;
-      }
-      const msgs = sessionMessages.get(targetSession) || [];
-      console.log(
-        `[Main] saveMessage role=${message.role} target=${targetSession.slice(-8)} cur=${currentSessionId?.slice(-8) ?? 'null'} prompt=${promptSessionId?.slice(-8) ?? 'null'} before=${msgs.length}`,
-      );
-      const isFirstMessage = msgs.length === 0;
-      msgs.push(message);
-      sessionMessages.set(targetSession, msgs);
-
-      const meta = sessions.get(targetSession);
-      if (meta) {
-        meta.updated = new Date().toISOString();
-        meta.messageCount = msgs.length;
-        if (isFirstMessage && message.role === 'user') {
-          // Quick fallback title from the first message text
-          const title = extractTitle(message);
-          if (title) meta.name = title;
-          // Fire-and-forget: AI-generated title in the background
-          void generateTitleWithAI(targetSession, message);
+  ipcMain.handle(
+    'session:saveMessage',
+    async (_event, message: Message, targetSessionId?: string) => {
+      try {
+        // Role-based session targeting:
+        // - User messages always go to currentSessionId (the session the user is viewing).
+        // - Assistant/system messages use the explicit targetSessionId (from the renderer event),
+        //   falling back to promptSessionId for backward compatibility.
+        const targetSession =
+          message.role === 'user'
+            ? currentSessionId
+            : targetSessionId || promptSessionId || currentSessionId;
+        if (!targetSession) {
+          console.log('[Main] saveMessage: SKIP (no session)');
+          return;
         }
-        await saveSession(meta, msgs);
+        const msgs = sessionMessages.get(targetSession) || [];
+        console.log(
+          `[Main] saveMessage role=${message.role} target=${targetSession.slice(-8)} cur=${currentSessionId?.slice(-8) ?? 'null'} prompt=${promptSessionId?.slice(-8) ?? 'null'} before=${msgs.length}`,
+        );
+        const isFirstMessage = msgs.length === 0;
+        msgs.push(message);
+        sessionMessages.set(targetSession, msgs);
+
+        const meta = sessions.get(targetSession);
+        if (meta) {
+          meta.updated = new Date().toISOString();
+          meta.messageCount = msgs.length;
+          if (isFirstMessage && message.role === 'user') {
+            // Quick fallback title from the first message text
+            const title = extractTitle(message);
+            if (title) meta.name = title;
+            // Fire-and-forget: AI-generated title in the background
+            void generateTitleWithAI(targetSession, message);
+          }
+          await saveSession(meta, msgs);
+        }
+      } catch (err) {
+        console.error('[Main] session:saveMessage failed:', (err as Error).message);
       }
-    } catch (err) {
-      console.error('[Main] session:saveMessage failed:', (err as Error).message);
-    }
-  });
+    },
+  );
 
   ipcMain.handle('session:delete', async (_event, id: string) => {
     try {
@@ -660,6 +720,14 @@ export function registerIpcHandlers(wm: WindowManager): void {
   // ===== Git Info =====
   ipcMain.handle('git:getInfo', async (_event, workingDir: string) => {
     return getGitInfo(workingDir);
+  });
+
+  ipcMain.handle('git:listBranches', async (_event, workingDir: string) => {
+    return listGitBranches(workingDir);
+  });
+
+  ipcMain.handle('git:checkoutBranch', async (_event, workingDir: string, branch: string) => {
+    return checkoutGitBranch(workingDir, branch);
   });
 
   ipcMain.handle('git:getStagedDiff', async (_event, workingDir: string) => {

@@ -7,6 +7,7 @@ import { parentPort } from 'node:worker_threads';
 import { DEFAULT_SETTINGS } from '@shared/constants';
 import type { AppSettings, WorkerInMessage, WorkerOutMessage } from '@shared/types';
 import { Agent } from './agent/agent';
+import { BackgroundProcessMonitor } from './tools/background-process-monitor';
 import { killProcessTree } from './tools/bash';
 
 if (!parentPort) {
@@ -19,6 +20,14 @@ console.log('[Worker] Started');
 /** Per-session agent instances. Keyed by sessionId. */
 const agents = new Map<string, Agent>();
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
+const backgroundProcessMonitor = new BackgroundProcessMonitor((item, exitCode) => {
+  post({
+    type: 'bgProcessCompleted',
+    sessionId: item.sessionId,
+    pid: item.process.pid,
+    exitCode,
+  });
+});
 
 /** Pending confirmations waiting for user response.
  *  Keyed by toolCallId (LLM-generated UUID, collision-safe across sessions). */
@@ -97,10 +106,14 @@ function createCallbacks(sessionId: string) {
       post({ type: 'done', sessionId, message }),
     onError: (errorMsg: string) =>
       post({ type: 'error', sessionId, message: errorMsg }),
-    onBgProcessStarted: (proc: import('@shared/types').BackgroundProcess) =>
-      post({ type: 'bgProcessStarted', sessionId, process: proc }),
-    onBgProcessCompleted: (pid: number, exitCode: number) =>
-      post({ type: 'bgProcessCompleted', sessionId, pid, exitCode }),
+    onBgProcessStarted: (proc: import('@shared/types').BackgroundProcess) => {
+      backgroundProcessMonitor.register(sessionId, proc);
+      post({ type: 'bgProcessStarted', sessionId, process: proc });
+    },
+    onBgProcessCompleted: (pid: number, exitCode: number) => {
+      backgroundProcessMonitor.unregister(pid);
+      post({ type: 'bgProcessCompleted', sessionId, pid, exitCode });
+    },
     onBgProcessPortsVerified: (pid: number, ports: number[]) =>
       post({ type: 'bgProcessPortsVerified', sessionId, pid, ports }),
     onRunEvent: (event: import('@shared/types').RunEvent) =>
@@ -254,10 +267,11 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
     case 'killBgProcess': {
       console.log('[Worker] Killing background process:', msg.pid);
       try {
-        killProcessTree(msg.pid);
+        killProcessTree(backgroundProcessMonitor.getMonitorPid(msg.pid) ?? msg.pid);
       } catch (err) {
         console.error('[Worker] Failed to kill process:', (err as Error).message);
       }
+      backgroundProcessMonitor.unregister(msg.pid);
       // Notify renderer that the process was terminated externally
       post({ type: 'bgProcessCompleted', sessionId: msg.sessionId, pid: msg.pid, exitCode: -1 });
       break;

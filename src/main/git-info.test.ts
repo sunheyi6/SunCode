@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test';
-import { parseNumstat } from './git-info';
+import { parseBranchList, parseNumstat } from './git-info';
 
 describe('parseNumstat', () => {
   test('sums insertions and deletions across files', () => {
@@ -25,5 +25,14 @@ describe('parseNumstat', () => {
       deletedLines: 0,
       changedFiles: 0,
     });
+  });
+});
+
+describe('parseBranchList', () => {
+  test('marks the current branch and keeps branch names', () => {
+    expect(parseBranchList('* main\n  feat/switch-branch\n')).toEqual([
+      { name: 'main', current: true },
+      { name: 'feat/switch-branch', current: false },
+    ]);
   });
 });

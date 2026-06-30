@@ -80,6 +80,47 @@ describe('chat store stream blocks', () => {
     ]);
   });
 
+  test('starts a fresh thinking cursor for each model turn in the same assistant message', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+    store.handleStreamEvent({ type: 'turn_start', turnCount: 1, maxTurns: 5 }, 'session-1');
+    store.handleStreamEvent(
+      { type: 'message_update', data: { text: '', thinking: 'First turn thinking', toolCalls: [] } },
+      'session-1',
+    );
+    store.handleStreamEvent(
+      {
+        type: 'message_update',
+        data: {
+          text: '',
+          thinking: 'First turn thinking',
+          toolCalls: [
+            {
+              type: 'tool_call',
+              id: 'tool-1',
+              name: 'read',
+              arguments: '{"file_path":"src/a.ts"}',
+            },
+          ],
+        },
+      },
+      'session-1',
+    );
+
+    store.handleStreamEvent({ type: 'turn_start', turnCount: 2, maxTurns: 5 }, 'session-1');
+    store.handleStreamEvent(
+      { type: 'message_update', data: { text: '', thinking: 'Second turn thinking', toolCalls: [] } },
+      'session-1',
+    );
+
+    expect(store.messages[0]?.blocks).toMatchObject([
+      { type: 'thinking', thinking: 'First turn thinking' },
+      { type: 'tool_call', toolCall: { id: 'tool-1' } },
+      { type: 'thinking', thinking: 'Second turn thinking' },
+    ]);
+  });
+
   test('keeps command progress inside the tool call instead of the assistant body', () => {
     const store = useChatStore();
     store.setActiveSessionId('session-1');
