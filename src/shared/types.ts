@@ -458,12 +458,46 @@ export interface TurnDetail {
 /** Unique identifier for an agent run. */
 export type RunId = string;
 
+/** Wire protocol version — bumped on breaking event schema changes. */
+export const WIRE_PROTOCOL_VERSION = 1;
+
+/** Content part types for content.part events (inspired by kimi-code LoopContentPartEvent). */
+export interface TextPart {
+  kind: 'text';
+  text: string;
+}
+
+export interface ThinkPart {
+  kind: 'thinking';
+  thinking: string;
+}
+
+export type ContentPart = TextPart | ThinkPart;
+
 /** Events recorded in the per-run JSONL event log. */
 export type RunEvent =
+  | { type: 'metadata'; protocol_version: number; created_at: number; timestamp?: string }
   | { type: 'run_started'; runId: RunId; timestamp: string; modelName?: string }
+  | { type: 'turn.prompt'; runId: RunId; input: string; timestamp: string }
   | { type: 'turn_started'; runId: RunId; turnNumber: number; timestamp: string }
   | { type: 'stream_event'; runId: RunId; event: StreamEvent; timestamp: string }
-  | { type: 'tool_started'; runId: RunId; toolCallId: string; toolName: string; timestamp: string; arguments?: string }
+  | {
+      type: 'content.part';
+      runId: RunId;
+      turnNumber: number;
+      part: ContentPart;
+      timestamp: string;
+    }
+  | {
+      type: 'tool_started';
+      runId: RunId;
+      toolCallId: string;
+      toolName: string;
+      timestamp: string;
+      arguments?: string;
+      /** Human-readable one-liner describing what the tool will do. */
+      description?: string;
+    }
   | {
       type: 'tool_completed';
       runId: RunId;
@@ -473,6 +507,10 @@ export type RunEvent =
       timestamp: string;
       output?: string;
       error?: string;
+      /** Whether the output was truncated (e.g. file too long, command output capped). */
+      truncated?: boolean;
+      /** Human-readable side note (e.g. "Read 200 lines, capped at 2000 chars"). */
+      message?: string;
     }
   | {
       type: 'turn_completed';
@@ -510,6 +548,10 @@ export type RunEvent =
       provider: string;
       model: string;
       durationMs: number;
+      /** Time to first token (ms). Measured from request start to first text/think delta. */
+      firstTokenLatencyMs?: number;
+      /** Time spent streaming after first token (ms). durationMs - firstTokenLatencyMs. */
+      streamDurationMs?: number;
       inputTokens?: number;
       outputTokens?: number;
       totalTokens?: number;

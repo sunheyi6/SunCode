@@ -3,7 +3,8 @@
 ## 项目约束
 
 - 开发服务器端口固定 `5173`，`strictPort: true`，禁止切换端口
-- 启动命令 `npm run dev`，Electron 窗口自动打开（桌面应用，不是网页）。`npm run dev` 为长期运行服务，后台执行即可。启动后**禁止**额外读取日志文件或 cat 输出做二次确认，窗口弹出即为成功
+- 启动命令 `bun run dev`。`dev` 实际由 `scripts/launch-dev.js` 启动器接管，它会检查依赖完整性、适配无 TTY / CI 环境，并拒绝在无桌面会话时启动 Electron。
+- `bun run dev` 为长期运行服务，后台执行即可。启动后**禁止**额外读取日志文件或 cat 输出做二次确认，窗口弹出即为成功
 - 代码风格遵循已有模式，不引入新范式
 - TypeScript strict 模式，禁止 `any` 除非有注释说明
 - 所有输出使用用户语言，中文对话用中文思考
@@ -37,7 +38,7 @@
 
 ## 构建与发布
 
-- `npm run electron:build` 本地打包当前平台
+- `bun run electron:build` 本地打包当前平台
 - 推送 `v*` 格式 tag 触发 GitHub Actions 三平台构建
 - 构建产物：Windows `.exe` (NSIS + Portable)、macOS `.dmg` (arm64)、Linux `.AppImage` + `.deb`
 

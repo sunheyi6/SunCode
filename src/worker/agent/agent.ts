@@ -259,6 +259,8 @@ export class Agent {
     const runId = crypto.randomUUID();
     const modelName = `${this.settings.activeProvider}/${this.settings.activeModel}`;
     this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString(), modelName });
+    // Record the user's original prompt in the run log
+    this.onRunEvent({ type: 'turn.prompt', runId, input: text, timestamp: new Date().toISOString() });
 
     // Detect /goal prefix → run autonomous goal loop
     const goalDef = extractGoalDefinition(text, {
@@ -302,6 +304,8 @@ export class Agent {
     const runId = crypto.randomUUID();
     const modelName = `${this.settings.activeProvider}/${this.settings.activeModel}`;
     this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString(), modelName });
+    // Record continuation prompt in the run log
+    this.onRunEvent({ type: 'turn.prompt', runId, input: '[continue]', timestamp: new Date().toISOString() });
 
     try {
       await this.runLoop(runId);

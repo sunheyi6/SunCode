@@ -3,6 +3,61 @@ import type { DiagLogger } from '../utils/diag-logger';
 import type { Tool } from '../tools/types';
 import { quickMatchLesson } from './lessons';
 
+function parseToolDescriptionArgs(argumentsJson: string): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(argumentsJson) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function buildToolDescription(name: string, args: Record<string, unknown> | undefined): string {
+  if (!args) return name;
+
+  const safeArgs = { ...args };
+  const redacted = new Set([
+    'content',
+    'new_string',
+    'old_string',
+    'output',
+    'stdout',
+    'text',
+    'thinking',
+  ]);
+
+  for (const key of Object.keys(safeArgs)) {
+    if (redacted.has(key) && typeof safeArgs[key] === 'string') {
+      safeArgs[key] = `[${safeArgs[key].length} chars]`;
+    }
+  }
+
+  const keyArgs = Object.entries(safeArgs)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .slice(0, 3)
+    .map(([key, value]) => {
+      if (typeof value !== 'string') return `${key}=${JSON.stringify(value)}`;
+      return `${key}=${value.length > 60 ? `${value.slice(0, 57)}...` : value}`;
+    })
+    .join(', ');
+
+  return keyArgs ? `${name}(${keyArgs})` : name;
+}
+
+function toolResultMeta(result: ToolResult, rawOutputLen: number): {
+  truncated: boolean | undefined;
+  message: string;
+} {
+  const truncated = rawOutputLen > 2000 || result.output.length < rawOutputLen;
+  const status = result.success ? 'OK' : 'FAIL';
+  const errorNote = result.error ? ` - ${result.error.slice(0, 80)}` : '';
+  const truncNote = truncated ? ` (truncated from ${rawOutputLen} chars)` : '';
+
+  return {
+    truncated: truncated ? true : undefined,
+    message: `${status}: ${result.name}${errorNote}${truncNote}`,
+  };
+}
+
 export interface ExecuteToolsInput {
   toolCalls: ToolCallContent[];
   tools: Tool[];
@@ -42,6 +97,7 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
   const toExecute: { tc: ToolCallContent; tool: Tool; params: Record<string, unknown> }[] = [];
 
   for (const tc of toolCalls) {
+    const description = buildToolDescription(tc.name, parseToolDescriptionArgs(tc.arguments));
     onToolStart(tc);
     onRunEvent({
       type: 'tool_started',
@@ -50,6 +106,7 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
       toolName: tc.name,
       timestamp: '',
       arguments: tc.arguments,
+      description,
     });
 
     const tool = tools.find((t) => t.name === tc.name);
@@ -198,6 +255,8 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
           tool.onProgress = null;
           result.toolCallId = tc.id;
           onToolEnd(result);
+          const rawOutputLen = result.output.length;
+          const meta = toolResultMeta(result, rawOutputLen);
           onRunEvent({
             type: 'tool_completed',
             runId,
@@ -206,7 +265,9 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
             success: result.success,
             timestamp: '',
             output: result.output?.slice(0, 2000),
-            ...(result.error ? { error: result.error.slice(0, 500) } : {}),
+            error: result.error ? result.error.slice(0, 500) : undefined,
+            truncated: meta.truncated,
+            message: meta.message,
           });
           console.log(
             `[AgentLoop] Tool ${tc.name}: ${result.success ? 'OK' : 'FAIL'}` +

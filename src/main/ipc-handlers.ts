@@ -141,8 +141,8 @@ function getAgentWorker(): Worker {
           break;
         case 'runEvent': {
           const evt = msg.event;
-          const sid = currentSessionId;
-          if (!sid) break;
+          const sid = msg.sessionId;
+          if (evt.type === 'metadata') break; // metadata is written by startRun, never via IPC
           if (evt.type === 'run_started') {
             await startRun(sid, evt.runId);
           }
@@ -196,6 +196,8 @@ function getAgentWorker(): Worker {
 }
 
 function sendToWorker(msg: WorkerInMessage): void {
+  const sid = (msg as Record<string, unknown>).sessionId as string | undefined;
+  console.log('[Main] sendToWorker:', msg.type, 'sid=', sid?.slice(-8) || 'N/A');
   const worker = getAgentWorker();
   worker.postMessage(msg);
 }

@@ -346,8 +346,11 @@ export class SubagentDispatcher {
       onToolProgress: (_toolCallId: string, _output: string) => {
         // Sub-agent tool progress throttled — not propagated
       },
-      onRunEvent: (_event: RunEvent) => {
-        // Sub-agent run events don't need to propagate
+      onRunEvent: (event: RunEvent) => {
+        // Forward sub-agent run events to the parent so they are persisted in the run log.
+        // The sub-agent's runId (executionId) differs from the parent runId, so events
+        // are written to a separate JSONL file under the same session.
+        this.opts.callbacks.onRunEvent(event);
       },
       initialTurnCount: 0,
     });

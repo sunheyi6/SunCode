@@ -19,6 +19,31 @@ import StreamingText from './StreamingText.vue';
 const SYSTEM_PROMPT_PREVIEW_LEN = 500;
 const showFullSystemPrompt = ref(false);
 
+const OUTPUT_PREVIEW_LINES = 5;
+const expandedOutputs = ref(new Set<string>());
+
+function toggleOutput(toolCallId: string): void {
+  const s = expandedOutputs.value;
+  if (s.has(toolCallId)) {
+    s.delete(toolCallId);
+  } else {
+    s.add(toolCallId);
+  }
+  // Trigger reactivity
+  expandedOutputs.value = new Set(s);
+}
+
+function outputPreview(text: string, toolCallId: string): { text: string; hidden: number } {
+  const lines = text.split('\n');
+  if (expandedOutputs.value.has(toolCallId) || lines.length <= OUTPUT_PREVIEW_LINES) {
+    return { text, hidden: 0 };
+  }
+  return {
+    text: lines.slice(0, OUTPUT_PREVIEW_LINES).join('\n'),
+    hidden: lines.length - OUTPUT_PREVIEW_LINES,
+  };
+}
+
 const props = defineProps<{
   messages: ChatMessage[];
   systemPrompt: string;
@@ -145,6 +170,26 @@ function toolStatusLabel(tc: ToolCallContent): string {
   if (tc.status === 'error' || tc.result?.success === false) return '失败';
   if (tc.status === 'done' || tc.result) return '完成';
   return '待执行';
+}
+
+function detectOutputLang(tc: ToolCallContent): string | undefined {
+  if (tc.name === 'bash') return 'bash';
+  if (tc.name === 'web-search' || tc.name === 'web-fetch') return 'json';
+  try {
+    const args = JSON.parse(tc.arguments);
+    if (tc.name === 'read') {
+      const fp = (args.file_path as string) || '';
+      const ext = fp.split('.').pop()?.toLowerCase();
+      const map: Record<string, string> = {
+        ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+        vue: 'html', html: 'html', css: 'css', py: 'python', rs: 'rust',
+        go: 'go', java: 'java', json: 'json', yaml: 'yaml', yml: 'yaml',
+        xml: 'xml', md: 'markdown', sh: 'bash', sql: 'sql', toml: 'toml',
+      };
+      if (ext && map[ext]) return map[ext];
+    }
+  } catch { /* ignore */ }
+  return undefined;
 }
 </script>
 

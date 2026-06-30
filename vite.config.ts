@@ -18,7 +18,14 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron/main',
             rollupOptions: {
-              external: ['electron', '@earendil-works/pi-ai', '@modelcontextprotocol/sdk'],
+              external: [
+                'electron',
+                'electron-log',
+                'electron-log/main',
+                'electron-updater',
+                '@earendil-works/pi-ai',
+                '@modelcontextprotocol/sdk',
+              ],
             },
           },
           resolve: {

@@ -2,6 +2,7 @@
 import { computed, ref, watch, nextTick } from 'vue';
 import type { ToolCallContent } from '@shared/types';
 import { commandSummary, parseToolArguments } from '../../utils/tool-presentation';
+import CodeBlock from '../code/CodeBlock.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -28,6 +29,25 @@ const isFailed = computed(
 const isRunning = computed(() => props.call.status === 'running');
 const streamingOutput = computed(() => props.call.partialOutput || '');
 
+// ── Expandable output ──
+const OUTPUT_PREVIEW_LINES = 5;
+const stdoutExpanded = ref(false);
+const stderrExpanded = ref(false);
+
+function previewLines(text: string, expanded: boolean): { text: string; hidden: number } {
+  const lines = text.split('\n');
+  if (expanded || lines.length <= OUTPUT_PREVIEW_LINES) {
+    return { text, hidden: 0 };
+  }
+  return {
+    text: lines.slice(0, OUTPUT_PREVIEW_LINES).join('\n'),
+    hidden: lines.length - OUTPUT_PREVIEW_LINES,
+  };
+}
+
+const stdoutPreview = computed(() => previewLines(details.value?.stdout || '', stdoutExpanded.value));
+const stderrPreview = computed(() => previewLines(details.value?.stderr || '', stderrExpanded.value));
+
 // Auto-scroll to bottom of streaming output
 watch(streamingOutput, async () => {
   await nextTick();
@@ -53,7 +73,10 @@ const exitCodeLabel = computed(() => {
     <div class="command-body">
       <div class="command-field">
         <span class="field-label">命令</span>
-        <pre><code>{{ details?.command || args.command || '' }}</code></pre>
+        <CodeBlock
+          :code="(details?.command || args.command || '') as string"
+          language="bash"
+        />
       </div>
       <div class="command-meta" v-if="!isRunning">
         <span>工作目录：{{ details?.cwd || '等待执行' }}</span>
@@ -66,11 +89,25 @@ const exitCodeLabel = computed(() => {
       </section>
       <section v-if="!isRunning" class="command-section">
         <h4>标准输出</h4>
-        <pre>{{ details?.stdout || '无输出' }}</pre>
+        <CodeBlock :code="stdoutPreview.text || '无输出'" language="text" />
+        <button
+          v-if="stdoutPreview.hidden > 0"
+          class="output-expand-btn"
+          @click="stdoutExpanded = !stdoutExpanded"
+        >
+          {{ stdoutExpanded ? '收起' : `展开剩余 ${stdoutPreview.hidden} 行` }}
+        </button>
       </section>
       <section v-if="!isRunning && details?.stderr" class="command-section">
         <h4>错误输出</h4>
-        <pre>{{ details.stderr }}</pre>
+        <CodeBlock :code="stderrPreview.text" language="text" />
+        <button
+          v-if="stderrPreview.hidden > 0"
+          class="output-expand-btn"
+          @click="stderrExpanded = !stderrExpanded"
+        >
+          {{ stderrExpanded ? '收起' : `展开剩余 ${stderrPreview.hidden} 行` }}
+        </button>
       </section>
     </div>
   </details>
@@ -211,5 +248,22 @@ details[open] .command-icon {
   max-height: 300px;
   background: var(--color-bg-tertiary);
   border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.output-expand-btn {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: 3px 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  text-align: center;
+  border-top: 1px solid var(--border-color);
+}
+.output-expand-btn:hover {
+  color: var(--color-accent);
 }
 </style>

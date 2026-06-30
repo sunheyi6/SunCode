@@ -44,6 +44,7 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
   let thinkingText = '';
   let assistantMsgRaw: Record<string, unknown> | null = null;
   const tokenUsage = { input: 0, output: 0, total: 0 };
+  let firstTokenTime: number | undefined;
 
   onStream({ type: 'message_start' });
 
@@ -55,7 +56,15 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
       case 'thinking_end':
         break;
       case 'text_delta':
+        firstTokenTime = firstTokenTime ?? Date.now();
         assistantText += event.delta;
+        onRunEvent({
+          type: 'content.part',
+          runId,
+          turnNumber: turnCount,
+          part: { kind: 'text', text: event.delta },
+          timestamp: '',
+        });
         onStream({
           type: 'message_update',
           data: {
@@ -68,7 +77,15 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
       case 'text_end':
         break;
       case 'thinking_delta':
+        firstTokenTime = firstTokenTime ?? Date.now();
         thinkingText += event.delta;
+        onRunEvent({
+          type: 'content.part',
+          runId,
+          turnNumber: turnCount,
+          part: { kind: 'thinking', thinking: event.delta },
+          timestamp: '',
+        });
         onStream({
           type: 'message_update',
           data: {
@@ -144,6 +161,8 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
   }
 
   const durationMs = Date.now() - requestStartTime;
+  const firstTokenLatencyMs =
+    firstTokenTime === undefined ? undefined : firstTokenTime - requestStartTime;
   const usage = assistantMsgRaw?.usage as
     | { input?: number; output?: number; totalTokens?: number }
     | undefined;
@@ -155,6 +174,9 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     provider: settings.activeProvider,
     model: settings.activeModel,
     durationMs,
+    firstTokenLatencyMs,
+    streamDurationMs:
+      firstTokenLatencyMs === undefined ? undefined : durationMs - firstTokenLatencyMs,
     inputTokens: usage?.input,
     outputTokens: usage?.output,
     totalTokens: usage?.totalTokens,

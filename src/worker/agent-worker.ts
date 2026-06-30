@@ -120,43 +120,59 @@ function createCallbacks(sessionId: string) {
 }
 
 async function handleMessage(msg: WorkerInMessage): Promise<void> {
-  console.log('[Worker] Received message:', msg.type);
+  const sid = (msg as Record<string, unknown>).sessionId as string | undefined;
+  console.log('[Worker] Received message:', msg.type, 'session=', sid?.slice(-8) || 'N/A');
 
   switch (msg.type) {
     case 'prompt': {
-      const agent = getAgent(msg.sessionId);
-      if (!agent) {
-        console.error('[Worker] Agent not initialized for session:', msg.sessionId);
-        post({ type: 'error', sessionId: msg.sessionId, message: 'Agent 未初始化。请先设置工作目录。' });
+      const sid = msg.sessionId;
+      if (!sid) {
+        console.error('[Worker] prompt: missing sessionId');
         return;
       }
-      console.log('[Worker] Dispatching prompt:', msg.text.slice(0, 50), 'session=', msg.sessionId.slice(-8));
+      const agent = getAgent(sid);
+      if (!agent) {
+        console.error('[Worker] Agent not initialized for session:', sid);
+        post({ type: 'error', sessionId: sid, message: 'Agent 未初始化。请先设置工作目录。' });
+        return;
+      }
+      console.log('[Worker] Dispatching prompt:', msg.text.slice(0, 50), 'session=', sid.slice(-8));
       try {
         await agent.prompt(msg.text);
-        console.log('[Worker] Prompt completed session=', msg.sessionId.slice(-8));
+        console.log('[Worker] Prompt completed session=', sid.slice(-8));
       } catch (error) {
         console.error('[Worker] Prompt error:', error);
-        post({ type: 'error', sessionId: msg.sessionId, message: (error as Error).message });
+        post({ type: 'error', sessionId: sid, message: (error as Error).message });
       }
       break;
     }
 
     case 'abort': {
-      console.log('[Worker] Aborting session=', msg.sessionId.slice(-8));
-      const agent = getAgent(msg.sessionId);
+      const sid = msg.sessionId;
+      if (!sid) {
+        console.error('[Worker] abort: missing sessionId');
+        return;
+      }
+      console.log('[Worker] Aborting session=', sid.slice(-8));
+      const agent = getAgent(sid);
       agent?.abort();
       break;
     }
 
     case 'continue': {
-      const agent = getAgent(msg.sessionId);
+      const sid = msg.sessionId;
+      if (!sid) {
+        console.error('[Worker] continue: missing sessionId');
+        return;
+      }
+      const agent = getAgent(sid);
       if (!agent) return;
-      console.log('[Worker] Continue session=', msg.sessionId.slice(-8));
+      console.log('[Worker] Continue session=', sid.slice(-8));
       try {
         await agent.continue();
       } catch (error) {
         console.error('[Worker] Continue error:', error);
-        post({ type: 'error', sessionId: msg.sessionId, message: (error as Error).message });
+        post({ type: 'error', sessionId: sid, message: (error as Error).message });
       }
       break;
     }
@@ -173,13 +189,18 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
     }
 
     case 'setWorkingDir': {
-      console.log('[Worker] Working dir set:', msg.path, 'session=', msg.sessionId.slice(-8));
-      const existing = agents.get(msg.sessionId);
+      const sid = msg.sessionId;
+      if (!sid) {
+        console.error('[Worker] setWorkingDir: missing sessionId');
+        return;
+      }
+      console.log('[Worker] Working dir set:', msg.path, 'session=', sid.slice(-8));
+      const existing = agents.get(sid);
       if (existing) {
         await existing.setWorkingDir(msg.path);
-        console.log('[Worker] Working dir updated session=', msg.sessionId.slice(-8));
+        console.log('[Worker] Working dir updated session=', sid.slice(-8));
       } else {
-        const cbs = createCallbacks(msg.sessionId);
+        const cbs = createCallbacks(sid);
         const newAgent = new Agent(
           msg.path,
           settings,
@@ -198,19 +219,24 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
           cbs.onGoalEvent,
           cbs.requestConfirmation,
         );
-        agents.set(msg.sessionId, newAgent);
-        console.log('[Worker] Agent created session=', msg.sessionId.slice(-8));
+        agents.set(sid, newAgent);
+        console.log('[Worker] Agent created session=', sid.slice(-8));
       }
       break;
     }
 
     case 'setMessages': {
-      const agent = getAgent(msg.sessionId);
+      const sid = msg.sessionId;
+      if (!sid) {
+        console.error('[Worker] setMessages: missing sessionId');
+        return;
+      }
+      const agent = getAgent(sid);
       if (agent) {
         agent.setMessages(msg.messages);
-        console.log('[Worker] Conversation context replaced:', msg.messages.length, 'messages', 'session=', msg.sessionId.slice(-8));
+        console.log('[Worker] Conversation context replaced:', msg.messages.length, 'messages', 'session=', sid.slice(-8));
       } else {
-        console.warn('[Worker] setMessages for unknown session:', msg.sessionId.slice(-8), '- no agent exists yet');
+        console.warn('[Worker] setMessages for unknown session:', sid.slice(-8), '- no agent exists yet');
       }
       break;
     }

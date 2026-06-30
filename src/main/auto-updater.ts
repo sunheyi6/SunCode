@@ -1,7 +1,9 @@
-import { app } from 'electron';
-import { autoUpdater } from 'electron-updater';
 import type { UpdateStatus } from '@shared/types';
+import { app } from 'electron';
+import pkg from 'electron-updater';
 import type { WindowManager } from './window-manager';
+
+const { autoUpdater } = pkg;
 
 let windowManager: WindowManager;
 let currentStatus: UpdateStatus = { state: 'idle' };

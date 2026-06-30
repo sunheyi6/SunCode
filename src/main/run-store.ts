@@ -2,6 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { appendFile, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DayStats, ModelStats, RunEvent, RunId } from '@shared/types';
+import { WIRE_PROTOCOL_VERSION } from '@shared/types';
 import { getAppDataDir } from './paths';
 
 /** Base directory for run event logs. */
@@ -107,19 +108,29 @@ export async function getTokenUsageAggregate(): Promise<{
   return { daily, byModel, totals: aggregate.totals };
 }
 
-/** Create the run directory (the first appendEvent call writes the initial event). */
+/** Create the run directory and write the metadata header as the first JSONL line. */
 export async function startRun(sessionId: string, runId: RunId): Promise<void> {
   const dir = runsDir(sessionId);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  // Don't write a bare run_started here — the worker's appendEvent call
-  // immediately follows with the full event including modelName and tokenUsage.
+  const filePath = runFilePath(sessionId, runId);
+  // Write metadata as first line (idempotent — only if file does not exist yet).
+  if (!existsSync(filePath)) {
+    const metadataEvent: RunEvent = {
+      type: 'metadata',
+      protocol_version: WIRE_PROTOCOL_VERSION,
+      created_at: Date.now(),
+    };
+    await appendFile(filePath, `${JSON.stringify(metadataEvent)}\n`, 'utf-8');
+  }
 }
 
 /** Append a single RunEvent to the JSONL file and update usage aggregate when a run finishes. */
 export async function appendEvent(sessionId: string, runId: RunId, event: RunEvent): Promise<void> {
-  event.timestamp = new Date().toISOString();
+  if (event.type !== 'metadata') {
+    event.timestamp = new Date().toISOString();
+  }
   await appendFile(runFilePath(sessionId, runId), `${JSON.stringify(event)}\n`, 'utf-8');
 
   if (event.type === 'run_started' && event.modelName) {
@@ -147,24 +158,31 @@ export async function listRuns(sessionId: string): Promise<RunId[]> {
   }
 }
 
-/** Read all events from a run's JSONL file. */
+/** Read all events from a run's JSONL file.  Handles legacy files (no metadata header). */
 export async function getEvents(sessionId: string, runId: RunId): Promise<RunEvent[]> {
   try {
     const raw = await readFile(runFilePath(sessionId, runId), 'utf-8');
     const lines = raw.split('\n').filter((l) => l.trim());
-    return lines.map((line) => {
+    const events: RunEvent[] = [];
+    for (const line of lines) {
       try {
-        return JSON.parse(line) as RunEvent;
+        const parsed = JSON.parse(line) as RunEvent;
+        // Skip metadata during replay — it's a header, not a runtime event.
+        if (parsed.type === 'metadata') {
+          continue;
+        }
+        events.push(parsed);
       } catch {
         // Corrupt line — return a marker event
-        return {
+        events.push({
           type: 'run_recovered',
           runId,
           reason: 'corrupt_event_line',
           timestamp: new Date().toISOString(),
-        } as RunEvent;
+        } as RunEvent);
       }
-    });
+    }
+    return events;
   } catch {
     return [];
   }

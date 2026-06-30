@@ -231,6 +231,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         });
       }
 
+
       // Capture request message summaries for turn_detail event
       const requestMsgSummaries = lastMsgsForLog.map((m) => {
         const contentStr = getMessageTextContent(m);
@@ -276,7 +277,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         requestMsgSummaries,
       });
 
-      const { assistantText, thinkingText, toolCalls, assistantMsgRaw } = streamResult;
+      const { assistantText, thinkingText, toolCalls } = streamResult;
       tokenUsage.input += streamResult.tokenUsage.input;
       tokenUsage.output += streamResult.tokenUsage.output;
       tokenUsage.total += streamResult.tokenUsage.total;
