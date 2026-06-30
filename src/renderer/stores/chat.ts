@@ -71,6 +71,15 @@ function appendThinkingBlock(target: ChatMessage, thinkingDelta: string): void {
   });
 }
 
+function formatUserFacingError(error: string | undefined): string {
+  const raw = error?.trim() || 'Unknown error';
+  if (/request timed out/i.test(raw)) {
+    return '请求大模型超时。可能是模型服务响应较慢或网络暂时不稳定，请稍后重试；如果连续出现，可以切换模型或检查代理/网络设置。';
+  }
+
+  return `请求失败：${raw}`;
+}
+
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([]);
   const isStreaming = ref(false);
@@ -283,7 +292,7 @@ export const useChatStore = defineStore('chat', () => {
 
       case 'error':
         if (msg) {
-          msg.content += `\n\n❌ Error: ${event.error || 'Unknown error'}`;
+          msg.content += `\n\n❌ ${formatUserFacingError(event.error)}`;
           msg.isStreaming = false;
         }
         streamingSessionIds.delete(sessionId);

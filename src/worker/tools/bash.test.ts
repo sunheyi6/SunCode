@@ -63,6 +63,41 @@ describe('bash tool details', () => {
     });
   });
 
+  test('blocks global Electron process-name checks as startup evidence', async () => {
+    const command =
+      'powershell -Command "Get-Process -Name electron -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, StartTime"';
+    const result = await createBashTool(process.cwd()).execute({ command });
+
+    expect(result.success).toBe(false);
+    expect(result.details).toMatchObject({
+      type: 'command',
+      command,
+      cwd: process.cwd(),
+      exitCode: null,
+      stderr: expect.stringContaining('Global Electron process-name checks are not valid'),
+    });
+  });
+
+  test('blocks SunCode startup marker for another project launch', async () => {
+    const command = 'cd D:/project/maka-agent && npm run dev';
+    const result = await createBashTool(process.cwd()).execute({
+      command,
+      run_in_background: true,
+      background_mode: 'service',
+      startup_marker: '[SunCode] STARTUP_COMPLETE',
+      readiness_timeout: 120000,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.details).toMatchObject({
+      type: 'command',
+      command,
+      cwd: process.cwd(),
+      exitCode: null,
+      stderr: expect.stringContaining('SunCode startup marker cannot validate another project'),
+    });
+  });
+
   test('background start preserves callbacks and returns command details', async () => {
     let startedPid: number | undefined;
     const command =

@@ -212,6 +212,41 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
   return { rewritten: command, modified: false, blocked: false };
 }
 
+function isGlobalElectronProcessNameCheck(command: string): boolean {
+  const isKillCommand = /\b(Stop-Process|taskkill|killall|pkill|kill)\b/i.test(command);
+  if (isKillCommand) return false;
+
+  return (
+    /Get-Process\s+-Name\s+(['"]?)electron\1\b/i.test(command) ||
+    /\btasklist\b[\s\S]*\bfindstr\b[\s\S]*\belectron\b/i.test(command) ||
+    /\bps\s+aux\b[\s\S]*\bgrep\b[\s\S]*\belectron\b/i.test(command)
+  );
+}
+
+function extractCdTarget(command: string): string | undefined {
+  const match = command.match(/\bcd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/i);
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
+function isCrossProjectSunCodeStartupMarker(
+  command: string,
+  startupMarker: string,
+  cwd: string,
+): boolean {
+  if (!startupMarker.includes('[SunCode] STARTUP_COMPLETE')) return false;
+
+  const cdTarget = extractCdTarget(command);
+  if (!cdTarget) return false;
+
+  return resolve(cwd, cdTarget).toLowerCase() !== cwd.toLowerCase();
+}
+
+function buildChildProcessEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.VITE_DEV_SERVER_URL;
+  return env;
+}
+
 export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks, options?: BashToolOptions) {
   const protectedPids = options?.protectedPids || [];
 
@@ -219,9 +254,9 @@ export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks
     readonly name = 'bash';
     readonly description = `Executes a shell command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds.
 
-IMPORTANT: Each invocation runs in a fresh shell. Use && to chain commands (works on PowerShell and bash).
+IMPORTANT: Each invocation runs in a fresh shell. On Windows PowerShell, use ; to run commands sequentially, for example \`cd D:/project/app; npm run dev\`. On Linux/macOS bash, use && when later commands should only run after earlier commands succeed.
 
-On Windows this runs PowerShell (powershell.exe, always preinstalled). PowerShell supports: && for chaining, double quotes for strings with spaces, single quotes for literals, Select-String for searching files (instead of grep), Get-ChildItem for directory listing (instead of ls).
+On Windows this runs Windows PowerShell (powershell.exe, always preinstalled). Windows PowerShell 5 does not support &&. It supports: ; for command sequencing, double quotes for strings with spaces, single quotes for literals, Select-String for searching files (instead of grep), Get-ChildItem for directory listing (instead of ls).
 
 On Linux/macOS this runs bash.
 
@@ -229,7 +264,7 @@ Git examples that work cross-platform:
 - \`git add . && git commit -m "feat(scope): message" && git push\`
 - \`git status && git log --oneline -5\`
 
-Set run_in_background: true for background processes. Background mode defaults to a finite task: when the shell exits, the UI marks it completed or failed. For long-running services/dev servers/GUI launchers, set background_mode: "service"; this only confirms the launch command was started. App readiness still requires a project-specific marker, reachable port, or other direct evidence.
+Set run_in_background: true for background processes. Background mode defaults to a finite task: when the shell exits, the UI marks it completed or failed. For long-running services/dev servers/GUI launchers, set background_mode: "service". For services with known startup output, set startup_marker and readiness_timeout so this tool waits for readiness before returning. For slow GUI launchers without a marker, set readiness_timeout so the tool waits before returning launch-only status. App readiness still requires a project-specific marker, reachable port, visible window, or process CommandLine/AppPath evidence.
 
 Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file.
 
@@ -250,6 +285,14 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
           'string',
           'Optional background behavior: "task" for finite background commands (default), or "service" for long-running dev servers/GUI launchers.',
         ),
+        startup_marker: p(
+          'string',
+          'Optional text that indicates a background service is ready. When set with background_mode: "service", the tool waits for stdout/stderr to contain this marker before returning success.',
+        ),
+        readiness_timeout: p(
+          'integer',
+          'Optional readiness wait timeout in milliseconds when startup_marker is set (max 300000, default 120000).',
+        ),
       },
       ['command'],
     );
@@ -259,6 +302,15 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
       const timeout = Math.min((params.timeout as number) || 60000, 300000);
       const runInBg = Boolean(params.run_in_background);
       const backgroundMode = params.background_mode === 'service' ? 'service' : 'task';
+      const startupMarker =
+        typeof params.startup_marker === 'string' && params.startup_marker.trim()
+          ? params.startup_marker.trim()
+          : '';
+      const hasReadinessTimeout = typeof params.readiness_timeout === 'number';
+      const readinessTimeout = Math.min(
+        (params.readiness_timeout as number) || 120000,
+        300000,
+      );
       const cwd = resolve(workingDir);
       const commandFailure = (message: string) =>
         this.failure(message, {
@@ -285,6 +337,18 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
         if (pattern.test(command)) {
           return commandFailure('Command blocked for security reasons: dangerous pattern detected');
         }
+      }
+
+      if (isGlobalElectronProcessNameCheck(command)) {
+        return commandFailure(
+          'Global Electron process-name checks are not valid startup evidence. Use the exact background PID, a project-specific readiness marker, a reachable port, a visible window, or inspect process CommandLine/AppPath for the target project.',
+        );
+      }
+
+      if (isCrossProjectSunCodeStartupMarker(command, startupMarker, cwd)) {
+        return commandFailure(
+          'SunCode startup marker cannot validate another project. Use the target project\'s own startup output, a reachable port, visible window evidence, or process CommandLine/AppPath evidence.',
+        );
       }
 
       const killResult = rewriteKillCommand(command, protectedPids);
@@ -316,7 +380,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
             // valid stdio handles to create visible windows on Windows.
             child = spawn(shell, shellArgs, {
               cwd,
-              env: process.env,
+              env: buildChildProcessEnv(),
               stdio: 'pipe',
               detached: true,
             });
@@ -334,6 +398,41 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
           // Throttle to ~100ms to avoid flooding the IPC channel.
           let progressBuf = '';
           let progressTimer: ReturnType<typeof setTimeout> | null = null;
+          let combinedOutput = '';
+          let resultSettled = false;
+          let readinessTimer: ReturnType<typeof setTimeout> | null = null;
+          let startupSettled = false;
+          let startedPid: number | undefined;
+          let completionNotified = false;
+
+          const resolveOnce = (result: ToolResult) => {
+            if (resultSettled) return;
+            resultSettled = true;
+            if (readinessTimer) {
+              clearTimeout(readinessTimer);
+              readinessTimer = null;
+            }
+            resolveResult(result);
+          };
+
+          const commandDetails = (exitCode: number | null = null) => ({
+            type: 'command' as const,
+            command,
+            cwd,
+            exitCode,
+            stdout: combinedOutput,
+            stderr: '',
+          });
+
+          const resolveReady = () => {
+            if (!startedPid || resultSettled) return;
+            resolveOnce(
+              this.success(
+                `Background service ready (PID: ${startedPid})\nCommand: ${command}\nMatched startup marker: ${startupMarker}`,
+                commandDetails(),
+              ),
+            );
+          };
 
           const flushProgress = () => {
             if (progressBuf && progress) {
@@ -344,6 +443,10 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
           };
 
           const pushProgress = (text: string) => {
+            combinedOutput += text;
+            if (startupMarker && combinedOutput.includes(startupMarker)) {
+              resolveReady();
+            }
             if (!progress) return;
             progressBuf += text;
             if (!progressTimer) {
@@ -354,14 +457,10 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
           child.stdout?.on('data', (data: Buffer) => pushProgress(data.toString()));
           child.stderr?.on('data', (data: Buffer) => pushProgress(data.toString()));
 
-          let startupSettled = false;
-          let startedPid: number | undefined;
-          let completionNotified = false;
-
           const failStartup = (message: string) => {
-            if (startupSettled) return;
+            if (resultSettled) return;
             startupSettled = true;
-            resolveResult(commandFailure(`Failed to start background process: ${message}`));
+            resolveOnce(commandFailure(`Failed to start background process: ${message}`));
           };
 
           const notifyComplete = (exitCode: number) => {
@@ -387,6 +486,30 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
               failStartup(`process closed before startup (exit code: ${code ?? 'null'})`);
               notifyComplete(code ?? -1);
               return;
+            }
+            if ((startupMarker || hasReadinessTimeout) && !resultSettled) {
+              if (startupMarker) {
+                resolveOnce(
+                  this.failure(
+                    `Background service exited before startup marker was seen (exit code: ${code ?? 'null'}). Marker: ${startupMarker}`,
+                    commandDetails(code ?? null),
+                  ),
+                );
+              } else if (code === 0) {
+                resolveOnce(
+                  this.success(
+                    `Background service launcher exited with code 0 (PID: ${startedPid})\nCommand: ${command}\nThis does not confirm the app is ready. For GUI launchers this may mean the launcher handed off to the app process; verify with visible window or process CommandLine/AppPath evidence instead of starting it again.`,
+                    commandDetails(0),
+                  ),
+                );
+              } else {
+                resolveOnce(
+                  this.failure(
+                    `Background service exited during readiness wait (exit code: ${code ?? 'null'}).`,
+                    commandDetails(code ?? null),
+                  ),
+                );
+              }
             }
             // Flush remaining progress before notifying completion
             if (progressTimer) {
@@ -421,7 +544,29 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                 ? `Background service launch command started (PID: ${pid})\nCommand: ${command}\nThis only confirms the launcher shell started; it does not confirm the app is ready. Verify readiness with a project-specific marker, reachable port, or direct app evidence.`
                 : `Background process started (PID: ${pid})\nCommand: ${command}`;
 
-            resolveResult(
+            if (backgroundMode === 'service' && (startupMarker || hasReadinessTimeout)) {
+              readinessTimer = setTimeout(() => {
+                if (startupMarker) {
+                  resolveOnce(
+                    this.failure(
+                      `Background service did not become ready within ${readinessTimeout}ms. Marker not seen: ${startupMarker}`,
+                      commandDetails(),
+                    ),
+                  );
+                  return;
+                }
+
+                resolveOnce(
+                  this.success(
+                    `Background service still running after readiness wait (PID: ${pid})\nCommand: ${command}\nThis does not confirm the app is ready. Use a startup_marker, reachable port, visible window, or process CommandLine/AppPath evidence for readiness.`,
+                    commandDetails(),
+                  ),
+                );
+              }, readinessTimeout);
+              return;
+            }
+
+            resolveOnce(
               this.success(output, {
                 type: 'command',
                 command,
@@ -439,7 +584,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
       return new Promise((resolveResult) => {
         const child = spawn(shell, shellArgs, {
           cwd,
-          env: process.env,
+          env: buildChildProcessEnv(),
           timeout,
           stdio: ['pipe', 'pipe', 'pipe'],
         });

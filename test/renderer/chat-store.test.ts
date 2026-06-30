@@ -97,4 +97,16 @@ describe('chat store stream blocks', () => {
     expect(store.messages[0]?.toolCalls?.[0]?.partialOutput).toBe('running output');
     expect('liveCommandOutput' in (store.messages[0] ?? {})).toBe(false);
   });
+
+  test('shows a friendly Chinese message for model request timeouts', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+
+    store.handleStreamEvent({ type: 'error', error: 'Request timed out.' }, 'session-1');
+
+    expect(store.messages[0]?.content).toContain('请求大模型超时');
+    expect(store.messages[0]?.content).toContain('稍后重试');
+    expect(store.messages[0]?.content).not.toContain('Error: Request timed out.');
+  });
 });

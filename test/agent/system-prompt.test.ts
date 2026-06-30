@@ -148,6 +148,19 @@ describe('tools', () => {
     expect(prompt).toContain('Get-Process -Name electron');
   });
 
+  it('tells service launches to wait for explicit readiness evidence', () => {
+    const prompt = DEFAULT_SYSTEM_PROMPT;
+
+    expect(prompt).toContain('startup_marker');
+    expect(prompt).toContain('readiness_timeout');
+  });
+
+  it('does not expose SunCode internal startup marker as a reusable project marker', () => {
+    const prompt = DEFAULT_SYSTEM_PROMPT;
+
+    expect(prompt).not.toContain('STARTUP_COMPLETE');
+  });
+
   it('omits Available Tools section when no tools provided', () => {
     const prompt = buildSystemPrompt(baseInput({ tools: [] }));
     expect(prompt).not.toContain('## Available Tools');
