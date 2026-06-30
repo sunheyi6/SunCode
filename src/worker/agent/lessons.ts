@@ -34,6 +34,7 @@ import type {
   LessonExtractionContext,
   Message,
 } from '@shared/types';
+import { buildStructuredTaskPrompt } from './model-structured-content';
 
 // ---- Paths ----
 
@@ -655,9 +656,20 @@ async function extractLessonWithLLM(
       .replace('{userGoal}', buildExtractionUserPrompt(ctx))
       .replace('{relevantContext}', ctx.error || '');
 
+    const structuredPrompt = buildStructuredTaskPrompt('lesson_extraction', {
+      instruction: prompt,
+      triggerType: ctx.triggerType,
+      userGoal: buildExtractionUserPrompt(ctx),
+      relevantContext: ctx.error || '',
+      responseFormat: 'json',
+    });
+
     const context = {
-      systemPrompt: '你是一个编程教训提炼器。只返回 JSON。',
-      messages: [{ role: 'user', content: prompt }],
+      systemPrompt: buildStructuredTaskPrompt('lesson_extraction_system', {
+        role: 'coding_lesson_extractor',
+        responseFormat: 'json_only',
+      }),
+      messages: [{ role: 'user', content: structuredPrompt }],
       tools: [],
     };
 

@@ -280,7 +280,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
                       <div class="trace-request-role">
                         {{ rm.role.toUpperCase() }} · {{ rm.length }} 字符
                       </div>
-                      <pre class="trace-request-preview">{{ rm.preview }}</pre>
+                      <pre class="trace-request-preview">{{ rm.content || rm.preview }}</pre>
                     </div>
                   </template>
 
@@ -351,6 +351,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
   flex-direction: column;
   min-height: 0;
   height: 100%;
+  box-sizing: border-box;
   padding-top: 60px;
   background: var(--color-bg);
   border-left: 1px solid var(--border-color);
@@ -458,6 +459,8 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 8px;
 }
 
@@ -700,8 +703,9 @@ details[open] > .outline-section-summary .outline-caret {
   color: var(--color-text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 160px;
+  max-height: min(360px, 45vh);
   overflow-y: auto;
+  overscroll-behavior: auto;
 }
 
 .trace-tool-item {

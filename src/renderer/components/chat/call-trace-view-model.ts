@@ -1,4 +1,9 @@
-import type { SubagentResult, ToolCallContent, TurnDetail } from '@shared/types';
+import type {
+  RequestMessageTrace,
+  SubagentResult,
+  ToolCallContent,
+  TurnDetail,
+} from '@shared/types';
 import type { ChatMessage } from '../../stores/chat';
 import { textMatchesUiLanguage, type UiLanguage } from '../../utils/ui-language';
 
@@ -45,7 +50,7 @@ export type CallTraceSection =
       title: string;
       itemCount: number;
       systemTokens: number;
-      requestMessages: Array<{ role: string; length: number; preview: string }>;
+      requestMessages: RequestMessageTrace[];
       defaultOpen: boolean;
     }
   | {

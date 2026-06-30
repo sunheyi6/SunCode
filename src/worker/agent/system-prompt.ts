@@ -1,5 +1,6 @@
 import { DEFAULT_SYSTEM_PROMPT } from '@shared/constants';
 import type { AppSettings, ToolDefinition } from '@shared/types';
+import { buildStructuredSystemPrompt } from './model-structured-content';
 
 export interface SystemPromptInput {
   workingDir: string;
@@ -18,8 +19,8 @@ export interface SystemPromptInput {
 }
 
 /**
- * Builds the system prompt for the agent.
- * Follows pi-agent-core's minimal approach: base prompt + tools + date/cwd.
+ * Builds the system prompt as structured JSON. The provider API still accepts
+ * a string, but the model receives named fields instead of Markdown sections.
  */
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const {
@@ -36,88 +37,49 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   const now = new Date();
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const promptCwd = workingDir.replace(/\\/g, '/');
-
-  const parts: string[] = [];
-
-  // Base system prompt
-  parts.push(customPrompt || DEFAULT_SYSTEM_PROMPT);
-
-  // Permission mode (one line, always append to base)
-  parts.push('');
-  parts.push(permissionMode === 'plan' ? '## Mode: plan — read-only tools only' : '');
-
-  // Tool-specific usage guidelines (like pi's promptGuidelines)
   const toolGuidelines = getToolGuidelines(tools.map((t) => t.name));
-  if (toolGuidelines.length > 0) {
-    parts.push('');
-    parts.push('## Guidelines');
-    for (const g of toolGuidelines) {
-      parts.push(`- ${g}`);
-    }
-  }
+  const sortedTools = sortToolsForPrompt(tools);
 
-  // Available Tools (same as pi's approach)
-  // --- CACHE BREAKPOINT: tool list changes between sessions ---
-  // Tools are ordered for cache stability: built-in tools first (stable prefix),
-  // then MCP/external tools (may change between sessions).
-  if (tools.length > 0) {
-    // Sort: built-in tools first (alphabetical), then non-built-in
-    const builtInNames = new Set([
-      'read', 'write', 'edit', 'bash', 'grep', 'glob', 'ls', 'find',
-      'web_fetch', 'web_search', 'search_lessons', 'subagent',
-      'EnterPlanMode', 'ExitPlanMode',
-    ]);
-    const sorted = [...tools].sort((a, b) => {
-      const aBuiltIn = builtInNames.has(a.name);
-      const bBuiltIn = builtInNames.has(b.name);
-      if (aBuiltIn && !bBuiltIn) return -1;
-      if (!aBuiltIn && bBuiltIn) return 1;
-      return a.name.localeCompare(b.name);
-    });
+  return buildStructuredSystemPrompt({
+    basePrompt: customPrompt || DEFAULT_SYSTEM_PROMPT,
+    permissionMode,
+    planModeNotice: permissionMode === 'plan' ? 'read-only tools only' : undefined,
+    guidelines: toolGuidelines,
+    tools: sortedTools.map((tool) => ({ ...tool, snippet: getToolSnippet(tool) })),
+    memoryContent,
+    agentsMdContent,
+    planModeInstructions,
+    skillsContent,
+    currentDate: date,
+    workingDirectory: promptCwd,
+  });
+}
 
-    parts.push('');
-    parts.push('## Available Tools');
-    for (const tool of sorted) {
-      parts.push(`- **${tool.name}**: ${getToolSnippet(tool)}`);
-    }
-  }
+function sortToolsForPrompt(tools: ToolDefinition[]): ToolDefinition[] {
+  const builtInNames = new Set([
+    'read',
+    'write',
+    'edit',
+    'bash',
+    'grep',
+    'glob',
+    'ls',
+    'find',
+    'web_fetch',
+    'web_search',
+    'search_lessons',
+    'subagent',
+    'EnterPlanMode',
+    'ExitPlanMode',
+  ]);
 
-  // Project memory
-  // --- CACHE PARTITION: dynamic content below this point ---
-  if (memoryContent) {
-    parts.push('');
-    parts.push('<project_memory>');
-    parts.push(memoryContent);
-    parts.push('</project_memory>');
-  }
-
-  // Workspace instructions
-  if (agentsMdContent) {
-    parts.push('');
-    parts.push('<project_context>');
-    parts.push(agentsMdContent);
-    parts.push('</project_context>');
-  }
-
-  // Plan mode instructions (highest priority behavioral guidance)
-  if (planModeInstructions) {
-    parts.push('');
-    parts.push(planModeInstructions);
-  }
-
-  // Skills
-  if (skillsContent) {
-    parts.push('');
-    parts.push('<available_skills>');
-    parts.push(skillsContent);
-    parts.push('</available_skills>');
-  }
-
-  // Date and working directory (like pi)
-  parts.push(`\nCurrent date: ${date}`);
-  parts.push(`Current working directory: ${promptCwd}`);
-
-  return parts.join('\n').replace(/\n{3,}/g, '\n\n'); // Collapse excessive blank lines
+  return [...tools].sort((a, b) => {
+    const aBuiltIn = builtInNames.has(a.name);
+    const bBuiltIn = builtInNames.has(b.name);
+    if (aBuiltIn && !bBuiltIn) return -1;
+    if (!aBuiltIn && bBuiltIn) return 1;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 /**
@@ -129,7 +91,7 @@ function getToolGuidelines(toolNames: string[]): string[] {
     read: ['Use read to examine files instead of cat or sed.'],
     bash: [
       'For file operations like ls, find, grep: use the dedicated tools (ls, find, grep) instead of bash.',
-      'CRITICAL: When verifying whether a background process started successfully, ONLY check by its specific PID (e.g. "Get-Process -Id <pid>"). NEVER search for processes by name globally ("Get-Process -Name electron", "tasklist | findstr", "ps aux | grep") — these will return unrelated system or app processes and cause false positives. Use the exact PID from the background process response. If the PID is gone, report the process exited rather than assuming it is alive.',
+      'CRITICAL: When verifying whether a background process started successfully, ONLY check by its specific PID (e.g. "Get-Process -Id <pid>"). NEVER search for processes by name globally ("Get-Process -Name electron", "tasklist | findstr", "ps aux | grep") - these will return unrelated system or app processes and cause false positives. Use the exact PID from the background process response. If the PID is gone, report the process exited rather than assuming it is alive.',
     ],
     edit: ['Read a file before editing it. Make precise edits.'],
     task_complete: [],

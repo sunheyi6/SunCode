@@ -162,6 +162,7 @@ const traceSystemPrompt = computed(() => {
 .app-main {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 

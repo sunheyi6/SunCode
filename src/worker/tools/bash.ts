@@ -25,7 +25,7 @@ const MAX_OUTPUT_LINES = 2000;
 const MAX_OUTPUT_BYTES = 50_000;
 /** Kill process if stdout + stderr exceeds this (safety valve). */
 const OVERFLOW_KILL_BYTES = 200_000;
-const SERVICE_OBSERVATION_MS = 100;
+const SERVICE_OBSERVATION_MS = 1000;
 
 interface ProcessEvidence {
   pid: number;
@@ -575,7 +575,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
               cwd,
               env: buildChildProcessEnv(),
               stdio: 'pipe',
-              detached: true,
+              detached: backgroundMode !== 'service',
             });
             // Close stdin — background processes don't read from it,
             // and an open pipe could cause the child to block.
@@ -601,6 +601,9 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
           const resolveOnce = (result: ToolResult) => {
             if (resultSettled) return;
             resultSettled = true;
+            if (startedPid && result.success && result.pid === undefined) {
+              result.pid = startedPid;
+            }
             if (readinessTimer) {
               clearTimeout(readinessTimer);
               readinessTimer = null;
@@ -616,6 +619,13 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
             stdout: combinedOutput,
             stderr: '',
           });
+
+          const observedOutputSection = (): string => {
+            const observed = truncateTail(combinedOutput, MAX_OUTPUT_LINES, MAX_OUTPUT_BYTES).text;
+            return observed
+              ? `\n\nObserved output during startup window:\n${observed}`
+              : '\n\nObserved output during startup window:\n(no observed output yet)';
+          };
 
           const resolveProcessEvidenceReady = async (): Promise<boolean> => {
             if (!startedPid || startupMarker) return false;
@@ -758,7 +768,9 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
 
             startupSettled = true;
             startedPid = pid;
-            child.unref();
+            if (backgroundMode !== 'service') {
+              child.unref();
+            }
 
             const proc: BackgroundProcess = {
               pid,
@@ -789,7 +801,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
 
                 resolveOnce(
                   this.success(
-                    `Background service still running after ${serviceObservationMs}ms observation (launcher PID: ${pid})\nCommand: ${command}\nThis does not confirm the app is ready. Do not treat the launcher PID as the app process; use the latest output, a startup_marker, reachable port, visible window, or process CommandLine/AppPath evidence for readiness.`,
+                    `Background service still running after ${serviceObservationMs}ms observation (launcher PID: ${pid})\nCommand: ${command}\nThis does not confirm the app is ready. Do not treat the launcher PID as the app process; use the latest output, a startup_marker, reachable port, visible window, or process CommandLine/AppPath evidence for readiness.${observedOutputSection()}`,
                     commandDetails(),
                   ),
                 );

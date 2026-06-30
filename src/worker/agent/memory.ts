@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { buildStructuredTaskPrompt } from './model-structured-content';
 
 const MEMORIES_DIR = '.suncode/memories';
 const MEMORY_INDEX = 'MEMORY.md';
@@ -410,7 +411,16 @@ async function generateSummary(entry: MemoryEntry, provider: string, modelId: st
 - 关键发现：...
 - 经验教训：...`;
 
-    const messages = [{ role: 'user', content: [{ type: 'text', text: prompt }] }];
+    const structuredPrompt = buildStructuredTaskPrompt('memory_summary', {
+      instruction: prompt,
+      responseFormat: {
+        language: 'zh',
+        sections: ['completed_work', 'key_findings', 'lessons_learned'],
+      },
+      userRequest: entry.userRequest,
+      toolsUsed: entry.toolsUsed,
+    });
+    const messages = [{ role: 'user', content: [{ type: 'text', text: structuredPrompt }] }];
     const result = await (model as any).generate({
       messages,
       maxTokens: 300,

@@ -620,11 +620,20 @@ export interface StreamEvent {
 
 // ===== Run Event Types =====
 
+/** Per-turn LLM request message detail (CallTracePanel rendering). */
+export interface RequestMessageTrace {
+  role: string;
+  length: number;
+  preview: string;
+  /** Full or capped message content actually sent to the LLM. */
+  content?: string;
+}
+
 /** Per-turn LLM request/response detail (CallTracePanel rendering). */
 export interface TurnDetail {
   turnNumber: number;
   systemTokens: number;
-  requestMessages: Array<{ role: string; length: number; preview: string }>;
+  requestMessages: RequestMessageTrace[];
   response: {
     text: string;
     thinking: string;
@@ -741,7 +750,7 @@ export type RunEvent =
       error?: string;
       timestamp: string;
       /** (Call trace) Message summaries sent to the LLM for this turn. */
-      requestMessages?: Array<{ role: string; length: number; preview: string }>;
+      requestMessages?: RequestMessageTrace[];
       /** (Call trace) System prompt token count for this turn. */
       systemTokens?: number;
       /** (Call trace) The LLM's visible text response. */

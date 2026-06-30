@@ -1,5 +1,11 @@
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
-import type { ToolCallContent, StreamEvent, RunEvent, AppSettings } from '@shared/types';
+import type {
+  ToolCallContent,
+  StreamEvent,
+  RunEvent,
+  AppSettings,
+  RequestMessageTrace,
+} from '@shared/types';
 import type { DiagLogger } from '../utils/diag-logger';
 
 export interface StreamHandlerInput {
@@ -13,7 +19,7 @@ export interface StreamHandlerInput {
   turnCount: number;
   requestAttempt: number;
   requestStartTime: number;
-  requestMsgSummaries: { role: string; length: number; preview: string }[];
+  requestMsgSummaries: RequestMessageTrace[];
   /** Optional: called immediately when a tool_use block is complete during streaming. */
   onToolCallComplete?: (toolCall: ToolCallContent) => void;
 }

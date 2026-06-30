@@ -6,10 +6,13 @@ import {
   buildWindowsProjectProcessEvidenceCommand,
   createBashTool,
   isForegroundElectronLaunch,
+  killProcessTree,
   resolveProjectEvidenceRoot,
   shouldWaitForServiceEvidenceAfterLauncherExit,
   rewriteKillCommand,
 } from './bash';
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('bash tool details', () => {
   test('returns command metadata and stdout', async () => {
@@ -95,7 +98,6 @@ describe('bash tool details', () => {
       type: 'command',
       command,
       cwd: process.cwd(),
-      exitCode: null,
     });
   });
 
@@ -128,8 +130,9 @@ describe('bash tool details', () => {
         type: 'command',
         command,
         cwd: dir,
-        exitCode: null,
       });
+      if (result.pid) killProcessTree(result.pid);
+      await wait(500);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -219,7 +222,7 @@ describe('bash tool details', () => {
   });
 
   test('uses a short observation window for service commands without a startup marker', async () => {
-    const command = process.platform === 'win32' ? 'ping 127.0.0.1 -n 3 > nul' : "sh -c 'sleep 1'";
+    const command = process.platform === 'win32' ? 'Start-Sleep -Seconds 2' : "sh -c 'sleep 2'";
     const startedAt = Date.now();
     const result = await createBashTool(process.cwd()).execute({
       command,
@@ -230,12 +233,44 @@ describe('bash tool details', () => {
 
     expect(Date.now() - startedAt).toBeLessThan(5000);
     expect(result.success).toBe(true);
-    expect(result.output).toContain('Background service still running after 100ms observation');
+    expect(result.output).toContain('Background service still running after 1000ms observation');
     expect(result.details).toMatchObject({
       type: 'command',
       command,
       exitCode: null,
     });
+    if (result.pid) killProcessTree(result.pid);
+  });
+
+  test('includes observed startup output in service observation result', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'suncode-service-output-'));
+    try {
+      await writeFile(
+        join(tempDir, 'service-output.js'),
+        "console.log('startup-log-line'); setTimeout(() => {}, 2000);\n",
+      );
+      const command = 'node service-output.js';
+      const result = await createBashTool(tempDir).execute({
+        command,
+        run_in_background: true,
+        background_mode: 'service',
+        readiness_timeout: 30000,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Observed output during startup window');
+      expect(result.output).toContain('startup-log-line');
+      expect(result.details).toMatchObject({
+        type: 'command',
+        command,
+        exitCode: null,
+        stdout: expect.stringContaining('startup-log-line'),
+      });
+      if (result.pid) killProcessTree(result.pid);
+      await wait(500);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   test('treats service background mode as a background launch even when run flag is omitted', async () => {

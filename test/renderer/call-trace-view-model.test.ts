@@ -142,6 +142,52 @@ describe('buildCallTraceOutline', () => {
     });
   });
 
+  test('keeps full request content for trace input display', () => {
+    const messages: ChatMessage[] = [
+      {
+        id: 'a-full-input',
+        role: 'assistant',
+        content: 'done',
+        timestamp: 1,
+        isStreaming: false,
+        turnDetails: [
+          {
+            turnNumber: 1,
+            systemTokens: 1,
+            requestMessages: [
+              {
+                role: 'tool',
+                length: 78,
+                preview: '{"type":"tool_result"',
+                content:
+                  '{"type":"tool_result","tool":"bash","log":"VITE ready on http://localhost:5173"}',
+              },
+            ],
+            response: {
+              text: 'done',
+              thinking: '',
+              toolCalls: [],
+            },
+          },
+        ],
+      },
+    ];
+
+    const outline = buildCallTraceOutline({ messages, systemPrompt: '' });
+    const turn = outline.entries[0];
+    const inputSection =
+      turn.kind === 'turn' ? turn.sections.find((section) => section.kind === 'input') : undefined;
+
+    expect(inputSection).toMatchObject({
+      kind: 'input',
+      requestMessages: [
+        expect.objectContaining({
+          content: expect.stringContaining('"log":"VITE ready'),
+        }),
+      ],
+    });
+  });
+
   test('marks the latest streaming turn and keeps its running tool section open', () => {
     const messages: ChatMessage[] = [
       {

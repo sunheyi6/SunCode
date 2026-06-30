@@ -19,6 +19,10 @@ import { computeNeedsFollowUp } from './turn-decision';
 import { handleStream } from './stream-handler';
 import { executeTools } from './tool-executor';
 import { StreamingToolExecutor } from './streaming-executor';
+import { buildStructuredTextMessage } from './model-structured-content';
+import { formatToolResultForModel } from './tool-result-content';
+
+const TRACE_MESSAGE_CONTENT_LIMIT = 20_000;
 
 /** Context passed to prepareNextTurn so implementors can trim or adjust. */
 export interface PrepareNextTurnContext {
@@ -239,11 +243,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // Capture request message summaries for turn_detail event
       const requestMsgSummaries = lastMsgsForLog.map((m) => {
-        const contentStr = getMessageTextContent(m);
+        const contentStr = getModelMessageTraceContent(m);
         return {
           role: m.role,
           length: contentStr.length,
           preview: contentStr.slice(0, 200),
+          content: truncateTraceContent(contentStr),
         };
       });
 
@@ -513,7 +518,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       for (const tr of toolResults) {
         contextMessages.push({
           role: 'tool',
-          content: tr.success ? tr.output : `错误: ${tr.error}`,
+          content: formatToolResultForModel(tr),
           toolCallId: tr.toolCallId,
         });
       }
@@ -622,13 +627,37 @@ function convertMessage(msg: Message): Record<string, unknown> {
     };
   }
 
-  if (typeof msg.content === 'string') {
-    return { role: msg.role, content: msg.content };
+  if (!isStructuredTextRole(msg.role)) {
+    return { role: msg.role, content: getMessageTextContent(msg) };
   }
 
+  const structuredRole = msg.role;
+
+  if (typeof msg.content === 'string') {
+    return {
+      role: structuredRole,
+      content: buildStructuredTextMessage({ role: structuredRole, text: msg.content }),
+    };
+  }
+
+  const textContent = getMessageTextContent(msg);
   const content = msg.content.map((block) => {
-    if (block.type === 'text') return { type: 'text', text: block.text };
-    if (block.type === 'thinking') return { type: 'thinking', text: block.text };
+    if (block.type === 'text') {
+      return {
+        type: 'text',
+        text: buildStructuredTextMessage({
+          role: structuredRole,
+          text: block.text,
+          toolCalls: msg.toolCalls,
+        }),
+      };
+    }
+    if (block.type === 'thinking') {
+      return {
+        type: 'thinking',
+        text: buildStructuredTextMessage({ role: structuredRole, text: block.text }),
+      };
+    }
     if (block.type === 'tool_call')
       return {
         type: 'toolCall' as const,
@@ -653,8 +682,21 @@ function convertMessage(msg: Message): Record<string, unknown> {
       : [];
 
   return {
-    role: msg.role as string,
-    content: [...content, ...toolCalls],
+    role: structuredRole,
+    content:
+      content.length > 0
+        ? [...content, ...toolCalls]
+        : [
+            {
+              type: 'text',
+              text: buildStructuredTextMessage({
+                role: structuredRole,
+                text: textContent,
+                toolCalls: msg.toolCalls,
+              }),
+            },
+            ...toolCalls,
+          ],
     ...(msg.toolCallId ? { tool_call_id: msg.toolCallId } : {}),
   };
 }
@@ -705,4 +747,33 @@ function getMessageTextContent(msg: Message): string {
     .filter((b) => b.type === 'text' || b.type === 'thinking')
     .map((b) => ('text' in b ? b.text : ''))
     .join('\n');
+}
+
+function getModelMessageTraceContent(msg: Message): string {
+  if (msg.role === 'tool') {
+    return getMessageTextContent(msg);
+  }
+
+  if (msg.role === 'user' || msg.role === 'assistant') {
+    return buildStructuredTextMessage({
+      role: msg.role,
+      text: getMessageTextContent(msg),
+      toolCalls: msg.toolCalls,
+    });
+  }
+
+  return getMessageTextContent(msg);
+}
+
+function isStructuredTextRole(role: Message['role']): role is 'user' | 'assistant' {
+  return role === 'user' || role === 'assistant';
+}
+
+function truncateTraceContent(content: string): string {
+  if (content.length <= TRACE_MESSAGE_CONTENT_LIMIT) return content;
+
+  const marker = '\n\n[...trace content truncated; keeping head and latest tail...]\n\n';
+  const headLength = Math.floor((TRACE_MESSAGE_CONTENT_LIMIT - marker.length) / 2);
+  const tailLength = TRACE_MESSAGE_CONTENT_LIMIT - marker.length - headLength;
+  return content.slice(0, headLength) + marker + content.slice(-tailLength);
 }
