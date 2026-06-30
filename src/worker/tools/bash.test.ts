@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBashTool, rewriteKillCommand } from './bash';
+import {
+  buildWindowsProjectProcessEvidenceCommand,
+  createBashTool,
+  isForegroundElectronLaunch,
+  resolveProjectEvidenceRoot,
+  shouldWaitForServiceEvidenceAfterLauncherExit,
+  rewriteKillCommand,
+} from './bash';
 
 describe('bash tool details', () => {
   test('returns command metadata and stdout', async () => {
@@ -78,6 +85,80 @@ describe('bash tool details', () => {
     });
   });
 
+  test('auto-backgrounds direct Electron launch commands', async () => {
+    const command = 'cd D:/project/maka-agent/apps/desktop; npx electron . 2>&1';
+    const result = await createBashTool(process.cwd()).execute({ command });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('Background service');
+    expect(result.details).toMatchObject({
+      type: 'command',
+      command,
+      cwd: process.cwd(),
+      exitCode: null,
+    });
+  });
+
+  test('auto-backgrounds npm workspace scripts that launch Electron', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'suncode-electron-workspace-'));
+    const desktopDir = join(dir, 'apps', 'desktop');
+    await mkdir(desktopDir, { recursive: true });
+    await writeFile(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        private: true,
+        workspaces: ['apps/desktop'],
+      }),
+    );
+    await writeFile(
+      join(desktopDir, 'package.json'),
+      JSON.stringify({
+        name: '@maka/desktop',
+        scripts: { start: 'electron .' },
+      }),
+    );
+
+    try {
+      const command = 'npm --workspace @maka/desktop run start';
+      const result = await createBashTool(dir).execute({ command });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Background service');
+      expect(result.details).toMatchObject({
+        type: 'command',
+        command,
+        cwd: dir,
+        exitCode: null,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('allows Electron launch commands when background mode is requested', () => {
+    const command = 'cd D:/project/maka-agent/apps/desktop; npx electron .';
+
+    expect(isForegroundElectronLaunch(command, true)).toBe(false);
+  });
+
+  test('uses the launch command directory as process evidence root', () => {
+    const root = resolveProjectEvidenceRoot(
+      'cd D:/project/maka-agent/apps/desktop; npx electron .',
+      'D:/project/SunCode',
+    );
+
+    expect(root.replace(/\\/g, '/')).toBe('D:/project/maka-agent/apps/desktop');
+  });
+
+  test('process evidence lookup excludes the launcher pid', () => {
+    const script = buildWindowsProjectProcessEvidenceCommand('D:/project/maka-agent/apps/desktop', 1234);
+
+    expect(script).toContain('$_.ProcessId -ne 1234');
+    expect(script).toContain('maka-agent/apps/desktop');
+    expect(script).toContain('CommandLine');
+    expect(script).toContain('ExecutablePath');
+  });
+
   test('blocks SunCode startup marker for another project launch', async () => {
     const command = 'cd D:/project/maka-agent && npm run dev';
     const result = await createBashTool(process.cwd()).execute({
@@ -119,6 +200,70 @@ describe('bash tool details', () => {
       stdout: '',
       stderr: '',
     });
+  });
+
+  test('waits for readiness timeout when a service launcher exits cleanly without evidence', async () => {
+    const command = process.platform === 'win32' ? 'cmd /c "exit 0"' : "sh -c 'exit 0'";
+    const startedAt = Date.now();
+    const result = await createBashTool(process.cwd()).execute({
+      command,
+      run_in_background: true,
+      background_mode: 'service',
+      readiness_timeout: 50,
+    });
+
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(40);
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('Background service still running after');
+    expect(result.output).toContain('launcher PID');
+  });
+
+  test('uses a short observation window for service commands without a startup marker', async () => {
+    const command = process.platform === 'win32' ? 'ping 127.0.0.1 -n 3 > nul' : "sh -c 'sleep 1'";
+    const startedAt = Date.now();
+    const result = await createBashTool(process.cwd()).execute({
+      command,
+      run_in_background: true,
+      background_mode: 'service',
+      readiness_timeout: 30000,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('Background service still running after 100ms observation');
+    expect(result.details).toMatchObject({
+      type: 'command',
+      command,
+      exitCode: null,
+    });
+  });
+
+  test('treats service background mode as a background launch even when run flag is omitted', async () => {
+    const command = process.platform === 'win32' ? 'cmd /c "exit 0"' : "sh -c 'exit 0'";
+    const result = await createBashTool(process.cwd()).execute({
+      command,
+      background_mode: 'service',
+      readiness_timeout: 50,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('Background service');
+    expect(result.details).toMatchObject({
+      type: 'command',
+      command,
+      exitCode: null,
+    });
+  });
+
+  test('continues waiting when a clean service launcher exit has no readiness evidence yet', () => {
+    expect(
+      shouldWaitForServiceEvidenceAfterLauncherExit({
+        exitCode: 0,
+        hasReadinessTimeout: true,
+        hasStartupMarker: false,
+        evidenceFound: false,
+      }),
+    ).toBe(true);
   });
 
   test('returns structured details when foreground process startup fails', async () => {

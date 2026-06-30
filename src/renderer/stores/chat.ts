@@ -17,6 +17,7 @@ import { parseTaskPlan, stripPlanFromContent } from '../utils/task-plan-parser';
 import { detectUiLanguage, type UiLanguage } from '../utils/ui-language';
 import { useAgentStore } from './agent';
 import { buildPersistedAssistantMessage } from './chat-message-persistence';
+import { mergeStreamedToolCalls } from './tool-call-state';
 
 export interface ChatMessageBlock {
   id: string;
@@ -279,23 +280,19 @@ export const useChatStore = defineStore('chat', () => {
 
         // Accumulate tool calls across turns
         if (incoming.length > 0) {
-          const existing = target.toolCalls ?? [];
-          const existingIds = new Set(existing.map((t) => t.id));
-          const merged = [...existing];
+          const beforeMerge = target.toolCalls ?? [];
+          const merged = mergeStreamedToolCalls(beforeMerge, incoming);
 
           for (const tc of incoming) {
-            const idx = existing.findIndex((t) => t.id === tc.id);
+            const idx = beforeMerge.findIndex((t) => t.id === tc.id);
             if (idx >= 0) {
-              merged[idx] = tc;
               // Update existing block's toolCall
               const blockIdx = target.blocks.findIndex(
                 (b) => b.type === 'tool_call' && b.toolCall?.id === tc.id,
               );
               if (blockIdx >= 0) {
-                target.blocks[blockIdx].toolCall = tc;
+                target.blocks[blockIdx].toolCall = merged[idx];
               }
-            } else if (!existingIds.has(tc.id)) {
-              merged.push(tc);
             }
           }
           target.toolCalls = merged;

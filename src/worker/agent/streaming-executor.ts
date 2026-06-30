@@ -13,15 +13,17 @@
  * - Results are collected and returned alongside the stream output
  */
 
-import type { ToolCallContent, ToolResult, PreExecutedToolCall } from '@shared/types';
+import type { RunEvent, RunId, ToolCallContent, ToolResult, PreExecutedToolCall } from '@shared/types';
 import type { Tool } from '../tools/types';
 
 // ===== Tool Execution Callbacks =====
 
 export interface StreamingExecutorCallbacks {
+  runId?: RunId;
   onToolStart?: (toolCall: ToolCallContent) => void;
   onToolEnd?: (result: ToolResult) => void;
   onToolProgress?: (toolCallId: string, output: string) => void;
+  onRunEvent?: (event: RunEvent) => void;
 }
 
 // ===== StreamingToolExecutor =====
@@ -86,6 +88,15 @@ export class StreamingToolExecutor {
     };
 
     this.callbacks.onToolStart?.(toolCall);
+    this.callbacks.onRunEvent?.({
+      type: 'tool_started',
+      runId: this.callbacks.runId ?? '',
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      timestamp: '',
+      arguments: toolCall.arguments,
+      description: toolCall.name,
+    });
 
     const promise = this.executeTool(tool, toolCall)
       .then((result) => {
@@ -93,6 +104,7 @@ export class StreamingToolExecutor {
         this.results.set(toolCall.id, result);
         tool.onProgress = null;
         this.callbacks.onToolEnd?.(result);
+        this.emitCompleted(toolCall, result);
         return result;
       })
       .catch((err) => {
@@ -106,10 +118,25 @@ export class StreamingToolExecutor {
         this.results.set(toolCall.id, result);
         tool.onProgress = null;
         this.callbacks.onToolEnd?.(result);
+        this.emitCompleted(toolCall, result);
         return result;
       });
 
     this.running.set(toolCall.id, promise);
+  }
+
+  private emitCompleted(toolCall: ToolCallContent, result: ToolResult): void {
+    this.callbacks.onRunEvent?.({
+      type: 'tool_completed',
+      runId: this.callbacks.runId ?? '',
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      success: result.success,
+      timestamp: '',
+      output: result.output?.slice(0, 2000),
+      error: result.error ? result.error.slice(0, 500) : undefined,
+      message: `${result.success ? 'OK' : 'FAIL'}: ${toolCall.name}`,
+    });
   }
 
   private async executeTool(tool: Tool, toolCall: ToolCallContent): Promise<ToolResult> {

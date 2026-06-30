@@ -27,3 +27,26 @@ export function completeToolCall(calls: ToolCallContent[], result: ToolResult): 
   existing.status = result.success ? 'done' : 'error';
   existing.result = result;
 }
+
+export function mergeStreamedToolCalls(
+  existing: ToolCallContent[],
+  incoming: ToolCallContent[],
+): ToolCallContent[] {
+  const merged = [...existing];
+
+  for (const streamed of incoming) {
+    const idx = merged.findIndex((call) => call.id === streamed.id);
+    if (idx >= 0) {
+      merged[idx] = {
+        ...streamed,
+        status: merged[idx].status,
+        result: merged[idx].result,
+        partialOutput: merged[idx].partialOutput,
+      };
+    } else {
+      merged.push(streamed);
+    }
+  }
+
+  return merged;
+}

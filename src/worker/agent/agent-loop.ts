@@ -268,9 +268,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         workingDir,
         settings.permissionMode === 'confirm_changes',
         {
+          runId,
           onToolStart,
           onToolEnd,
           onToolProgress: (toolCallId, output) => onToolProgress(toolCallId, output),
+          onRunEvent: (event) => onRunEvent(event),
         },
       );
 

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import type { ToolResult } from '@shared/types';
 import { randomBytes } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { BackgroundProcess } from '@shared/types';
@@ -24,6 +25,13 @@ const MAX_OUTPUT_LINES = 2000;
 const MAX_OUTPUT_BYTES = 50_000;
 /** Kill process if stdout + stderr exceeds this (safety valve). */
 const OVERFLOW_KILL_BYTES = 200_000;
+const SERVICE_OBSERVATION_MS = 100;
+
+interface ProcessEvidence {
+  pid: number;
+  name: string;
+  source: 'CommandLine' | 'ExecutablePath';
+}
 
 export interface BashToolCallbacks {
   onBackgroundStart?: (proc: BackgroundProcess) => void;
@@ -223,9 +231,187 @@ function isGlobalElectronProcessNameCheck(command: string): boolean {
   );
 }
 
+export function isForegroundElectronLaunch(command: string, runInBackground: boolean): boolean {
+  if (runInBackground) return false;
+
+  const commandStart = String.raw`(?:^|[;&|]\s*)`;
+  const runner = String.raw`(?:(?:npx|bunx)\s+(?:--yes\s+)?|(?:npm|pnpm)\s+exec\s+|pnpm\s+dlx\s+|yarn\s+(?:exec\s+)?)?`;
+  const electron = String.raw`electron(?:\.cmd|\.exe)?(?:\s|$)`;
+  return new RegExp(commandStart + runner + electron, 'i').test(command);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function readPackageJson(dir: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(join(dir, 'package.json'), 'utf-8')) as unknown;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseNpmRun(command: string): { workspace?: string; script: string } | undefined {
+  const match = command.match(
+    /\b(?:npm|pnpm)\s+(?:(?:--workspace|-w)\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s+)?run\s+([^\s;&|]+)/i,
+  );
+  if (!match) return undefined;
+
+  return {
+    workspace: match[1] ?? match[2] ?? match[3],
+    script: match[4],
+  };
+}
+
+function workspacePatterns(pkg: Record<string, unknown>): string[] {
+  const workspaces = pkg.workspaces;
+  if (Array.isArray(workspaces)) {
+    return workspaces.filter((entry): entry is string => typeof entry === 'string');
+  }
+  if (isRecord(workspaces) && Array.isArray(workspaces.packages)) {
+    return workspaces.packages.filter((entry): entry is string => typeof entry === 'string');
+  }
+  return [];
+}
+
+async function resolveWorkspacePackageDir(rootDir: string, workspace: string): Promise<string | undefined> {
+  const rootPkg = await readPackageJson(rootDir);
+  if (!rootPkg) return undefined;
+
+  for (const pattern of workspacePatterns(rootPkg)) {
+    if (pattern.includes('*')) continue;
+    const candidateDir = resolve(rootDir, pattern);
+    const candidatePkg = await readPackageJson(candidateDir);
+    if (candidatePkg?.name === workspace) return candidateDir;
+  }
+
+  return undefined;
+}
+
+async function isForegroundElectronLaunchCommand(
+  command: string,
+  cwd: string,
+  runInBackground: boolean,
+): Promise<boolean> {
+  if (isForegroundElectronLaunch(command, runInBackground)) return true;
+  if (runInBackground) return false;
+
+  const run = parseNpmRun(command);
+  if (!run) return false;
+
+  const commandRoot = resolveProjectEvidenceRoot(command, cwd);
+  const packageDir = run.workspace
+    ? await resolveWorkspacePackageDir(commandRoot, run.workspace)
+    : commandRoot;
+  if (!packageDir) return false;
+
+  const pkg = await readPackageJson(packageDir);
+  const scripts = isRecord(pkg?.scripts) ? pkg.scripts : undefined;
+  const script = scripts?.[run.script];
+  return typeof script === 'string' && isForegroundElectronLaunch(script, false);
+}
+
 function extractCdTarget(command: string): string | undefined {
   const match = command.match(/\bcd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/i);
   return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
+export function resolveProjectEvidenceRoot(command: string, cwd: string): string {
+  const cdTarget = extractCdTarget(command);
+  return resolve(cwd, cdTarget || '.');
+}
+
+function quotePowerShellSingle(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+export function buildWindowsProjectProcessEvidenceCommand(
+  projectRoot: string,
+  launcherPid: number,
+): string {
+  const normalizedRoot = projectRoot.replace(/\\/g, '/');
+  return [
+    `$root = ${quotePowerShellSingle(normalizedRoot)}`,
+    'Get-CimInstance Win32_Process |',
+    `Where-Object { $_.ProcessId -ne $PID -and $_.ProcessId -ne ${launcherPid} -and (`,
+    '(([string]$_.CommandLine).Replace(\'\\\', \'/\').IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or',
+    '(([string]$_.ExecutablePath).Replace(\'\\\', \'/\').IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0)',
+    ') } |',
+    'Select-Object -First 1 ProcessId,Name,CommandLine,ExecutablePath |',
+    'ConvertTo-Json -Compress',
+  ].join(' ');
+}
+
+function parseProcessEvidenceOutput(output: string): ProcessEvidence | undefined {
+  const trimmed = output.trim();
+  if (!trimmed) return undefined;
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      ProcessId?: unknown;
+      Name?: unknown;
+      CommandLine?: unknown;
+      ExecutablePath?: unknown;
+    };
+    if (typeof parsed.ProcessId !== 'number' || typeof parsed.Name !== 'string') {
+      return undefined;
+    }
+
+    const source =
+      typeof parsed.CommandLine === 'string' && parsed.CommandLine.trim()
+        ? 'CommandLine'
+        : 'ExecutablePath';
+    return { pid: parsed.ProcessId, name: parsed.Name, source };
+  } catch {
+    return undefined;
+  }
+}
+
+async function findProjectProcessEvidence(
+  projectRoot: string,
+  launcherPid: number,
+): Promise<ProcessEvidence | undefined> {
+  if (process.platform !== 'win32') return undefined;
+
+  return new Promise((resolveEvidence) => {
+    const child = spawn(
+      getPowerShellPath(),
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        buildWindowsProjectProcessEvidenceCommand(projectRoot, launcherPid),
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        timeout: 3000,
+      },
+    );
+
+    let stdout = '';
+    child.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    child.on('close', () => resolveEvidence(parseProcessEvidenceOutput(stdout)));
+    child.on('error', () => resolveEvidence(undefined));
+  });
+}
+
+export function shouldWaitForServiceEvidenceAfterLauncherExit(args: {
+  exitCode: number | null;
+  hasReadinessTimeout: boolean;
+  hasStartupMarker: boolean;
+  evidenceFound: boolean;
+}): boolean {
+  return (
+    args.exitCode === 0 &&
+    args.hasReadinessTimeout &&
+    !args.hasStartupMarker &&
+    !args.evidenceFound
+  );
 }
 
 function isCrossProjectSunCodeStartupMarker(
@@ -300,8 +486,13 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
     async execute(params: Record<string, unknown>): Promise<ToolResult> {
       const command = (params.command as string) || '';
       const timeout = Math.min((params.timeout as number) || 60000, 300000);
-      const runInBg = Boolean(params.run_in_background);
-      const backgroundMode = params.background_mode === 'service' ? 'service' : 'task';
+      const cwd = resolve(workingDir);
+      const inferredService = command
+        ? await isForegroundElectronLaunchCommand(command, cwd, false)
+        : false;
+      const backgroundMode =
+        params.background_mode === 'service' || inferredService ? 'service' : 'task';
+      const runInBg = Boolean(params.run_in_background) || backgroundMode === 'service';
       const startupMarker =
         typeof params.startup_marker === 'string' && params.startup_marker.trim()
           ? params.startup_marker.trim()
@@ -311,7 +502,9 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
         (params.readiness_timeout as number) || 120000,
         300000,
       );
-      const cwd = resolve(workingDir);
+      const serviceObservationMs = startupMarker
+        ? readinessTimeout
+        : Math.min(readinessTimeout, SERVICE_OBSERVATION_MS);
       const commandFailure = (message: string) =>
         this.failure(message, {
           type: 'command',
@@ -424,11 +617,28 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
             stderr: '',
           });
 
+          const resolveProcessEvidenceReady = async (): Promise<boolean> => {
+            if (!startedPid || startupMarker) return false;
+            const evidence = await findProjectProcessEvidence(
+              resolveProjectEvidenceRoot(command, cwd),
+              startedPid,
+            );
+            if (!evidence) return false;
+
+              resolveOnce(
+                this.success(
+                `Background service ready (app PID: ${evidence.pid})\nCommand: ${command}\nMatched process ${evidence.source} evidence for project path: ${evidence.name}`,
+                commandDetails(),
+              ),
+            );
+            return true;
+          };
+
           const resolveReady = () => {
             if (!startedPid || resultSettled) return;
-            resolveOnce(
-              this.success(
-                `Background service ready (PID: ${startedPid})\nCommand: ${command}\nMatched startup marker: ${startupMarker}`,
+              resolveOnce(
+                this.success(
+                `Background service ready (launcher PID: ${startedPid})\nCommand: ${command}\nMatched startup marker: ${startupMarker}`,
                 commandDetails(),
               ),
             );
@@ -480,14 +690,24 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
             notifyComplete(-1);
           });
 
-          child.on('close', (code) => {
+          child.on('close', async (code) => {
             if (!startupSettled) {
               // Exited before spawn event fired — startup failure
               failStartup(`process closed before startup (exit code: ${code ?? 'null'})`);
               notifyComplete(code ?? -1);
               return;
             }
-            if ((startupMarker || hasReadinessTimeout) && !resultSettled) {
+            if (backgroundMode === 'service' && !resultSettled) {
+              const evidenceFound = await resolveProcessEvidenceReady();
+              if (evidenceFound) {
+                if (progressTimer) {
+                  clearTimeout(progressTimer);
+                  flushProgress();
+                }
+                notifyComplete(code ?? -1);
+                return;
+              }
+
               if (startupMarker) {
                 resolveOnce(
                   this.failure(
@@ -495,10 +715,19 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                     commandDetails(code ?? null),
                   ),
                 );
+              } else if (
+                shouldWaitForServiceEvidenceAfterLauncherExit({
+                  exitCode: code,
+                  hasReadinessTimeout,
+                  hasStartupMarker: Boolean(startupMarker),
+                  evidenceFound,
+                })
+              ) {
+                return;
               } else if (code === 0) {
                 resolveOnce(
                   this.success(
-                    `Background service launcher exited with code 0 (PID: ${startedPid})\nCommand: ${command}\nThis does not confirm the app is ready. For GUI launchers this may mean the launcher handed off to the app process; verify with visible window or process CommandLine/AppPath evidence instead of starting it again.`,
+                    `Background service launcher exited with code 0 (launcher PID: ${startedPid})\nCommand: ${command}\nThis does not confirm the app is ready. For GUI launchers this may mean the launcher handed off to the app process; verify with visible window or process CommandLine/AppPath evidence instead of starting it again.`,
                     commandDetails(0),
                   ),
                 );
@@ -541,28 +770,30 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
 
             const output =
               backgroundMode === 'service'
-                ? `Background service launch command started (PID: ${pid})\nCommand: ${command}\nThis only confirms the launcher shell started; it does not confirm the app is ready. Verify readiness with a project-specific marker, reachable port, or direct app evidence.`
+                ? `Background service launch command started (launcher PID: ${pid})\nCommand: ${command}\nThis only confirms the launcher shell started; it does not confirm the app is ready. Do not treat the launcher PID as the app process; verify readiness with a project-specific marker, reachable port, or direct app evidence.`
                 : `Background process started (PID: ${pid})\nCommand: ${command}`;
 
-            if (backgroundMode === 'service' && (startupMarker || hasReadinessTimeout)) {
-              readinessTimer = setTimeout(() => {
+            if (backgroundMode === 'service') {
+              readinessTimer = setTimeout(async () => {
                 if (startupMarker) {
                   resolveOnce(
                     this.failure(
-                      `Background service did not become ready within ${readinessTimeout}ms. Marker not seen: ${startupMarker}`,
+                      `Background service did not become ready within ${serviceObservationMs}ms. Marker not seen: ${startupMarker}`,
                       commandDetails(),
                     ),
                   );
                   return;
                 }
 
+                if (await resolveProcessEvidenceReady()) return;
+
                 resolveOnce(
                   this.success(
-                    `Background service still running after readiness wait (PID: ${pid})\nCommand: ${command}\nThis does not confirm the app is ready. Use a startup_marker, reachable port, visible window, or process CommandLine/AppPath evidence for readiness.`,
+                    `Background service still running after ${serviceObservationMs}ms observation (launcher PID: ${pid})\nCommand: ${command}\nThis does not confirm the app is ready. Do not treat the launcher PID as the app process; use the latest output, a startup_marker, reachable port, visible window, or process CommandLine/AppPath evidence for readiness.`,
                     commandDetails(),
                   ),
                 );
-              }, readinessTimeout);
+              }, serviceObservationMs);
               return;
             }
 

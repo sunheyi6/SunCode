@@ -1,7 +1,7 @@
 // @ts-expect-error Bun provides this module at test runtime; the repo has no Bun type package.
 import { describe, expect, test } from 'bun:test';
 import type { ToolCallContent, ToolResult } from '@shared/types';
-import { completeToolCall, startToolCall } from './tool-call-state';
+import { completeToolCall, mergeStreamedToolCalls, startToolCall } from './tool-call-state';
 
 describe('tool call state', () => {
   test('starts a call without duplicating an existing streamed call', () => {
@@ -36,5 +36,32 @@ describe('tool call state', () => {
 
     completeToolCall(calls, result);
     expect(calls[0]).toMatchObject({ status: 'done', result });
+  });
+
+  test('keeps live execution state when streamed tool calls refresh', () => {
+    const calls: ToolCallContent[] = [
+      {
+        type: 'tool_call',
+        id: 'call-1',
+        name: 'bash',
+        arguments: '{"command":"npm run dev"}',
+        status: 'running',
+        partialOutput: 'building...\n',
+      },
+    ];
+
+    const merged = mergeStreamedToolCalls(calls, [
+      {
+        type: 'tool_call',
+        id: 'call-1',
+        name: 'bash',
+        arguments: '{"command":"npm run dev"}',
+      },
+    ]);
+
+    expect(merged[0]).toMatchObject({
+      status: 'running',
+      partialOutput: 'building...\n',
+    });
   });
 });
