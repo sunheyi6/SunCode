@@ -5,9 +5,19 @@
  * Hooks run in priority order (lowest number first). The first hook that
  * returns `shouldStop: true` or `shouldBlock: true` wins — later hooks
  * are not executed for that turn.
+ *
+ * Also provides adapters for the unified Hook system (see ../hooks/hook-system.ts).
  */
 
-import type { StopHook, StopHookContext, StopHookResult, StopHookRegistry } from '@shared/types';
+import type { StopHook, StopHookContext, StopHookResult, StopHookRegistry, HookRegistry } from '@shared/types';
+import {
+  DefaultHookRegistry,
+  createHookRegistry,
+  adaptStopHookAsHook,
+  hookRegistryAsStopRegistry,
+} from '../hooks/hook-system';
+
+export { DefaultHookRegistry, createHookRegistry } from '../hooks/hook-system';
 
 // ===== Built-in Stop Hooks =====
 
@@ -47,7 +57,7 @@ export class SafetyStopHook implements StopHook {
   }
 }
 
-// ===== Stop Hook Registry =====
+// ===== Stop Hook Registry (legacy, backward compatible) =====
 
 /**
  * Default implementation of the StopHookRegistry.
@@ -91,4 +101,23 @@ export function createDefaultStopHookRegistry(): StopHookRegistry {
   const registry = new DefaultStopHookRegistry();
   registry.register(new SafetyStopHook());
   return registry;
+}
+
+// ===== Unified Hook Registry Factory =====
+
+/**
+ * Create a unified hook registry with the built-in SafetyStopHook
+ * adapted to the new HookInterface. Provides the full lifecycle hook
+ * capabilities (pre_tool_use, post_tool_use, permission_request, etc.)
+ * while maintaining backward compatibility with the legacy stop hook.
+ */
+export function createUnifiedHookRegistry(): { registry: DefaultHookRegistry; stopRegistry: StopHookRegistry } {
+  const registry = createHookRegistry();
+  // Register the safety hook as a unified hook
+  registry.register(adaptStopHookAsHook(new SafetyStopHook()));
+
+  // Wrap for backward-compatible StopHookRegistry interface
+  const stopRegistry = hookRegistryAsStopRegistry(registry);
+
+  return { registry, stopRegistry };
 }

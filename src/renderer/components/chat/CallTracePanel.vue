@@ -351,6 +351,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
   flex-direction: column;
   min-height: 0;
   height: 100%;
+  padding-top: 60px;
   background: var(--color-bg);
   border-left: 1px solid var(--border-color);
   overflow: hidden;

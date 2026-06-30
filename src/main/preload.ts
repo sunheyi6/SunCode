@@ -160,6 +160,11 @@ const suncodeAPI = {
     return ipcRenderer.invoke('session:deleteMany', ids);
   },
 
+  /** Clear messages in the current session (stay in same session). */
+  clearSessionMessages(): void {
+    ipcRenderer.send('session:clearMessages');
+  },
+
   /** Listen for sub-agent progress updates */
   onSubagentProgress(
     callback: (data: { sessionId: string; executionId: string; agent: string; delta: Record<string, unknown> }) => void,

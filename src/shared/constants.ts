@@ -164,9 +164,38 @@ export const DEFAULT_CONTEXT_BUDGET_POLICY = {
     highWaterRatio: DEFAULT_HIGH_WATER_RATIO,
     keepRecentTurns: DEFAULT_KEEP_RECENT_TURNS,
   },
+  snip: {
+    enabled: true,
+    minResultChars: 500,
+    maxAgeTurns: 3,
+  },
+  contextCollapse: {
+    enabled: true,
+    collapseThreshold: 0.7,
+    maxGroupTokens: 4096,
+  },
   minRecentTurns: DEFAULT_MIN_RECENT_TURNS,
   charsPerToken: CHARS_PER_TOKEN,
 } as const;
+
+// ===== Plan Mode Defaults =====
+
+/** Default directory for plan files. */
+export const DEFAULT_PLAN_DIR = '.suncode/plans';
+
+/** Maximum turns in plan mode before requiring user to exit or approve. */
+export const DEFAULT_PLAN_MAX_TURNS = 25;
+
+// ===== Error Recovery Defaults =====
+
+/** Maximum retry attempts for max_output_tokens recovery. */
+export const DEFAULT_MAX_OUTPUT_RECOVERY_ATTEMPTS = 3;
+
+/** Maximum retry attempts for context overflow recovery. */
+export const DEFAULT_CONTEXT_OVERFLOW_RECOVERY_ATTEMPTS = 2;
+
+/** Escalated max_output_tokens value for recovery (32K). */
+export const RECOVERY_MAX_OUTPUT_TOKENS = 32768;
 
 /** Default max turns for a goal-level loop. */
 export const DEFAULT_GOAL_MAX_TURNS = 5;

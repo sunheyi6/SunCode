@@ -14,6 +14,8 @@ export interface StreamHandlerInput {
   requestAttempt: number;
   requestStartTime: number;
   requestMsgSummaries: { role: string; length: number; preview: string }[];
+  /** Optional: called immediately when a tool_use block is complete during streaming. */
+  onToolCallComplete?: (toolCall: ToolCallContent) => void;
 }
 
 export interface StreamHandlerOutput {
@@ -37,6 +39,7 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     requestAttempt,
     requestStartTime,
     requestMsgSummaries,
+    onToolCallComplete,
   } = input;
 
   let assistantText = '';
@@ -107,6 +110,10 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
           arguments: JSON.stringify(event.toolCall.arguments),
         };
         toolCalls.push(tc);
+
+        // Notify streaming executor immediately — don't wait for stream to end
+        onToolCallComplete?.(tc);
+
         onStream({
           type: 'message_update',
           data: {

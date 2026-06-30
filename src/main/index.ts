@@ -39,7 +39,14 @@ let windowManager: WindowManager;
 
 const isMac = process.platform === 'darwin';
 
+function getWindowChromeColors(): { background: string; foreground: string } {
+  return nativeTheme.shouldUseDarkColors
+    ? { background: '#1e1e2e', foreground: '#cdd6f4' }
+    : { background: '#f4f5f7', foreground: '#2f343b' };
+}
+
 function createMainWindow(): BrowserWindow {
+  const chromeColors = getWindowChromeColors();
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -53,35 +60,28 @@ function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: false,
     },
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
+    backgroundColor: chromeColors.background,
     autoHideMenuBar: true,
     show: false,
-    // macOS only: hide native title bar with overlay color control
-    // On Windows, keeping the default title bar avoids rendering issues
-    ...(isMac
-      ? {
-          titleBarStyle: 'hidden' as const,
-          titleBarOverlay: {
-            color: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
-            symbolColor: nativeTheme.shouldUseDarkColors ? '#cdd6f4' : '#4c4f69',
-            height: 38,
-          },
-        }
-      : {}),
+    titleBarStyle: 'hidden' as const,
+    titleBarOverlay: {
+      color: chromeColors.background,
+      symbolColor: chromeColors.foreground,
+      height: isMac ? 38 : 60,
+    },
   });
   win.setMenuBarVisibility(false);
 
-  // macOS: Handle theme changes to update title bar overlay color
-  if (isMac) {
-    nativeTheme.on('updated', () => {
-      if (!win.isDestroyed()) {
-        win.setTitleBarOverlay({
-          color: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#eff1f5',
-          symbolColor: nativeTheme.shouldUseDarkColors ? '#cdd6f4' : '#4c4f69',
-        });
-      }
-    });
-  }
+  nativeTheme.on('updated', () => {
+    if (!win.isDestroyed()) {
+      const nextChromeColors = getWindowChromeColors();
+      win.setBackgroundColor(nextChromeColors.background);
+      win.setTitleBarOverlay({
+        color: nextChromeColors.background,
+        symbolColor: nextChromeColors.foreground,
+      });
+    }
+  });
 
   // ── Safety: if ready-to-show never fires (e.g. renderer crash during
   //     load), force-show the window after a timeout so the user at least

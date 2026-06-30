@@ -349,6 +349,7 @@ function formatTime(value: string): string {
   flex: 1;
   min-height: 0;
   flex-direction: column;
+  padding-top: 6px;
 }
 
 /* ── Update bar ── */
@@ -403,44 +404,54 @@ function formatTime(value: string): string {
 
 .sidebar-actions {
   display: flex;
-  gap: 6px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border-color);
+  gap: 4px;
+  align-items: center;
+  min-height: 54px;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 62%, transparent);
+  -webkit-app-region: drag;
+  app-region: drag;
 }
 
 .primary-action,
 .icon-action {
-  height: 36px;
-  border: 1px solid var(--border-color-strong);
+  height: 34px;
+  border: 1px solid transparent;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .primary-action {
   display: flex;
   flex: 1;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 7px;
-  background: var(--color-accent);
-  color: var(--color-bg);
-  font-weight: 650;
-  transition: background 0.15s ease;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--color-text);
+  font-weight: 560;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.primary-action:hover { background: var(--color-accent-hover); }
+.primary-action:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
 .action-icon { font-size: 18px; line-height: 1; }
 
 .icon-action {
-  width: 38px;
+  width: 32px;
   padding: 0;
-  background: var(--color-surface);
+  background: transparent;
   color: var(--color-text-secondary);
-  font-size: 16px;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  font-size: 15px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .icon-action:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+  background: var(--color-surface);
+  color: var(--color-text);
 }
 
 .select-count {
@@ -481,6 +492,8 @@ function formatTime(value: string): string {
   border-radius: var(--border-radius-sm);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .global-search input {
@@ -519,7 +532,7 @@ function formatTime(value: string): string {
 .conversation-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 7px 12px;
+  padding: 10px 8px 12px;
 }
 
 .project-group + .project-group { margin-top: 14px; }
@@ -532,7 +545,7 @@ function formatTime(value: string): string {
   color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
   text-transform: uppercase;
   cursor: pointer;
   user-select: none;
@@ -541,7 +554,7 @@ function formatTime(value: string): string {
 }
 
 .project-heading:hover {
-  background: var(--color-surface-hover);
+  background: color-mix(in srgb, var(--color-surface) 74%, transparent);
   color: var(--color-text-secondary);
 }
 
@@ -563,7 +576,7 @@ function formatTime(value: string): string {
   min-width: 18px;
   padding: 1px 5px;
   border-radius: 999px;
-  background: var(--color-surface);
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
   text-align: center;
   font-size: 10px;
 }
@@ -572,6 +585,7 @@ function formatTime(value: string): string {
   display: flex;
   position: relative;
   align-items: center;
+  border-radius: var(--border-radius-sm);
 }
 
 .conversation-row .delete-btn {
@@ -612,8 +626,9 @@ function formatTime(value: string): string {
   width: 100%;
   align-items: center;
   gap: 9px;
-  padding: 8px 9px;
+  padding: 8px 9px 8px 12px;
   border: 1px solid transparent;
+  border-left: 2px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
   text-align: left;
@@ -622,12 +637,12 @@ function formatTime(value: string): string {
 
 .conversation-row:hover .conversation-item,
 .conversation-row:hover {
-  background: var(--color-surface-hover);
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
   color: var(--color-text);
 }
 
 .conversation-row.active {
-  background: color-mix(in srgb, var(--color-accent) 11%, var(--color-surface));
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-accent));
 }
 
 .show-more-sessions {
@@ -646,8 +661,9 @@ function formatTime(value: string): string {
   background: var(--color-surface-hover);
 }
 
+.conversation-row.active .conversation-item,
 .conversation-item.active {
-  border-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  border-left-color: var(--color-accent);
   background: transparent;
   color: var(--color-text);
 }

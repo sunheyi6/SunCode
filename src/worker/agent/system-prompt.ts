@@ -13,6 +13,8 @@ export interface SystemPromptInput {
   agentsMdContent?: string;
   /** Optional: Auto-generated memories from prior sessions */
   memoryContent?: string;
+  /** Optional: Plan mode instructions (only when plan mode is active) */
+  planModeInstructions?: string;
 }
 
 /**
@@ -28,6 +30,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     customPrompt,
     agentsMdContent,
     memoryContent,
+    planModeInstructions,
   } = input;
 
   const now = new Date();
@@ -54,15 +57,33 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   }
 
   // Available Tools (same as pi's approach)
+  // --- CACHE BREAKPOINT: tool list changes between sessions ---
+  // Tools are ordered for cache stability: built-in tools first (stable prefix),
+  // then MCP/external tools (may change between sessions).
   if (tools.length > 0) {
+    // Sort: built-in tools first (alphabetical), then non-built-in
+    const builtInNames = new Set([
+      'read', 'write', 'edit', 'bash', 'grep', 'glob', 'ls', 'find',
+      'web_fetch', 'web_search', 'search_lessons', 'subagent',
+      'EnterPlanMode', 'ExitPlanMode',
+    ]);
+    const sorted = [...tools].sort((a, b) => {
+      const aBuiltIn = builtInNames.has(a.name);
+      const bBuiltIn = builtInNames.has(b.name);
+      if (aBuiltIn && !bBuiltIn) return -1;
+      if (!aBuiltIn && bBuiltIn) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
     parts.push('');
     parts.push('## Available Tools');
-    for (const tool of tools) {
+    for (const tool of sorted) {
       parts.push(`- **${tool.name}**: ${getToolSnippet(tool)}`);
     }
   }
 
   // Project memory
+  // --- CACHE PARTITION: dynamic content below this point ---
   if (memoryContent) {
     parts.push('');
     parts.push('<project_memory>');
@@ -76,6 +97,12 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     parts.push('<project_context>');
     parts.push(agentsMdContent);
     parts.push('</project_context>');
+  }
+
+  // Plan mode instructions (highest priority behavioral guidance)
+  if (planModeInstructions) {
+    parts.push('');
+    parts.push(planModeInstructions);
   }
 
   // Skills

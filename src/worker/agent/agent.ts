@@ -32,6 +32,8 @@ import type { ContextBudgetPolicy } from '@shared/types';
 import { DEFAULT_CONTEXT_BUDGET_POLICY } from '@shared/constants';
 import { runGoalLoop, extractGoalDefinition } from './goal-loop';
 import { createDefaultStopHookRegistry } from './stop-hooks';
+import { isPlanModeActive, getPlanPermissionMode, isToolAllowedInPlanMode, getPlanState, buildPlanModeInstructions } from './plan-mode';
+import { createEnterPlanModeTool, createExitPlanModeTool, type PlanToolCallbacks } from '../tools/plan-tools';
 
 export class Agent {
   private workingDir: string;
@@ -62,6 +64,10 @@ export class Agent {
   private onSubagentEvent: (type: string, data: unknown) => void;
   private onGoalEvent: (event: GoalEvent) => void;
   private requestConfirmation: ((toolCall: ToolCallContent) => Promise<boolean>) | undefined;
+  /** Plan approval callback — blocks the agent loop until user responds. */
+  private onPlanApprovalRequest:
+    | ((planContent: string, planFilePath: string) => Promise<boolean>)
+    | undefined;
 
   constructor(
     workingDir: string,
@@ -142,6 +148,21 @@ export class Agent {
       // Register subagent tool separately (after dispatcher is created)
       // to avoid circular import between tools/registry.ts and agent/subagent.ts
       registry.register(createSubagentTool(this.dispatcher));
+
+      // Register plan mode tools
+      const planCallbacks: PlanToolCallbacks = {
+        getWorkingDir: () => this.workingDir,
+        getPermissionMode: () => this.settings.permissionMode,
+        onPlanApprovalRequest: async (planContent, planFilePath) => {
+          if (this.onPlanApprovalRequest) {
+            return this.onPlanApprovalRequest(planContent, planFilePath);
+          }
+          return false;
+        },
+      };
+      registry.register(createEnterPlanModeTool(planCallbacks));
+      registry.register(createExitPlanModeTool(planCallbacks));
+
       this.tools = registry.getAll();
 
       // Load MCP tools
@@ -163,8 +184,13 @@ export class Agent {
 
   /** Return tools filtered by the current permission mode. */
   private getEffectiveTools(): Tool[] {
-    if (this.settings.permissionMode === 'plan') {
-      return this.tools.filter((t) => t.isReadonly);
+    // Plan mode overrides user-selected permission mode
+    const effectiveMode = isPlanModeActive() ? getPlanPermissionMode() : this.settings.permissionMode;
+
+    if (effectiveMode === 'plan') {
+      // In plan mode: only read-only tools + plan management tools
+      const planAllowedTools = new Set(['EnterPlanMode', 'ExitPlanMode']);
+      return this.tools.filter((t) => t.isReadonly || planAllowedTools.has(t.name));
     }
     return this.tools;
   }
@@ -222,6 +248,21 @@ export class Agent {
     if (this.dispatcher) {
       registry.register(createSubagentTool(this.dispatcher));
     }
+
+    // Register plan mode tools
+    const planCallbacks: PlanToolCallbacks = {
+      getWorkingDir: () => this.workingDir,
+      getPermissionMode: () => this.settings.permissionMode,
+      onPlanApprovalRequest: async (planContent, planFilePath) => {
+        if (this.onPlanApprovalRequest) {
+          return this.onPlanApprovalRequest(planContent, planFilePath);
+        }
+        return false;
+      },
+    };
+    registry.register(createEnterPlanModeTool(planCallbacks));
+    registry.register(createExitPlanModeTool(planCallbacks));
+
     const newBuiltInTools = registry.getAll();
 
     // Replace built-in tools while keeping MCP tools
@@ -335,6 +376,14 @@ export class Agent {
     this.emitStatus('idle');
   }
 
+  /**
+   * Set the plan approval request handler.
+   * Called by the main process to wire up the IPC-based plan approval flow.
+   */
+  setPlanApprovalHandler(handler: (planContent: string, planFilePath: string) => Promise<boolean>): void {
+    this.onPlanApprovalRequest = handler;
+  }
+
   private async runLoop(runId: string): Promise<void> {
     const modelRegistry = createModelRegistry();
     const model = await modelRegistry.getModel(
@@ -371,6 +420,11 @@ export class Agent {
       contextWindowFromModel(model),
     );
 
+    // Build plan mode instructions if active
+    const planModeInstructions = isPlanModeActive()
+      ? buildPlanModeInstructions(getPlanState()!, this.turnCount)
+      : undefined;
+
     const result = await runAgentLoop({
       model,
       messages: this.messages,
@@ -380,6 +434,7 @@ export class Agent {
       skillsContent,
       agentsMdContent,
       memoryContent,
+      planModeInstructions,
       abortSignal: this.abortController!.signal,
       runId,
       sessionId: this.sessionId,

@@ -85,12 +85,9 @@ onUnmounted(() => {
 
       <MessageList />
       <PendingPromptQueue @send-now="interruptAndSend" />
-      <div class="input-area">
-        <ChatInput @send="handleSend" @stop="handleStop" :is-streaming="isStreaming" />
-      </div>
     </template>
 
-    <!-- Empty state: centered welcome + input -->
+    <!-- Empty state: centered welcome content only (input stays at bottom) -->
     <template v-else>
       <div class="welcome-empty">
         <div class="welcome-content">
@@ -103,12 +100,14 @@ onUnmounted(() => {
           <h2>SunCode</h2>
           <p>AI 编程助手</p>
         </div>
-        <div class="welcome-input-area">
-          <PendingPromptQueue @send-now="interruptAndSend" />
-          <ChatInput @send="handleSend" @stop="handleStop" :is-streaming="isStreaming" />
-        </div>
       </div>
     </template>
+
+    <!-- Input always at the bottom -->
+    <div class="input-area">
+      <PendingPromptQueue v-if="!hasMessages" @send-now="interruptAndSend" />
+      <ChatInput @send="handleSend" @stop="handleStop" :is-streaming="isStreaming" />
+    </div>
   </div>
 </template>
 
@@ -118,27 +117,27 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  background: var(--color-bg);
 }
 
 .input-area {
   flex-shrink: 0;
+  padding: 0 18px 14px;
 }
 
-/* Empty state: vertically centered */
+/* Empty state: fills flex space, content centered, input stays at bottom */
 .welcome-empty {
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--spacing-xl);
+  padding: var(--spacing-xl) var(--spacing-xl) 12px;
   overflow-y: auto;
 }
 
 .welcome-content {
   text-align: center;
   max-width: 480px;
-  margin-bottom: 24px;
 }
 
 .welcome-logo {
@@ -158,11 +157,6 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--color-text-muted);
   margin: 0;
-}
-
-.welcome-input-area {
-  width: 100%;
-  max-width: 640px;
 }
 
 /* Model switch notice banner */

@@ -66,6 +66,7 @@ declare global {
       exportSession(id: string): Promise<string>;
       deleteSession(id: string): Promise<{ remaining: SessionMeta[]; wasActive: boolean }>;
       deleteSessions(ids: string[]): Promise<{ remaining: SessionMeta[]; wasActive: boolean }>;
+      clearSessionMessages(): void;
 
       // Settings
       getSettings(): Promise<AppSettings>;

@@ -1,10 +1,12 @@
 /**
  * Context Budget Manager — multi-layer context compaction for the agent loop.
  *
- * Three layers, applied in order:
- *   1. Stale Tool Result Prune  — replace oversized tool results with placeholders
- *   2. Token Budget Turn Cap     — keep only recent turns that fit within a token budget
- *   3. History Compact           — fold old turns into a summary when above high-water mark
+ * Five layers, applied in order (escalating cost):
+ *   0. Snip                        — zero-cost: remove unreferenced old tool results
+ *   1. Stale Tool Result Prune     — replace oversized tool results with placeholders
+ *   2. Context Collapse            — read-time projection of tool-heavy turns
+ *   3. Token Budget Turn Cap       — keep only recent turns that fit within a token budget
+ *   4. History Compact             — fold old turns into a summary when above high-water mark
  *
  * Integrated via the prepareNextTurn hook in agent-loop.ts.
  */
@@ -19,6 +21,7 @@ import type {
 import { CHARS_PER_TOKEN } from '@shared/constants';
 import { countStringTokens } from '../utils/token-counter';
 import { compactMessages } from './compaction';
+import { snipUnreferencedResults, collapseContext } from './snip-compact';
 
 // ============================================================================
 // Types
@@ -48,10 +51,26 @@ export function applyContextBudget(
   const beforeCount = messages.length;
 
   let working = messages;
+  let snippedResults = 0;
+  let snippedTokensSaved = 0;
   let prunedToolResults = 0;
   let prunedTokensSaved = 0;
+  let collapsedGroups = 0;
+  let collapsedTokensSaved = 0;
   let droppedTurns = 0;
   let compactedTurns = 0;
+
+  // ---- Layer 0: Snip (zero-cost — unreferenced old tool results) ----
+  if (policy.snip?.enabled) {
+    const snipResult = snipUnreferencedResults(working, {
+      minResultChars: policy.snip.minResultChars,
+      maxAgeTurns: policy.snip.maxAgeTurns,
+      charsPerToken,
+    });
+    working = snipResult.messages;
+    snippedResults = snipResult.snippedCount;
+    snippedTokensSaved = snipResult.snippedTokensSaved;
+  }
 
   // ---- Layer 1: Stale tool result prune ----
   if (policy.staleToolResultPrune?.enabled) {
@@ -61,7 +80,20 @@ export function applyContextBudget(
     prunedTokensSaved = pruneResult.tokensSaved;
   }
 
-  // ---- Layer 2: Token budget turn cap ----
+  // ---- Layer 2: Context collapse (read-time projection) ----
+  if (policy.contextCollapse?.enabled) {
+    const collapseResult = collapseContext(working, {
+      collapseThreshold: policy.contextCollapse.collapseThreshold,
+      maxGroupTokens: policy.contextCollapse.maxGroupTokens,
+      charsPerToken,
+      keepRecentTurns: policy.minRecentTurns ?? 3,
+    });
+    working = collapseResult.collapsedMessages;
+    collapsedGroups = collapseResult.groupsCollapsed;
+    collapsedTokensSaved = collapseResult.tokensSaved;
+  }
+
+  // ---- Layer 3: Token budget turn cap ----
   const turnGroups = groupMessagesByTurn(working, charsPerToken);
   const maxTokens = policy.maxHistoryTokens;
   const maxTurns = policy.maxHistoryTurns;
@@ -82,7 +114,7 @@ export function applyContextBudget(
     }
   }
 
-  // ---- Layer 3: History compact (high-water trigger) ----
+  // ---- Layer 4: History compact (high-water trigger, last resort) ----
   if (policy.historyCompact?.enabled) {
     const afterLayer2Tokens = estimateMessagesTokens(working, charsPerToken);
     const effectiveMax = maxTokens ?? 128_000;
@@ -106,12 +138,18 @@ export function applyContextBudget(
   const afterCount = working.length;
 
   const diagnostic: ContextBudgetDiagnostic = {
-    changed: beforeCount !== afterCount || prunedToolResults > 0,
+    changed:
+      beforeCount !== afterCount ||
+      prunedToolResults > 0 ||
+      snippedResults > 0 ||
+      collapsedGroups > 0,
     beforeTokens,
     afterTokens,
     beforeMessages: beforeCount,
     afterMessages: afterCount,
+    ...(snippedResults > 0 ? { snippedResults, snippedTokensSaved } : {}),
     ...(prunedToolResults > 0 ? { prunedToolResults, prunedTokensSaved } : {}),
+    ...(collapsedGroups > 0 ? { collapsedGroups, collapsedTokensSaved } : {}),
     ...(droppedTurns > 0 ? { droppedTurns } : {}),
     ...(compactedTurns > 0 ? { compactedTurns } : {}),
   };
@@ -316,7 +354,7 @@ function buildTurnGroup(turnId: string, messages: Message[], charsPerToken: numb
   };
 }
 
-function estimateMessagesTokens(messages: Message[], charsPerToken: number): number {
+export function estimateMessagesTokens(messages: Message[], charsPerToken: number): number {
   return Math.ceil(
     messages.reduce((total, msg) => {
       if (typeof msg.content === 'string') {
@@ -338,7 +376,7 @@ function estimateMessagesTokens(messages: Message[], charsPerToken: number): num
   );
 }
 
-function buildMessageTurnMap(messages: Message[]): Map<Message, string> {
+export function buildMessageTurnMap(messages: Message[]): Map<Message, string> {
   const map = new Map<Message, string>();
   const groups = groupMessagesByTurn(messages);
   for (const group of groups) {
@@ -349,7 +387,7 @@ function buildMessageTurnMap(messages: Message[]): Map<Message, string> {
   return map;
 }
 
-function recentTurnIdsFromGroups(messageTurnMap: Map<Message, string>, count: number): Set<string> {
+export function recentTurnIdsFromGroups(messageTurnMap: Map<Message, string>, count: number): Set<string> {
   if (count <= 0) return new Set();
   // Collect unique non-system turn IDs in document order
   const order: string[] = [];

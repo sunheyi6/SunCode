@@ -18,6 +18,7 @@ import { buildSystemPrompt } from './system-prompt';
 import { computeNeedsFollowUp } from './turn-decision';
 import { handleStream } from './stream-handler';
 import { executeTools } from './tool-executor';
+import { StreamingToolExecutor } from './streaming-executor';
 
 /** Context passed to prepareNextTurn so implementors can trim or adjust. */
 export interface PrepareNextTurnContext {
@@ -40,6 +41,8 @@ export interface AgentLoopInput {
   skillsContent: string;
   /** Content from .agents.md / AGENTS.md (Codex-style workspace instructions). */
   agentsMdContent?: string;
+  /** Plan mode instructions to inject into the system prompt (only when plan mode is active). */
+  planModeInstructions?: string;
   /** Auto-generated memories from prior sessions. */
   memoryContent?: string;
   abortSignal: AbortSignal;
@@ -108,6 +111,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     skillsContent,
     agentsMdContent,
     memoryContent,
+    planModeInstructions,
     abortSignal,
     runId,
     sessionId,
@@ -169,6 +173,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     permissionMode: settings.permissionMode,
     agentsMdContent,
     memoryContent,
+    planModeInstructions,
   });
 
   // Prepend system message
@@ -256,6 +261,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         timestamp: '',
       });
 
+      // ===== Streaming Tool Pre-Executor =====
+      // Create executor that can start read-only tools during LLM streaming
+      const streamingExecutor = new StreamingToolExecutor(
+        tools,
+        workingDir,
+        settings.permissionMode === 'confirm_changes',
+        {
+          onToolStart,
+          onToolEnd,
+          onToolProgress: (toolCallId, output) => onToolProgress(toolCallId, output),
+        },
+      );
+
       const stream = streamSimpleFn(model, piContext, {
         reasoning: settings.thinkingLevel,
         signal: abortSignal,
@@ -275,6 +293,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         requestAttempt,
         requestStartTime,
         requestMsgSummaries,
+        // Pre-execute read-only tools as soon as their blocks are complete
+        onToolCallComplete: (tc) => streamingExecutor.onToolCallComplete(tc),
       });
 
       const { assistantText, thinkingText, toolCalls } = streamResult;
@@ -439,20 +459,40 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         throw err2;
       }
 
-      const toolResult = await executeTools({
-        toolCalls,
-        tools,
-        settings: settings,
-        workingDir,
-        runId,
-        onToolStart,
-        onToolEnd,
-        onToolProgress,
-        onRunEvent: (event) => onRunEvent(event),
-        diag,
-        requestConfirmation,
-      });
-      const toolResults = toolResult.results;
+      // ===== Execute Tools =====
+      // Collect pre-executed results (read-only tools that ran during streaming)
+      // and execute remaining deferred (write) tools.
+      const preExecResults = await streamingExecutor.collectAllResults();
+      const preExecIds = new Set(preExecResults.map((r) => r.toolCallId));
+
+      // Determine which tool calls still need execution
+      const remainingCalls = toolCalls.filter((tc) => !preExecIds.has(tc.id));
+
+      let toolResults: ToolResult[];
+      if (remainingCalls.length > 0) {
+        const deferredResult = await executeTools({
+          toolCalls: remainingCalls,
+          tools,
+          settings: settings,
+          workingDir,
+          runId,
+          onToolStart,
+          onToolEnd,
+          onToolProgress,
+          onRunEvent: (event) => onRunEvent(event),
+          diag,
+          requestConfirmation,
+        });
+        toolResults = [...preExecResults, ...deferredResult.results];
+      } else {
+        toolResults = preExecResults;
+      }
+
+      // Ensure results are in the same order as toolCalls
+      const resultMap = new Map(toolResults.map((r) => [r.toolCallId, r]));
+      toolResults = toolCalls
+        .map((tc) => resultMap.get(tc.id))
+        .filter((r): r is ToolResult => r !== undefined);
 
       // Add assistant + tool results to context
       const assistantBlocks: ContentBlock[] = [];

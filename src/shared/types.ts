@@ -250,6 +250,51 @@ export type TurnDecision =
       taxonomy: TurnTaxonomy;
     };
 
+// ===== Error Recovery Types =====
+
+/**
+ * Continue sites for error recovery in the agent loop.
+ * Each site represents a distinct recovery strategy for a specific failure mode.
+ */
+export type ContinueSite =
+  | 'next_turn' // Normal: tool execution completed, continue loop
+  | 'max_output_recovery' // Model output truncated → retry with larger max_output_tokens
+  | 'max_output_continuation' // Inject continuation prompt after max_output_recovery fails
+  | 'context_overflow_recovery' // Context overflow → trigger emergency compression then retry
+  | 'stop_hook_blocking'; // Stop hook returned shouldBlock → inject feedback
+
+/** Recovery state tracking across retry attempts. */
+export interface RecoveryContext {
+  site: ContinueSite;
+  attempt: number;
+  maxAttempts: number;
+  /** Original max_output_tokens before escalation. */
+  originalMaxOutputTokens?: number;
+}
+
+// ===== Plan Mode Types =====
+
+/** Phase of the plan mode workflow. */
+export type PlanPhase = 'exploring' | 'implementing';
+
+/** Runtime state for plan mode. */
+export interface PlanState {
+  phase: PlanPhase;
+  /** Permission mode saved before entering plan mode, restored on exit. */
+  savedPermissionMode: AppSettings['permissionMode'];
+  /** Path to the plan file being written. */
+  planFilePath: string;
+  /** Whether the plan was approved by the user. */
+  approved?: boolean;
+}
+
+/** Events emitted during plan mode transitions. */
+export type PlanModeEvent =
+  | { type: 'plan_entered'; planFilePath: string }
+  | { type: 'plan_approved'; planFilePath: string }
+  | { type: 'plan_rejected'; planFilePath: string }
+  | { type: 'plan_exited'; restoredMode: AppSettings['permissionMode'] };
+
 // ===== Goal Types =====
 
 /** User-defined goal for autonomous multi-turn execution. */
@@ -353,6 +398,125 @@ export interface StopHookRegistry {
   runAll(ctx: StopHookContext): Promise<StopHookResult>;
 }
 
+// ===== Extended Hook System Types =====
+
+/** Events the hook system can intercept. */
+export type HookEventType =
+  | 'pre_tool_use' // Before a tool is executed
+  | 'post_tool_use' // After a tool completes successfully
+  | 'post_tool_use_failure' // After a tool fails
+  | 'permission_request' // When permission confirmation is needed
+  | 'stop' // Before turn finalization (backward compatible with StopHook)
+  | 'session_start' // When a new session begins
+  | 'session_end' // When a session ends
+  | 'subagent_start' // When a sub-agent is dispatched
+  | 'subagent_stop'; // When a sub-agent completes
+
+/** Unified context passed to all hook types. */
+export interface HookContext {
+  eventType: HookEventType;
+  /** Tool call data (for pre_tool_use, post_tool_use, post_tool_use_failure, permission_request). */
+  toolCall?: ToolCallContent;
+  /** Tool result (for post_tool_use, post_tool_use_failure). */
+  toolResult?: ToolResult;
+  /** Stop hook context fields (for 'stop' events). */
+  assistantText?: string;
+  thinkingText?: string;
+  toolCalls?: ToolCallContent[];
+  toolResults?: ToolResult[];
+  turnCount?: number;
+  maxTurns?: number;
+  tokenUsage?: TokenUsage;
+  /** Sub-agent information (for subagent_start, subagent_stop). */
+  subagentName?: string;
+  sessionId?: string;
+}
+
+/** Result from a hook execution. */
+export interface HookResult {
+  /** Whether to block the action (with optional continuation prompt). */
+  shouldBlock: boolean;
+  /** Whether to force immediate stop. */
+  shouldStop: boolean;
+  /** Prompt to inject when shouldBlock is true. */
+  continuationPrompt?: string;
+  /** Human-readable reason. */
+  reason?: string;
+  /** Whether to allow the action (for permission_request hooks). */
+  allow?: boolean;
+}
+
+/** A hook that runs on specific events. */
+export interface HookInterface {
+  name: string;
+  /** Execution priority (lower number = earlier execution). */
+  priority: number;
+  /** Which event types this hook listens to. */
+  eventTypes: HookEventType[];
+  /** Check/execute the hook. First hook returning a non-neutral result wins. */
+  check(ctx: HookContext): Promise<HookResult>;
+}
+
+/** Registry for the extended hook system. */
+export interface HookRegistry {
+  register(hook: HookInterface): void;
+  unregister(name: string): void;
+  /** Run all matching hooks for an event. Returns the first non-neutral result. */
+  runEvent(eventType: HookEventType, ctx: HookContext): Promise<HookResult>;
+}
+
+// ===== Permission Rule Types =====
+
+/** How a rule pattern is matched against a tool name. */
+export type RuleMatchMode = 'exact' | 'prefix' | 'wildcard';
+
+/** Permission rule source priority (higher = more authoritative). */
+export type RuleSource =
+  | 'policySettings' // Enterprise MDM (highest)
+  | 'userSettings' // User-level ~/.suncode/permissions.json
+  | 'projectSettings' // Project-level .suncode/permissions.json
+  | 'localSettings' // Workspace local
+  | 'flagSettings' // CLI flags
+  | 'cliArg' // Per-invocation CLI args
+  | 'command' // In-command override
+  | 'session'; // Session-level (lowest)
+
+/** A single permission rule. */
+export interface PermissionRule {
+  type: 'allow' | 'deny';
+  /** Tool name pattern to match. */
+  toolPattern: string;
+  /** How to interpret the pattern. */
+  matchMode: RuleMatchMode;
+  /** Where this rule came from (determines priority). */
+  source: RuleSource;
+  /** Optional argument filter (key=value). */
+  argFilter?: Record<string, string>;
+}
+
+/** Set of permission rules with resolution logic. */
+export interface PermissionRuleSet {
+  rules: PermissionRule[];
+  /**
+   * Resolve whether a tool call is allowed.
+   * Returns 'allow' | 'deny' | 'uncertain'.
+   * Deny rules always take precedence regardless of source.
+   */
+  resolve(toolName: string, params: Record<string, unknown>): 'allow' | 'deny' | 'uncertain';
+}
+
+// ===== Streaming Tool Pre-execution Types =====
+
+/** A tool call that was pre-executed during streaming. */
+export interface PreExecutedToolCall {
+  toolCallId: string;
+  toolName: string;
+  /** The execution promise (settled by the time streaming completes). */
+  resultPromise: Promise<ToolResult>;
+  /** Whether this tool is read-only (can pre-execute without confirmation). */
+  isReadOnly: boolean;
+}
+
 // ===== Worker Messages =====
 
 /** Messages sent from main process to agent worker */
@@ -364,7 +528,9 @@ export type WorkerInMessage =
   | { type: 'setWorkingDir'; sessionId: string; path: string }
   | { type: 'setMessages'; sessionId: string; messages: Message[] }
   | { type: 'confirmResponse'; sessionId: string; toolCallId: string; confirmed: boolean }
-  | { type: 'killBgProcess'; sessionId: string; pid: number };
+  | { type: 'killBgProcess'; sessionId: string; pid: number }
+  | { type: 'planResponse'; sessionId: string; runId: string; approved: boolean }
+  | { type: 'hookConfig'; sessionId: string; hooks: HookInterface[] };
 
 /** Messages sent from agent worker to main process */
 export type WorkerOutMessage =
@@ -390,7 +556,10 @@ export type WorkerOutMessage =
       delta: SubagentProgressDelta;
     }
   | { type: 'goalEvent'; sessionId: string; event: GoalEvent }
-  | { type: 'confirmRequest'; sessionId: string; toolCall: ToolCallContent };
+  | { type: 'confirmRequest'; sessionId: string; toolCall: ToolCallContent }
+  | { type: 'planRequest'; sessionId: string; runId: string; planContent: string; planFilePath: string }
+  | { type: 'planStateChanged'; sessionId: string; phase: PlanPhase; planFilePath: string }
+  | { type: 'permissionCheck'; sessionId: string; toolName: string; params: Record<string, unknown> };
 
 /** Streaming event types from the LLM */
 /**
@@ -771,6 +940,24 @@ export interface HistoryCompactPolicy {
   keepRecentTurns?: number;
 }
 
+/** Policy for snipping unreferenced tool results (zero-cost compression). */
+export interface SnipPolicy {
+  enabled: boolean;
+  /** Tool result text longer than this (chars) is eligible for snipping. Default 500. */
+  minResultChars?: number;
+  /** Tool results older than this many turns are eligible for snipping. Default 3. */
+  maxAgeTurns?: number;
+}
+
+/** Policy for context collapse (read-time projection, reversible). */
+export interface ContextCollapsePolicy {
+  enabled: boolean;
+  /** Trigger collapse when estimated tokens exceed this ratio of context window. Default 0.7. */
+  collapseThreshold?: number;
+  /** Maximum tokens to collapse into a single summary group. Default 4096. */
+  maxGroupTokens?: number;
+}
+
 /** Top-level context budget policy. */
 export interface ContextBudgetPolicy {
   /** Max estimated tokens for prior history. Falls back to model contextWindow * 0.9. */
@@ -785,6 +972,10 @@ export interface ContextBudgetPolicy {
   staleToolResultPrune?: StaleToolResultPrunePolicy;
   /** History compaction configuration. */
   historyCompact?: HistoryCompactPolicy;
+  /** Unreferenced tool result snipping (zero-cost). */
+  snip?: SnipPolicy;
+  /** Context collapse (read-time projection). */
+  contextCollapse?: ContextCollapsePolicy;
 }
 
 /** Diagnostic info emitted after context budget is applied. */
@@ -796,6 +987,10 @@ export interface ContextBudgetDiagnostic {
   afterMessages: number;
   prunedToolResults?: number;
   prunedTokensSaved?: number;
+  snippedResults?: number;
+  snippedTokensSaved?: number;
+  collapsedGroups?: number;
+  collapsedTokensSaved?: number;
   droppedTurns?: number;
   compactedTurns?: number;
 }

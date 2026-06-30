@@ -68,6 +68,9 @@ onMounted(() => {
     <div class="header-main">
       <span v-if="activeSession" class="header-title">{{ activeSession.name }}</span>
       <span v-else class="header-title">SunCode</span>
+      <span v-if="folderName" class="header-folder" :title="activeSession?.workingDirectory">
+        {{ folderName }}
+      </span>
     </div>
 
     <div class="header-actions">
@@ -102,10 +105,10 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 38px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--color-bg-secondary);
+  height: 60px;
+  padding: 10px 154px 8px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  background: transparent;
   flex-shrink: 0;
   /* The entire header is a drag region for the frameless window.
      Only interactive elements (buttons, links) are excluded. */
@@ -128,6 +131,14 @@ onMounted(() => {
   flex: 1;
   display: flex;
   align-items: center;
+  gap: 10px;
+  height: 42px;
+  max-width: 760px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .header-title {
@@ -140,12 +151,27 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.header-folder {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 190px;
+  overflow: hidden;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Right actions */
 .header-actions {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  height: 42px;
 }
 
 .header-bg {
@@ -154,7 +180,7 @@ onMounted(() => {
   gap: 3px;
   padding: 2px 8px;
   border-radius: var(--border-radius-sm);
-  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
   color: var(--color-accent);
   font-weight: 550;
   font-size: 11px;
@@ -166,7 +192,7 @@ onMounted(() => {
   gap: 3px;
   padding: 2px 8px;
   border-radius: var(--border-radius-sm);
-  background: var(--color-surface);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   color: var(--color-text-muted);
@@ -209,7 +235,7 @@ onMounted(() => {
   height: 28px;
   border: none;
   border-radius: var(--border-radius-sm, 4px);
-  background: transparent;
+  background: color-mix(in srgb, var(--color-surface) 86%, transparent);
   color: var(--color-text-muted);
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease;

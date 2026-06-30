@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useSessionsStore } from '../../stores/sessions';
+import { useChatStore } from '../../stores/chat';
 import { getComposerTextareaHeight } from './chat-input';
 import { bridge } from '../../api/bridge';
 import { useDropdownGroup } from '../../composables/useDropdown';
@@ -8,7 +9,10 @@ import WorkspaceSelector from './WorkspaceSelector.vue';
 import ModelSelector from './ModelSelector.vue';
 import PermissionSelector from './PermissionSelector.vue';
 import ThinkingSelector from './ThinkingSelector.vue';
+import CommandDropdown from './CommandDropdown.vue';
 import type { GitInfo } from '@shared/types';
+import type { SlashCommand } from '@shared/commands';
+import { parseCommandFromInput } from '@shared/commands';
 
 const props = defineProps<{
   isStreaming: boolean;
@@ -20,10 +24,99 @@ const emit = defineEmits<{
 }>();
 
 const sessionsStore = useSessionsStore();
+const chatStore = useChatStore();
 
 const inputText = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const inputRef = ref<HTMLElement | null>(null);
+
+// --- Slash Command Dropdown ---
+const showCommandDropdown = ref(false);
+const composerRect = ref<DOMRect | null>(null);
+
+/** The currently recognized command name (for chip display). */
+const activeCommandName = computed(() => {
+  const text = inputText.value;
+  const lines = text.split('\n');
+  const lastLine = lines[lines.length - 1] ?? '';
+  const m = lastLine.match(/^\s*\/(\S+)/);
+  if (!m) return null;
+  const cmd = m[1];
+  // Don't show chip for paths
+  if (cmd.includes('/') || cmd.includes('\\')) return null;
+  return cmd;
+});
+
+/** Detect whether the cursor is in a position where commands should be suggested. */
+const commandQueryActive = computed(() => {
+  const text = inputText.value;
+  if (!text) return false;
+  const lines = text.split('\n');
+  const lastLine = lines[lines.length - 1] ?? '';
+  // Active if line starts with "/" followed by a word (not a path)
+  const m = lastLine.match(/^\s*\/(\S*)/);
+  if (!m) return false;
+  const after = m[1];
+  // Don't trigger on paths (contain / or \)
+  if (after.includes('/') || after.includes('\\')) return false;
+  return true;
+});
+
+function updateComposerRect(): void {
+  const ta = textareaRef.value;
+  if (ta) {
+    composerRect.value = ta.getBoundingClientRect();
+  }
+}
+
+function onCommandSelect(cmd: SlashCommand): void {
+  const text = inputText.value;
+  const lines = text.split('\n');
+  const lastLine = lines[lines.length - 1] ?? '';
+
+  // Replace "/..." with "/commandName "
+  const replaced = lastLine.replace(/^(\s*)\/\S*/, `$1/${cmd.name}`);
+  lines[lines.length - 1] = replaced + (cmd.argsLabel ? ` ${cmd.argsLabel} ` : ' ');
+  inputText.value = lines.join('\n');
+
+  showCommandDropdown.value = false;
+
+  if (cmd.handler === 'local') {
+    handleLocalCommand(cmd);
+    return;
+  }
+
+  void nextTick(() => {
+    textareaRef.value?.focus();
+    const len = inputText.value.length;
+    textareaRef.value?.setSelectionRange(len, len);
+    resizeTextarea();
+  });
+}
+
+function handleLocalCommand(cmd: SlashCommand): void {
+  switch (cmd.name) {
+    case 'clear':
+      // Clear UI messages
+      chatStore.clearMessages();
+      // Clear worker + persisted messages for this session
+      bridge.clearSessionMessages();
+      inputText.value = '';
+      void nextTick(() => resizeTextarea());
+      break;
+    case 'help':
+      inputText.value = '/help';
+      void nextTick(() => {
+        resizeTextarea();
+        textareaRef.value?.focus();
+      });
+      break;
+  }
+}
+
+function closeCommandDropdown(): void {
+  showCommandDropdown.value = false;
+}
 
 // Unified dropdown group: each dropdown keeps its own state but only one can be open.
 const dropdowns = useDropdownGroup();
@@ -73,6 +166,23 @@ async function refreshGitInfo() {
 
 watch(() => activeSession.value?.workingDirectory, refreshGitInfo, { immediate: true });
 
+// Show/hide command dropdown based on input
+watch(commandQueryActive, (active) => {
+  if (active) {
+    updateComposerRect();
+    showCommandDropdown.value = true;
+  } else {
+    showCommandDropdown.value = false;
+  }
+});
+
+// Track input changes to update dropdown position
+watch(inputText, () => {
+  if (showCommandDropdown.value) {
+    updateComposerRect();
+  }
+});
+
 const hasInput = computed(() => inputText.value.trim().length > 0);
 const isGoalInput = computed(() => inputText.value.trim().startsWith('/goal'));
 
@@ -93,6 +203,22 @@ function resizeTextarea(): void {
 async function handleSend(): Promise<void> {
   const text = inputText.value.trim();
   if (!text) return;
+
+  // Intercept local commands that shouldn't be sent to the worker
+  const parsed = parseCommandFromInput(text);
+  if (parsed?.command.handler === 'local') {
+    handleLocalCommand(parsed.command);
+    pushHistory(text);
+    historyIndex = -1;
+    draftBeforeHistory = '';
+    inputText.value = '';
+    await nextTick();
+    if (textareaRef.value) {
+      textareaRef.value.value = '';
+      textareaRef.value.style.height = '64px';
+    }
+    return;
+  }
 
   pushHistory(text);
   historyIndex = -1;
@@ -157,6 +283,22 @@ function navigateHistory(direction: 'up' | 'down'): void {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
+  // When command dropdown is open, let it handle navigation keys
+  if (showCommandDropdown.value) {
+    // If user typed a complete command (e.g. "/help"), let Enter pass through to send
+    const isExactCommand = activeCommandName.value != null;
+    if (event.key === 'Enter' && isExactCommand) {
+      // Close dropdown and let Enter send the message naturally
+      showCommandDropdown.value = false;
+      // Continue to normal Enter handling below
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Enter' || event.key === 'Tab') {
+      return; // CommandDropdown handles navigation/selection
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeCommandDropdown();
+      return;
+    }
+  }
   // ArrowUp from first line → history (backward)
   if (event.key === 'ArrowUp') {
     const ta = textareaRef.value;
@@ -223,6 +365,21 @@ watch(
     <WorkspaceSelector :git-info="gitInfo" :dropdown="workspaceDropdown" />
 
     <div class="composer" :class="{ streaming: props.isStreaming }">
+      <!-- Slash Command Dropdown (teleported to body) -->
+      <CommandDropdown
+        :input-text="inputText"
+        :visible="showCommandDropdown"
+        :anchor-rect="composerRect"
+        @select="onCommandSelect"
+        @close="closeCommandDropdown"
+      />
+
+      <!-- Command indicator chip -->
+      <div v-if="activeCommandName" class="cmd-chip">
+        <span class="cmd-chip-icon">/</span>
+        <span class="cmd-chip-name">{{ activeCommandName }}</span>
+      </div>
+
       <!-- Goal mode indicator -->
       <div v-if="isGoalInput" class="goal-indicator">
         <span class="goal-icon">🎯</span>
@@ -382,6 +539,31 @@ watch(
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.04),
     0 4px 16px color-mix(in srgb, var(--color-orange) 12%, transparent);
+}
+
+/* Command indicator chip */
+.cmd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 10px;
+  margin: -6px 0 8px 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.cmd-chip-icon {
+  color: var(--color-accent);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.cmd-chip-name {
+  color: var(--color-accent);
+  font-weight: 600;
 }
 
 .goal-indicator {

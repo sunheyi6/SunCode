@@ -432,8 +432,8 @@ watch(collapsed, (isCollapsed) => {
 <style scoped>
 .git-float {
   position: absolute;
-  top: 46px;
-  right: 10px;
+  top: 72px;
+  right: 14px;
   z-index: 50;
   display: flex;
   flex-direction: column;
@@ -450,7 +450,7 @@ watch(collapsed, (isCollapsed) => {
   padding: 3px 10px;
   border: 1px solid var(--border-color-strong);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-bg-secondary) 92%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
   color: var(--color-text-secondary);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
   backdrop-filter: blur(10px);
@@ -462,7 +462,7 @@ watch(collapsed, (isCollapsed) => {
   overflow: hidden;
   border: 1px solid var(--border-color-strong);
   border-radius: 14px;
-  background: var(--color-bg-secondary);
+  background: var(--color-surface);
   color: var(--color-text);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
 }
@@ -525,7 +525,7 @@ watch(collapsed, (isCollapsed) => {
   opacity: 0.7;
 }
 .process-ports.ready {
-  color: var(--color-success);
+  color: var(--color-green);
   opacity: 1;
 }
 .status-dot {

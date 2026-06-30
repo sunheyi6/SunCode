@@ -544,6 +544,24 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
+  ipcMain.on('session:clearMessages', () => {
+    const sid = currentSessionId;
+    if (!sid) return;
+    // Clear in-memory messages
+    const msgs = sessionMessages.get(sid) || [];
+    console.log(`[Main] session:clearMessages id=${sid.slice(-8)} before=${msgs.length}`);
+    sessionMessages.set(sid, []);
+    // Persist empty messages
+    const meta = sessions.get(sid);
+    if (meta) {
+      meta.updated = new Date().toISOString();
+      meta.messageCount = 0;
+      void saveSession(meta, []);
+    }
+    // Clear worker messages
+    sendToWorker({ type: 'setMessages', sessionId: sid, messages: [] });
+  });
+
   ipcMain.handle('session:export', async (_event, id: string) => {
     try {
       const msgs = sessionMessages.get(id) || [];

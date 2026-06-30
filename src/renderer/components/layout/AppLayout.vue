@@ -156,7 +156,7 @@ const traceSystemPrompt = computed(() => {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
 }
 
 .app-main {
@@ -173,12 +173,13 @@ const traceSystemPrompt = computed(() => {
   user-select: none;
   display: flex;
   flex-direction: column;
+  border-right: 1px solid var(--border-color);
 }
 
 /* Settings button at sidebar bottom */
 .sidebar-footer {
-  padding: 8px;
-  border-top: 1px solid var(--border-color);
+  padding: 8px 10px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
   flex-shrink: 0;
 }
 
@@ -187,7 +188,7 @@ const traceSystemPrompt = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   background: transparent;
   border: none;
   border-radius: var(--border-radius-sm);
@@ -212,7 +213,7 @@ const traceSystemPrompt = computed(() => {
 
 /* Resize handle — subtle */
 .resize-handle {
-  width: 3px;
+  width: 1px;
   cursor: col-resize;
   background: transparent;
   transition: background 0.2s;

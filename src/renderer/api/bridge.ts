@@ -121,6 +121,11 @@ export const bridge = {
     return api().deleteSessions(ids);
   },
 
+  /** Clear all messages in the current session without changing sessions. */
+  clearSessionMessages(): void {
+    api().clearSessionMessages();
+  },
+
   // ===== Settings =====
   async getSettings(): Promise<AppSettings> {
     return api().getSettings();
