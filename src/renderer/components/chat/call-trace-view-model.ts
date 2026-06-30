@@ -1,5 +1,6 @@
-import type { ToolCallContent, TurnDetail } from '@shared/types';
+import type { SubagentResult, ToolCallContent, TurnDetail } from '@shared/types';
 import type { ChatMessage } from '../../stores/chat';
+import { textMatchesUiLanguage, type UiLanguage } from '../../utils/ui-language';
 
 export interface CallTraceOutline {
   systemPrompt?: {
@@ -67,6 +68,30 @@ export type CallTraceSection =
       text: string;
       charCount: number;
       defaultOpen: boolean;
+    };
+
+export interface InlineCallTrace {
+  entries: InlineCallTraceEntry[];
+  toolCount: number;
+  completedToolCount: number;
+  failedToolCount: number;
+}
+
+export type InlineCallTraceEntry =
+  | {
+      kind: 'thinking';
+      id: string;
+      text: string;
+      isCurrent: boolean;
+    }
+  | {
+      kind: 'tools';
+      id: string;
+      label: string;
+      toolCalls: ToolCallContent[];
+      isCurrent: boolean;
+      hasRunning: boolean;
+      hasFailed: boolean;
     };
 
 export function buildCallTraceOutline(input: {
@@ -217,4 +242,256 @@ function matchExecutedToolCalls(
     (modelToolCall) =>
       executedToolCalls.find((toolCall) => toolCall.id === modelToolCall.id) ?? modelToolCall,
   );
+}
+
+export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
+  const uiLanguage = message.uiLanguage ?? 'zh';
+  const entries: InlineCallTraceEntry[] = [];
+  const representedToolIds = new Set<string>();
+  const hasBlocks = (message.blocks?.length ?? 0) > 0;
+
+  for (const block of message.blocks ?? []) {
+    if (block.type === 'thinking' && block.thinking) {
+      entries.push({
+        kind: 'thinking',
+        id: block.id,
+        text: displayThinkingText(block.thinking, uiLanguage),
+        isCurrent: false,
+      });
+      continue;
+    }
+
+    if (block.type === 'tool_call' && block.toolCall) {
+      const latestToolCall =
+        message.toolCalls?.find((toolCall) => toolCall.id === block.toolCall?.id) ?? block.toolCall;
+      representedToolIds.add(latestToolCall.id);
+      pushToolGroup(entries, [latestToolCall], block.id, uiLanguage);
+    }
+  }
+
+  if (!hasBlocks && message.thinking) {
+    entries.push({
+      kind: 'thinking',
+      id: `${message.id}:thinking`,
+      text: displayThinkingText(message.thinking, uiLanguage),
+      isCurrent: false,
+    });
+  }
+
+  const unrepresentedToolCalls = (message.toolCalls ?? []).filter(
+    (toolCall) => !representedToolIds.has(toolCall.id),
+  );
+  pushToolGroups(entries, unrepresentedToolCalls, `${message.id}:tools`, uiLanguage);
+
+  const lastIndex = entries.length - 1;
+  const markedEntries = entries.map((entry, index) => ({
+    ...entry,
+    isCurrent: message.isStreaming && index === lastIndex,
+  }));
+
+  const toolCalls = message.toolCalls ?? [];
+  return {
+    entries: markedEntries,
+    toolCount: toolCalls.length,
+    completedToolCount: toolCalls.filter(
+      (toolCall) => toolCall.status === 'done' || toolCall.result,
+    ).length,
+    failedToolCount: toolCalls.filter(
+      (toolCall) => toolCall.status === 'error' || toolCall.result?.success === false,
+    ).length,
+  };
+}
+
+export function buildSubagentInlineTrace(
+  result: SubagentResult,
+  isStreaming: boolean,
+  uiLanguage: UiLanguage = 'zh',
+): InlineCallTrace {
+  const entries: InlineCallTraceEntry[] = [];
+  const representedToolIds = new Set<string>();
+  const hasBlocks = (result.internalBlocks?.length ?? 0) > 0;
+
+  for (const block of result.internalBlocks ?? []) {
+    if (block.type === 'thinking' && block.thinking) {
+      entries.push({
+        kind: 'thinking',
+        id: block.id,
+        text: displayThinkingText(block.thinking, uiLanguage),
+        isCurrent: false,
+      });
+      continue;
+    }
+
+    if (block.type === 'tool_call' && block.toolCall) {
+      const latestToolCall =
+        result.internalCalls?.find((toolCall) => toolCall.id === block.toolCall?.id) ??
+        block.toolCall;
+      representedToolIds.add(latestToolCall.id);
+      pushToolGroup(entries, [latestToolCall], block.id, uiLanguage);
+    }
+  }
+
+  if (!hasBlocks && result.thinking) {
+    entries.push({
+      kind: 'thinking',
+      id: `${result.agent}:thinking`,
+      text: displayThinkingText(result.thinking, uiLanguage),
+      isCurrent: false,
+    });
+  }
+
+  const unrepresentedToolCalls = (result.internalCalls ?? []).filter(
+    (toolCall) => !representedToolIds.has(toolCall.id),
+  );
+  pushToolGroups(entries, unrepresentedToolCalls, `${result.agent}:tools`, uiLanguage);
+
+  const lastIndex = entries.length - 1;
+  const markedEntries = entries.map((entry, index) => ({
+    ...entry,
+    isCurrent: isStreaming && index === lastIndex,
+  }));
+
+  const toolCalls = result.internalCalls ?? [];
+  return {
+    entries: markedEntries,
+    toolCount: toolCalls.length,
+    completedToolCount: toolCalls.filter(
+      (toolCall) => toolCall.status === 'done' || toolCall.result,
+    ).length,
+    failedToolCount: toolCalls.filter(
+      (toolCall) => toolCall.status === 'error' || toolCall.result?.success === false,
+    ).length,
+  };
+}
+
+function pushToolGroup(
+  entries: InlineCallTraceEntry[],
+  toolCalls: ToolCallContent[],
+  fallbackId: string,
+  language: UiLanguage,
+): void {
+  if (toolCalls.length === 0) return;
+  const previous = entries[entries.length - 1];
+  if (previous?.kind === 'tools' && canMergeToolGroups(previous.toolCalls, toolCalls)) {
+    const mergedToolCalls = [...previous.toolCalls, ...toolCalls];
+    entries[entries.length - 1] = buildToolEntry(mergedToolCalls, previous.id, language);
+    return;
+  }
+
+  entries.push(buildToolEntry(toolCalls, fallbackId, language));
+}
+
+function pushToolGroups(
+  entries: InlineCallTraceEntry[],
+  toolCalls: ToolCallContent[],
+  fallbackId: string,
+  language: UiLanguage,
+): void {
+  let groupIndex = 0;
+  let group: ToolCallContent[] = [];
+
+  for (const toolCall of toolCalls) {
+    const previous = group[group.length - 1];
+    if (previous && toolGroupKind(previous) !== toolGroupKind(toolCall)) {
+      pushToolGroup(entries, group, `${fallbackId}:${groupIndex}`, language);
+      groupIndex += 1;
+      group = [];
+    }
+    group.push(toolCall);
+  }
+
+  if (group.length > 0) {
+    pushToolGroup(entries, group, `${fallbackId}:${groupIndex}`, language);
+  }
+}
+
+function canMergeToolGroups(previous: ToolCallContent[], next: ToolCallContent[]): boolean {
+  if (previous.length === 0 || next.length === 0) return false;
+  const nextKind = toolGroupKind(next[0]);
+  return previous.every((toolCall) => toolGroupKind(toolCall) === nextKind);
+}
+
+function buildToolEntry(
+  toolCalls: ToolCallContent[],
+  id: string,
+  language: UiLanguage,
+): InlineCallTraceEntry {
+  const hasRunning = toolCalls.some((toolCall) => toolCall.status === 'running');
+  const hasFailed = toolCalls.some(
+    (toolCall) => toolCall.status === 'error' || toolCall.result?.success === false,
+  );
+
+  return {
+    kind: 'tools',
+    id,
+    label: inlineToolLabel(toolCalls, hasRunning, hasFailed, language),
+    toolCalls,
+    isCurrent: false,
+    hasRunning,
+    hasFailed,
+  };
+}
+
+function inlineToolLabel(
+  toolCalls: ToolCallContent[],
+  hasRunning: boolean,
+  hasFailed: boolean,
+  language: UiLanguage,
+): string {
+  const status = localizedStatus(hasRunning, hasFailed, language);
+  if (toolCalls.length > 1) {
+    return formatCount(status, toolCalls.length, toolGroupKind(toolCalls[0]), language);
+  }
+
+  const toolCall = toolCalls[0];
+  if (!toolCall) return status;
+  return formatCount(status, 1, toolGroupKind(toolCall), language);
+}
+
+function toolGroupKind(toolCall: ToolCallContent | undefined): 'command' | 'agent' | 'tool' {
+  if (toolCall?.name === 'bash') return 'command';
+  if (toolCall?.name === 'subagent') return 'agent';
+  return 'tool';
+}
+
+function formatCount(
+  status: string,
+  count: number,
+  kind: 'command' | 'agent' | 'tool',
+  language: UiLanguage,
+): string {
+  if (language === 'en') {
+    const unit =
+      kind === 'command'
+        ? count === 1
+          ? 'command'
+          : 'commands'
+        : kind === 'agent'
+          ? count === 1
+            ? 'agent'
+            : 'agents'
+          : count === 1
+            ? 'tool'
+            : 'tools';
+    return `${status} ${count} ${unit}`;
+  }
+
+  const unit = kind === 'command' ? '条命令' : kind === 'agent' ? '个代理' : '个工具';
+  return `${status} ${count} ${unit}`;
+}
+
+function displayThinkingText(text: string, language: UiLanguage): string {
+  if (textMatchesUiLanguage(text, language)) return text;
+  return language === 'zh' ? '正在分析下一步。' : 'Analyzing the next step.';
+}
+
+function localizedStatus(hasRunning: boolean, hasFailed: boolean, language: UiLanguage): string {
+  if (language === 'en') {
+    if (hasRunning) return 'Running';
+    if (hasFailed) return 'Failed';
+    return 'Ran';
+  }
+  if (hasRunning) return '正在运行';
+  if (hasFailed) return '运行失败';
+  return '已运行';
 }

@@ -4,6 +4,7 @@ import type {
   StreamEvent,
   SubagentProgressDelta,
   SubagentResult,
+  SubagentTraceBlock,
   TaskPlan,
   ToolCallContent,
   ToolResult,
@@ -13,6 +14,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';
 import { parseTaskPlan, stripPlanFromContent } from '../utils/task-plan-parser';
+import { detectUiLanguage, type UiLanguage } from '../utils/ui-language';
 import { useAgentStore } from './agent';
 import { buildPersistedAssistantMessage } from './chat-message-persistence';
 
@@ -42,6 +44,8 @@ export interface ChatMessage {
   taskPlan?: TaskPlan;
   /** Per-turn LLM request/response details (for call trace panel). */
   turnDetails?: TurnDetail[];
+  /** UI language derived from the user prompt for localized progress display. */
+  uiLanguage?: UiLanguage;
 }
 
 let msgCounter = 0;
@@ -71,6 +75,50 @@ function appendThinkingBlock(target: ChatMessage, thinkingDelta: string): void {
   });
 }
 
+function appendSubagentThinkingBlock(target: SubagentResult, thinkingDelta: string): void {
+  if (!thinkingDelta) return;
+  if (!target.internalBlocks) target.internalBlocks = [];
+
+  const lastBlock = target.internalBlocks[target.internalBlocks.length - 1];
+  if (lastBlock?.type === 'thinking') {
+    lastBlock.thinking = (lastBlock.thinking || '') + thinkingDelta;
+    return;
+  }
+
+  target.internalBlocks.push({
+    id: nextBlockId(),
+    type: 'thinking',
+    thinking: thinkingDelta,
+  });
+}
+
+function mergeSubagentLiveBlocks(
+  nextResults: SubagentResult[] | undefined,
+  currentResults: SubagentResult[] | undefined,
+): void {
+  if (!nextResults || !currentResults) return;
+  for (const nextResult of nextResults) {
+    const currentResult = currentResults.find((result) => result.agent === nextResult.agent);
+    if (currentResult?.internalBlocks && !nextResult.internalBlocks) {
+      nextResult.internalBlocks = currentResult.internalBlocks;
+    }
+  }
+}
+
+function updateSubagentToolBlock(
+  blocks: SubagentTraceBlock[] | undefined,
+  result: ToolResult | undefined,
+): void {
+  if (!blocks || !result) return;
+  const block = blocks.find(
+    (item) => item.type === 'tool_call' && item.toolCall?.id === result.toolCallId,
+  );
+  if (block?.toolCall) {
+    block.toolCall.status = result.success ? 'done' : 'error';
+    block.toolCall.result = result;
+  }
+}
+
 function formatUserFacingError(error: string | undefined): string {
   const raw = error?.trim() || 'Unknown error';
   if (/request timed out/i.test(raw)) {
@@ -88,6 +136,7 @@ export const useChatStore = defineStore('chat', () => {
   let lastParsedPlanLength = 0;
   let lastThinkingLength = 0;
   let lastToolCallCount = 0;
+  let latestUiLanguage: UiLanguage = 'zh';
 
   /** ID of the renderer's currently visible session. */
   let activeSessionId: string | null = null;
@@ -97,12 +146,14 @@ export const useChatStore = defineStore('chat', () => {
   const pendingAssistantMessages = new Map<string, ChatMessage>();
 
   function addUserMessage(text: string): void {
+    latestUiLanguage = detectUiLanguage(text);
     messages.value.push({
       id: nextId(),
       role: 'user',
       content: text,
       timestamp: Date.now(),
       isStreaming: false,
+      uiLanguage: latestUiLanguage,
     });
   }
 
@@ -115,6 +166,7 @@ export const useChatStore = defineStore('chat', () => {
       blocks: [],
       timestamp: Date.now(),
       isStreaming: true,
+      uiLanguage: latestUiLanguage,
     };
     lastParsedPlanLength = 0;
     lastThinkingLength = 0;
@@ -143,6 +195,7 @@ export const useChatStore = defineStore('chat', () => {
       thinking: '',
       timestamp: Date.now(),
       isStreaming: true,
+      uiLanguage: latestUiLanguage,
     };
     pendingAssistantMessages.set(sessionId, msg);
     return msg;
@@ -277,6 +330,7 @@ export const useChatStore = defineStore('chat', () => {
               toolCalls: target.toolCalls,
               systemPrompt: target.systemPrompt,
               turnDetails: target.turnDetails,
+              uiLanguage: target.uiLanguage,
               finalMessage: event.message,
             }),
             sessionId,
@@ -346,6 +400,7 @@ export const useChatStore = defineStore('chat', () => {
               output: '执行中...',
               toolCalls: 0,
               tokenUsage: { input: 0, output: 0, total: 0 },
+              internalBlocks: [],
             })),
           };
         }
@@ -361,6 +416,9 @@ export const useChatStore = defineStore('chat', () => {
     if (!msg?.toolCalls) return;
     const tc = msg.toolCalls.find((t) => t.id === result.toolCallId);
     if (tc) {
+      if (result.name === 'subagent') {
+        mergeSubagentLiveBlocks(result.subagentResults, tc.result?.subagentResults);
+      }
       tc.status = result.success ? 'done' : 'error';
       tc.result = result;
       if (result.name === 'subagent') {
@@ -448,12 +506,19 @@ export const useChatStore = defineStore('chat', () => {
     switch (delta.type) {
       case 'thinking': {
         target.thinking = (target.thinking || '') + (delta.text || '');
+        appendSubagentThinkingBlock(target, delta.text || '');
         break;
       }
       case 'tool_start': {
         if (!delta.toolCall) return;
         if (!target.internalCalls) target.internalCalls = [];
         target.internalCalls.push(delta.toolCall);
+        if (!target.internalBlocks) target.internalBlocks = [];
+        target.internalBlocks.push({
+          id: nextBlockId(),
+          type: 'tool_call',
+          toolCall: delta.toolCall,
+        });
         break;
       }
       case 'tool_end': {
@@ -462,6 +527,7 @@ export const useChatStore = defineStore('chat', () => {
           existing.status = delta.toolResult.success ? 'done' : 'error';
           existing.result = delta.toolResult;
         }
+        updateSubagentToolBlock(target.internalBlocks, delta.toolResult);
         break;
       }
     }
@@ -504,6 +570,7 @@ export const useChatStore = defineStore('chat', () => {
     clearMessages();
 
     activeSessionId = sessionId;
+    let inferredUiLanguage: UiLanguage = 'zh';
     messages.value = sessionMessages
       .filter((message) => message.role === 'user' || message.role === 'assistant')
       .map((message) => {
@@ -522,6 +589,9 @@ export const useChatStore = defineStore('chat', () => {
 
         const taskPlan = parseTaskPlan(content, false) ?? undefined;
         const displayContent = taskPlan ? stripPlanFromContent(content) : content;
+        if (message.role === 'user') {
+          inferredUiLanguage = message.uiLanguage ?? detectUiLanguage(content);
+        }
 
         return {
           id: nextId(),
@@ -533,6 +603,7 @@ export const useChatStore = defineStore('chat', () => {
           isStreaming: false,
           systemPrompt: message.systemPrompt,
           turnDetails: message.turnDetails,
+          uiLanguage: message.uiLanguage ?? inferredUiLanguage,
           taskPlan,
         };
       });

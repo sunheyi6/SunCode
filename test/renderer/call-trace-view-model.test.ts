@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import type { ChatMessage } from '../../src/renderer/stores/chat';
-import { buildCallTraceOutline } from '../../src/renderer/components/chat/call-trace-view-model';
+import {
+  buildCallTraceOutline,
+  buildInlineCallTrace,
+  buildSubagentInlineTrace,
+} from '../../src/renderer/components/chat/call-trace-view-model';
+import type { SubagentResult } from '../../src/shared/types';
 
 describe('buildCallTraceOutline', () => {
   test('groups user requests and assistant model turns into an outline', () => {
@@ -249,5 +254,219 @@ describe('buildCallTraceOutline', () => {
         failedToolCount: 1,
       }),
     });
+  });
+});
+
+describe('buildInlineCallTrace', () => {
+  test('keeps thinking and tool calls in streaming order', () => {
+    const message: ChatMessage = {
+      id: 'a-inline',
+      role: 'assistant',
+      content: '',
+      thinking: 'read first\nthen continue',
+      timestamp: 1,
+      isStreaming: true,
+      uiLanguage: 'en',
+      blocks: [
+        { id: 'b1', type: 'thinking', thinking: 'read first' },
+        {
+          id: 'b2',
+          type: 'tool_call',
+          toolCall: {
+            type: 'tool_call',
+            id: 'tc1',
+            name: 'bash',
+            arguments: '{"command":"Get-Content src/a.ts"}',
+          },
+        },
+        { id: 'b3', type: 'thinking', thinking: '\nthen continue' },
+      ],
+      toolCalls: [
+        {
+          type: 'tool_call',
+          id: 'tc1',
+          name: 'bash',
+          arguments: '{"command":"Get-Content src/a.ts"}',
+          status: 'done',
+          result: { toolCallId: 'tc1', name: 'bash', success: true, output: '' },
+        },
+      ],
+    };
+
+    const trace = buildInlineCallTrace(message);
+
+    expect(trace.entries).toMatchObject([
+      { kind: 'thinking', text: 'read first', isCurrent: false },
+      { kind: 'tools', label: 'Ran 1 command', isCurrent: false },
+      { kind: 'thinking', text: '\nthen continue', isCurrent: true },
+    ]);
+  });
+
+  test('merges adjacent commands into a compact command count', () => {
+    const message: ChatMessage = {
+      id: 'a-commands',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      isStreaming: false,
+      uiLanguage: 'en',
+      blocks: [
+        {
+          id: 'b1',
+          type: 'tool_call',
+          toolCall: { type: 'tool_call', id: 'tc1', name: 'bash', arguments: '{"command":"one"}' },
+        },
+        {
+          id: 'b2',
+          type: 'tool_call',
+          toolCall: { type: 'tool_call', id: 'tc2', name: 'bash', arguments: '{"command":"two"}' },
+        },
+      ],
+      toolCalls: [
+        { type: 'tool_call', id: 'tc1', name: 'bash', arguments: '{"command":"one"}', status: 'done' },
+        { type: 'tool_call', id: 'tc2', name: 'bash', arguments: '{"command":"two"}', status: 'done' },
+      ],
+    };
+
+    const trace = buildInlineCallTrace(message);
+
+    expect(trace.entries).toMatchObject([
+      { kind: 'tools', label: 'Ran 2 commands', isCurrent: false },
+    ]);
+  });
+
+  test('falls back to message-level thinking and tool calls without blocks', () => {
+    const message: ChatMessage = {
+      id: 'a-fallback',
+      role: 'assistant',
+      content: '',
+      thinking: 'fallback thinking',
+      timestamp: 1,
+      isStreaming: false,
+      uiLanguage: 'en',
+      toolCalls: [
+        {
+          type: 'tool_call',
+          id: 'tc1',
+          name: 'read',
+          arguments: '{"file_path":"src/a.ts"}',
+          status: 'running',
+        },
+      ],
+    };
+
+    const trace = buildInlineCallTrace(message);
+
+    expect(trace.entries).toMatchObject([
+      { kind: 'thinking', text: 'fallback thinking' },
+      { kind: 'tools', label: 'Running 1 tool' },
+    ]);
+  });
+
+  test('keeps agents, tools, and commands in separate fallback groups', () => {
+    const message: ChatMessage = {
+      id: 'a-mixed',
+      role: 'assistant',
+      content: '',
+      timestamp: 1,
+      isStreaming: true,
+      uiLanguage: 'en',
+      toolCalls: [
+        {
+          type: 'tool_call',
+          id: 'agent-1',
+          name: 'subagent',
+          arguments: '{"agent":"explore","prompt":"inspect"}',
+          status: 'done',
+        },
+        {
+          type: 'tool_call',
+          id: 'read-1',
+          name: 'read',
+          arguments: '{"file_path":"src/a.ts"}',
+          status: 'done',
+        },
+        {
+          type: 'tool_call',
+          id: 'bash-1',
+          name: 'bash',
+          arguments: '{"command":"bun test"}',
+          status: 'running',
+        },
+      ],
+    };
+
+    const trace = buildInlineCallTrace(message);
+
+    expect(trace.entries).toMatchObject([
+      { kind: 'tools', label: 'Ran 1 agent' },
+      { kind: 'tools', label: 'Ran 1 tool' },
+      { kind: 'tools', label: 'Running 1 command' },
+    ]);
+  });
+
+  test('does not show English thinking text for a Chinese UI language', () => {
+    const message: ChatMessage = {
+      id: 'a-language',
+      role: 'assistant',
+      content: '',
+      thinking: 'Read files and inspect the result.',
+      timestamp: 1,
+      isStreaming: true,
+      uiLanguage: 'zh',
+      blocks: [
+        { id: 'b1', type: 'thinking', thinking: 'Read files and inspect the result.' },
+      ],
+    };
+
+    const trace = buildInlineCallTrace(message);
+
+    expect(trace.entries).toMatchObject([
+      { kind: 'thinking', text: '正在分析下一步。' },
+    ]);
+  });
+});
+
+describe('buildSubagentInlineTrace', () => {
+  test('keeps subagent thinking and internal tools in streaming order', () => {
+    const result: SubagentResult = {
+      agent: 'explore',
+      success: true,
+      output: '执行中...',
+      toolCalls: 1,
+      tokenUsage: { input: 0, output: 0, total: 0 },
+      thinking: 'Read first\nThen inspect result',
+      internalCalls: [
+        {
+          type: 'tool_call',
+          id: 'read-1',
+          name: 'read',
+          arguments: '{"file_path":"src/a.ts"}',
+          status: 'running',
+        },
+      ],
+      internalBlocks: [
+        { id: 'b1', type: 'thinking', thinking: 'Read first' },
+        {
+          id: 'b2',
+          type: 'tool_call',
+          toolCall: {
+            type: 'tool_call',
+            id: 'read-1',
+            name: 'read',
+            arguments: '{"file_path":"src/a.ts"}',
+          },
+        },
+        { id: 'b3', type: 'thinking', thinking: '\nThen inspect result' },
+      ],
+    };
+
+    const trace = buildSubagentInlineTrace(result, true, 'en');
+
+    expect(trace.entries).toMatchObject([
+      { kind: 'thinking', text: 'Read first', isCurrent: false },
+      { kind: 'tools', label: 'Running 1 tool', isCurrent: false },
+      { kind: 'thinking', text: '\nThen inspect result', isCurrent: true },
+    ]);
   });
 });

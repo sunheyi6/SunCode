@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { ChatMessage, ChatMessageBlock } from '../../stores/chat';
-import CompactToolBar from '../tools/CompactToolBar.vue';
-import ToolOperationList from '../tools/ToolOperationList.vue';
+import type { ChatMessage } from '../../stores/chat';
+import InlineCallTrace from './InlineCallTrace.vue';
 import StreamingText from './StreamingText.vue';
-import CommandOperationCard from '../tools/CommandOperationCard.vue';
-import FileOperationCard from '../tools/FileOperationCard.vue';
-import FileInspectCard from '../tools/FileInspectCard.vue';
-import SubagentCard from '../tools/SubagentCard.vue';
+import { buildInlineCallTrace } from './call-trace-view-model';
 
 const props = defineProps<{
   message: ChatMessage;
@@ -20,6 +16,9 @@ const hasThinking = computed(
 );
 
 const thinkingText = computed(() => props.message.thinking || '');
+const inlineTrace = computed(() => buildInlineCallTrace(props.message));
+const hasInlineTrace = computed(() => inlineTrace.value.entries.length > 0);
+const uiLanguage = computed(() => props.message.uiLanguage ?? 'zh');
 
 const copied = ref(false);
 
@@ -84,88 +83,38 @@ const fullTextForCopy = computed(() => {
 });
 
 const thinkingSummary = computed(() => {
-  const calls = props.message.toolCalls ?? [];
-  const running = calls.find((t) => t.status === 'running');
-  const done = calls.filter((t) => t.status === 'done' || t.status === 'error').length;
+  const trace = inlineTrace.value;
   const time = formattedElapsed.value;
 
   if (props.message.isStreaming) {
-    if (running) {
-      const shortArgs = running.arguments ? running.arguments.slice(0, 50) : '';
-      return `[${running.name}] ${shortArgs}  ${time}`;
+    if (trace.toolCount > 0) {
+      const label = uiLanguage.value === 'en' ? 'Processing' : '处理中';
+      const toolLabel = uiLanguage.value === 'en' ? 'tools' : '工具';
+      return `${label} ${time} · ${toolLabel} ${trace.completedToolCount}/${trace.toolCount}`;
     }
-    if (done > 0) return `[工具] ${done}/${calls.length} 完成  ${time}`;
-    return `[等待响应] ${time}`;
+    return `${uiLanguage.value === 'en' ? 'Processing' : '处理中'} ${time}`;
   }
 
-  const parts: string[] = ['思考过程'];
+  const parts: string[] = [uiLanguage.value === 'en' ? 'Processed' : '已处理'];
   const turn = props.message.turnCount ?? 0;
-  if (turn > 0) parts.push(`${turn}次请求`);
+  if (turn > 1) parts.push(uiLanguage.value === 'en' ? `${turn} requests` : `${turn} 次请求`);
   if (elapsedSeconds.value > 0) parts.push(time);
-  if (calls.length > 0) {
-    const names = calls
-      .slice(0, 3)
-      .map((t) => t.name)
-      .join(', ');
-    const more = calls.length > 3 ? ` +${calls.length - 3}` : '';
-    parts.push(names + more);
+  if (trace.toolCount > 0) {
+    const failed =
+      trace.failedToolCount > 0
+        ? uiLanguage.value === 'en'
+          ? `, failed ${trace.failedToolCount}`
+          : `，失败 ${trace.failedToolCount}`
+        : '';
+    const toolLabel = uiLanguage.value === 'en' ? 'tools' : '工具';
+    parts.push(`${toolLabel} ${trace.completedToolCount}/${trace.toolCount}${failed}`);
   }
   return parts.join('  ');
 });
 
 const hasAnyThinkingContent = computed(() => {
-  return thinkingText.value.length > 0 || hasToolCalls.value;
+  return hasInlineTrace.value || thinkingText.value.length > 0 || hasToolCalls.value;
 });
-
-const hasBlocks = computed(() => (props.message.blocks?.length ?? 0) > 0);
-
-const blocksCount = computed(() => props.message.blocks?.length ?? 0);
-
-const currentBlockIndex = computed(() => {
-  if (!hasBlocks.value || !props.message.isStreaming) return -1;
-  return blocksCount.value - 1;
-});
-
-function getBlockSummary(block: ChatMessageBlock): string {
-  if (block.type === 'thinking') {
-    const text = block.thinking || '';
-    return text.length > 50 ? text.slice(0, 50) + '...' : text;
-  }
-  if (block.type === 'tool_call' && block.toolCall) {
-    return `${block.toolCall.name}`;
-  }
-  return '未知';
-}
-
-function isInspectTool(name: string): boolean {
-  return name === 'read' || name === 'glob' || name === 'grep';
-}
-
-function getToolIcon(name: string): string {
-  switch (name) {
-    case 'bash': return '⚙';
-    case 'read': return '📖';
-    case 'glob': return '🔍';
-    case 'grep': return '🔎';
-    case 'edit': return '✏';
-    case 'write': return '📝';
-    case 'subagent': return '🤖';
-    default: return '📦';
-  }
-}
-
-function getToolLabel(name: string): string {
-  switch (name) {
-    case 'bash': return '运行命令';
-    case 'read': return '读取';
-    case 'glob': return '查找';
-    case 'grep': return '搜索';
-    case 'edit': return '编辑';
-    case 'write': return '写入';
-    case 'subagent': return '子代理';
-    default: return name;
-  }
-}
 
 async function copyContent() {
   try {
@@ -195,62 +144,15 @@ async function copyContent() {
   <div class="assistant-message">
     <div class="message-body">
       <!-- Streaming: show blocks with previous ones collapsed, current one expanded -->
-      <div v-if="hasThinking && message.isStreaming" class="thinking-live">
-        <div class="thinking-live-header">
-          <span class="thinking-live-dot" />
+      <div v-if="hasThinking && message.isStreaming" class="inline-trace inline-trace-live">
+        <div class="inline-trace-header">
+          <span class="inline-trace-dot" />
           <span>{{ thinkingSummary }}</span>
         </div>
-        <div v-if="hasBlocks" class="thinking-blocks">
-          <template v-for="(block, index) in message.blocks" :key="block.id">
-            <!-- Previous blocks: collapsed -->
-            <details v-if="index < currentBlockIndex" class="block-collapsed">
-              <summary class="block-summary">
-                <span class="block-icon">{{ block.type === 'thinking' ? '💭' : '⚙' }}</span>
-                <span class="block-type">{{ block.type === 'thinking' ? '思考' : '工具调用' }}</span>
-                <span class="block-preview">{{ getBlockSummary(block) }}</span>
-              </summary>
-              <div class="block-content">
-                <div v-if="block.type === 'thinking'" class="thinking-text">
-                  {{ block.thinking }}
-                </div>
-                <div v-else-if="block.type === 'tool_call' && block.toolCall">
-                  <SubagentCard v-if="block.toolCall.name === 'subagent'" :call="block.toolCall" />
-                  <FileOperationCard v-else-if="block.toolCall.name === 'edit' || block.toolCall.name === 'write'" :call="block.toolCall" />
-                  <CommandOperationCard v-else-if="block.toolCall.name === 'bash'" :call="block.toolCall" />
-                  <FileInspectCard v-else-if="isInspectTool(block.toolCall.name)" :call="block.toolCall" />
-                </div>
-              </div>
-            </details>
-
-            <!-- Current block: expanded -->
-            <div v-else-if="index === currentBlockIndex" class="block-current">
-              <div class="block-header">
-                <span class="block-icon">{{ block.type === 'thinking' ? '💭' : '⚙' }}</span>
-                <span class="block-type">{{ block.type === 'thinking' ? '思考' : '工具调用' }}</span>
-              </div>
-              <div v-if="block.type === 'thinking'" class="thinking-text">
-                {{ block.thinking }}
-              </div>
-              <div v-else-if="block.type === 'tool_call' && block.toolCall">
-                <div class="tool-call-header">
-                  <span class="tool-icon">{{ getToolIcon(block.toolCall.name) }}</span>
-                  <span class="tool-label">{{ getToolLabel(block.toolCall.name) }}</span>
-                  <span class="tool-name">Thought</span>
-                </div>
-                <SubagentCard v-if="block.toolCall.name === 'subagent'" :call="block.toolCall" />
-                <FileOperationCard v-else-if="block.toolCall.name === 'edit' || block.toolCall.name === 'write'" :call="block.toolCall" />
-                <CommandOperationCard v-else-if="block.toolCall.name === 'bash'" :call="block.toolCall" />
-                <FileInspectCard v-else-if="isInspectTool(block.toolCall.name)" :call="block.toolCall" />
-              </div>
-            </div>
-          </template>
-        </div>
-        <div v-else-if="thinkingText" class="thinking-text">
-          {{ thinkingText }}
-        </div>
-        <ToolOperationList
-          v-else-if="hasToolCalls"
-          :calls="message.toolCalls ?? []"
+        <InlineCallTrace
+          v-if="hasInlineTrace"
+          :entries="inlineTrace.entries"
+          :ui-language="uiLanguage"
         />
       </div>
 
@@ -258,36 +160,14 @@ async function copyContent() {
       <details v-if="!message.isStreaming && hasAnyThinkingContent" class="thinking-section">
         <summary class="thinking-summary thinking-summary-done">{{ thinkingSummary }}</summary>
         <div class="thinking-content">
-          <div v-if="hasBlocks" class="thinking-blocks">
-            <template v-for="block in message.blocks" :key="block.id">
-              <details class="block-collapsed">
-                <summary class="block-summary">
-                  <span class="block-icon">{{ block.type === 'thinking' ? '💭' : '⚙' }}</span>
-                  <span class="block-type">{{ block.type === 'thinking' ? '思考' : '工具调用' }}</span>
-                  <span class="block-preview">{{ getBlockSummary(block) }}</span>
-                </summary>
-                <div class="block-content">
-                  <div v-if="block.type === 'thinking'" class="thinking-text">
-                    {{ block.thinking }}
-                  </div>
-                  <div v-else-if="block.type === 'tool_call' && block.toolCall">
-                    <SubagentCard v-if="block.toolCall.name === 'subagent'" :call="block.toolCall" />
-                    <FileOperationCard v-else-if="block.toolCall.name === 'edit' || block.toolCall.name === 'write'" :call="block.toolCall" />
-                    <CommandOperationCard v-else-if="block.toolCall.name === 'bash'" :call="block.toolCall" />
-                    <FileInspectCard v-else-if="isInspectTool(block.toolCall.name)" :call="block.toolCall" />
-                  </div>
-                </div>
-              </details>
-            </template>
-          </div>
-          <div v-else-if="thinkingText" class="thinking-text">
+          <InlineCallTrace
+            v-if="hasInlineTrace"
+            :entries="inlineTrace.entries"
+            :ui-language="uiLanguage"
+          />
+          <div v-else-if="thinkingText" class="trace-fallback-text">
             {{ thinkingText }}
           </div>
-          <ToolOperationList
-            v-else-if="hasToolCalls"
-            :calls="message.toolCalls ?? []"
-          />
-          <div v-else-if="!thinkingText" class="thinking-no-tools">无工具调用</div>
         </div>
       </details>
 
@@ -317,22 +197,18 @@ async function copyContent() {
 }
 .message-body { max-width: 90%; }
 
-/* -- streaming live -- */
-.thinking-live {
+/* -- streaming trace -- */
+.inline-trace {
   margin-bottom: var(--spacing-sm);
-  border-radius: var(--border-radius);
-  overflow: hidden;
-  background: var(--color-bg-tertiary);
 }
 
-.thinking-live-header {
+.inline-trace-header {
   display: flex; align-items: center; gap: 6px;
-  font-size: 11px; color: var(--color-text-secondary);
-  padding: 6px 12px;
-  background: var(--color-surface);
+  font-size: 12px; color: var(--color-text-muted);
+  padding: 2px 0 8px;
 }
 
-.thinking-live-dot {
+.inline-trace-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--color-accent);
   animation: pulse-dot 1.4s ease-in-out infinite;
@@ -340,17 +216,21 @@ async function copyContent() {
 
 @keyframes pulse-dot { 0%,100%{opacity:.4} 50%{opacity:1} }
 
+.trace-fallback-text {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+
 /* -- thinking section -- */
 .thinking-section {
   margin-bottom: var(--spacing-sm);
-  border-radius: var(--border-radius);
-  overflow: hidden;
-  background: var(--color-bg-tertiary);
 }
 
 .thinking-summary {
-  padding: 6px 12px; font-size: 12px; color: var(--color-text-secondary);
-  cursor: pointer; background: var(--color-surface); user-select: none;
+  padding: 2px 0 8px; font-size: 12px; color: var(--color-text-muted);
+  cursor: pointer; user-select: none;
   list-style: none;
 }
 .thinking-summary::-webkit-details-marker { display: none; }
@@ -360,7 +240,7 @@ async function copyContent() {
   transition: transform 0.15s;
 }
 details[open] > .thinking-summary::before { transform: rotate(90deg); }
-.thinking-summary:hover { background: var(--color-surface-hover); }
+.thinking-summary:hover { color: var(--color-text-secondary); }
 
 .thinking-summary-done {
   cursor: pointer;
@@ -380,123 +260,9 @@ details[open] > .thinking-summary-done::before {
 }
 
 .thinking-content {
-  padding: 0;
+  padding: 0 0 4px;
   color: var(--color-text-secondary);
   max-height: 600px; overflow-y: auto;
-}
-
-.thinking-text {
-  padding: 8px 12px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--color-text-secondary);
-  background: var(--color-bg);
-  border-left: 3px solid var(--color-accent);
-}
-
-.thinking-blocks {
-  padding: 4px 0;
-}
-
-.block-collapsed {
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  background: var(--color-surface);
-  margin: 2px 0;
-  font-size: 12px;
-}
-
-.block-summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  cursor: pointer;
-  user-select: none;
-  list-style: none;
-  font-size: 11px;
-}
-
-.block-summary::-webkit-details-marker {
-  display: none;
-}
-
-.block-summary::before {
-  content: '▸';
-  font-size: 10px;
-  color: var(--color-text-muted);
-  transition: transform 0.15s;
-}
-
-details[open] > .block-summary::before {
-  transform: rotate(90deg);
-}
-
-.block-icon {
-  font-size: 12px;
-}
-
-.block-type {
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-
-.block-preview {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-secondary);
-  font-family: var(--font-mono);
-}
-
-.block-content {
-  padding: 4px 8px;
-  border-top: 1px solid var(--border-color);
-}
-
-.block-current {
-  margin: 4px 0;
-  padding: 4px 0;
-}
-
-.block-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  background: var(--color-bg-tertiary);
-  border-radius: var(--border-radius-sm);
-}
-
-.tool-call-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-
-.tool-icon {
-  font-size: 12px;
-}
-
-.tool-label {
-  font-size: 11px;
-}
-
-.tool-name {
-  font-size: 11px;
-  font-style: italic;
-}
-
-.thinking-no-tools {
-  font-size: 11px; color: var(--color-text-muted); font-style: italic;
-  padding: 4px 12px;
 }
 
 /* -- reply text -- */

@@ -52,4 +52,13 @@ describe('chat message persistence', () => {
       { type: 'text', text: 'Final answer.' },
     ]);
   });
+
+  test('persists assistant UI language', () => {
+    const persisted = buildPersistedAssistantMessage({
+      visibleContent: '完成。',
+      uiLanguage: 'zh',
+    });
+
+    expect(persisted.uiLanguage).toBe('zh');
+  });
 });

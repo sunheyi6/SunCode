@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { SubagentResult, ToolCallContent } from '@shared/types';
 import { computed, nextTick, ref, watch } from 'vue';
-import ToolOperationList from './ToolOperationList.vue';
+import InlineCallTrace from '../chat/InlineCallTrace.vue';
+import { buildSubagentInlineTrace } from '../chat/call-trace-view-model';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -9,7 +10,6 @@ const props = defineProps<{
 
 const expanded = ref(true);
 const cardBodyRef = ref<HTMLElement | null>(null);
-const thinkingRefs = ref<Map<string, HTMLElement>>(new Map());
 const outputRefs = ref<Map<string, HTMLElement>>(new Map());
 
 const results = computed<SubagentResult[]>(() => {
@@ -24,30 +24,32 @@ function toggleExpand(): void {
   expanded.value = !expanded.value;
 }
 
-function setThinkingRef(agent: string, el: Element | null): void {
-  if (el) thinkingRefs.value.set(agent, el as HTMLElement);
-}
 function setOutputRef(agent: string, el: Element | null): void {
   if (el) outputRefs.value.set(agent, el as HTMLElement);
 }
 
-// Auto-scroll thinking and output to bottom as content streams in.
+function resultTrace(result: SubagentResult) {
+  return buildSubagentInlineTrace(result, isRunning.value);
+}
+
+function hasResultOutput(result: SubagentResult): boolean {
+  return Boolean(result.output && result.output !== '执行中...');
+}
+
+// Auto-scroll output to bottom as content streams in.
 // Also ensures the card itself is visible within parent scroll containers.
 watch(
   () =>
     results.value
       .map(
         (r) =>
-          `${r.agent}:t${r.thinking?.length ?? 0}:o${r.output?.length ?? 0}:c${r.internalCalls?.length ?? 0}`,
+          `${r.agent}:t${r.thinking?.length ?? 0}:o${r.output?.length ?? 0}:c${r.internalCalls?.length ?? 0}:b${r.internalBlocks?.length ?? 0}`,
       )
       .join(','),
   () => {
     void nextTick(() => {
       // rAF ensures browser has completed layout before we read scrollHeight
       requestAnimationFrame(() => {
-        for (const [, el] of thinkingRefs.value) {
-          el.scrollTop = el.scrollHeight;
-        }
         for (const [, el] of outputRefs.value) {
           el.scrollTop = el.scrollHeight;
         }
@@ -85,24 +87,20 @@ watch(
       <div v-for="(r, i) in results" :key="i" class="subagent-result">
         <div class="result-header">
           <span class="result-agent">{{ r.agent }}</span>
-          <span class="result-tokens">{{ r.tokenUsage.total }} tokens · {{ r.toolCalls }} 步</span>
+          <span class="result-tokens">
+            <template v-if="isRunning && r.output === '执行中...'">执行中</template>
+            <template v-else>{{ r.tokenUsage.total }} tokens · {{ r.toolCalls }} 步</template>
+          </span>
         </div>
 
-        <!-- Sub-agent's internal thinking -->
-        <details v-if="r.thinking" class="sub-thinking" :open="isRunning">
-          <summary class="sub-thinking-summary">🧠 思考过程 ({{ r.thinking.length }} 字)</summary>
-          <pre class="sub-thinking-text" :ref="(el) => setThinkingRef(r.agent, el as Element)">{{ r.thinking }}</pre>
-        </details>
-
-        <!-- Sub-agent's internal tool calls -->
-        <div v-if="r.internalCalls && r.internalCalls.length > 0" class="sub-tools">
-          <div class="sub-tools-label">🔧 工具调用 ({{ r.internalCalls.length }})</div>
-          <ToolOperationList :calls="r.internalCalls" />
-        </div>
+        <InlineCallTrace
+          v-if="resultTrace(r).entries.length > 0"
+          class="sub-inline-trace"
+          :entries="resultTrace(r).entries"
+        />
 
         <!-- Sub-agent's output -->
-        <div v-if="r.output" class="result-output">
-          <div class="output-label">{{ r.success ? '✅' : '❌' }} 输出</div>
+        <div v-if="hasResultOutput(r)" class="result-output">
           <pre class="output-text" :ref="(el) => setOutputRef(r.agent, el as Element)">{{ r.output }}</pre>
         </div>
 
@@ -158,13 +156,12 @@ watch(
 
 .card-body {
   border-top: 1px solid var(--border-color);
-  padding: 4px 8px;
-  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 10px;
 }
 
 .subagent-result {
-  border-left: 3px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  padding: 4px 6px;
+  padding: 0;
   margin: 0;
 }
 
@@ -175,36 +172,13 @@ watch(
 .result-agent { font-size: 12px; font-weight: 600; color: var(--color-text); }
 .result-tokens { font-size: 10px; color: var(--color-text-muted); }
 
-.sub-thinking {
-  margin: 2px 0;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  overflow: hidden;
-  background: var(--color-bg-tertiary);
-}
-.sub-thinking-summary {
-  font-size: 11px; color: var(--color-text-muted); cursor: pointer;
-  padding: 3px 6px;
-  user-select: none;
-}
-.sub-thinking-text {
-  font-size: 11px; line-height: 1.15; color: var(--color-text-secondary);
-  padding: 3px 6px;
-  margin: 0;
-  max-height: 300px; overflow-y: auto;
-  white-space: pre-wrap; word-break: break-all;
-}
+.sub-inline-trace { margin-top: 6px; }
 
-.sub-tools { margin: 2px 0; }
-.sub-tools-label { font-size: 10px; color: var(--color-text-muted); font-weight: 600; margin-bottom: 1px; }
-
-.result-output { margin: 2px 0; }
-.output-label { font-size: 10px; color: var(--color-text-muted); font-weight: 600; }
+.result-output { margin: 8px 0 0; }
 .output-text {
-  font-size: 12px; line-height: 1.2; color: var(--color-text);
-  background: var(--color-surface);
-  padding: 4px 6px; border-radius: 3px;
-  margin: 2px 0 0 0;
+  font-size: 13px; line-height: 1.5; color: var(--color-text);
+  padding: 0;
+  margin: 0;
   max-height: 300px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
 }

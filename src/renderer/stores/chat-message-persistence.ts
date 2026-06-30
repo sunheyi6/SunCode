@@ -1,4 +1,5 @@
 import type { Message, ToolCallContent, TurnDetail } from '@shared/types';
+import type { UiLanguage } from '../utils/ui-language';
 
 interface PersistedAssistantInput {
   visibleContent: string;
@@ -6,6 +7,7 @@ interface PersistedAssistantInput {
   toolCalls?: ToolCallContent[];
   systemPrompt?: string;
   turnDetails?: TurnDetail[];
+  uiLanguage?: UiLanguage;
   finalMessage?: Message;
 }
 
@@ -28,6 +30,7 @@ export function buildPersistedAssistantMessage(input: PersistedAssistantInput): 
       result: tc.result,
       thinkingOffset: tc.thinkingOffset,
     })),
+    uiLanguage: input.uiLanguage,
     // Persist system prompt so call trace panel works across session switches
     systemPrompt: input.systemPrompt,
     ...(input.turnDetails ? { turnDetails: input.turnDetails } : {}),

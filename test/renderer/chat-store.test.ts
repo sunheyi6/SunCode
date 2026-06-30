@@ -98,6 +98,73 @@ describe('chat store stream blocks', () => {
     expect('liveCommandOutput' in (store.messages[0] ?? {})).toBe(false);
   });
 
+  test('derives assistant UI language from the user message', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+
+    store.addUserMessage('请检查这个问题');
+    store.startAssistantMessage();
+
+    expect(store.messages[0]?.uiLanguage).toBe('zh');
+    expect(store.messages[1]?.uiLanguage).toBe('zh');
+  });
+
+  test('keeps subagent progress as ordered internal trace blocks', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+
+    const subagentCall: ToolCallContent = {
+      type: 'tool_call',
+      id: 'subagent-1',
+      name: 'subagent',
+      arguments: '{"agent":"explore","prompt":"inspect code"}',
+    };
+    const internalCall: ToolCallContent = {
+      type: 'tool_call',
+      id: 'read-1',
+      name: 'read',
+      arguments: '{"file_path":"src/a.ts"}',
+    };
+
+    store.startToolExecution(subagentCall, 'session-1');
+    store.handleSubagentProgress(
+      'exec-1',
+      'explore',
+      { type: 'thinking', text: 'Read first' },
+      'session-1',
+    );
+    store.handleSubagentProgress(
+      'exec-1',
+      'explore',
+      { type: 'tool_start', toolCall: { ...internalCall, status: 'running' } },
+      'session-1',
+    );
+    store.handleSubagentProgress(
+      'exec-1',
+      'explore',
+      { type: 'thinking', text: '\nThen inspect result' },
+      'session-1',
+    );
+    store.handleSubagentProgress(
+      'exec-1',
+      'explore',
+      {
+        type: 'tool_end',
+        toolResult: { toolCallId: 'read-1', name: 'read', success: true, output: 'content' },
+      },
+      'session-1',
+    );
+
+    const result = store.messages[0]?.toolCalls?.[0]?.result?.subagentResults?.[0];
+
+    expect(result?.internalBlocks).toMatchObject([
+      { type: 'thinking', thinking: 'Read first' },
+      { type: 'tool_call', toolCall: { id: 'read-1', status: 'done' } },
+      { type: 'thinking', thinking: '\nThen inspect result' },
+    ]);
+  });
+
   test('shows a friendly Chinese message for model request timeouts', () => {
     const store = useChatStore();
     store.setActiveSessionId('session-1');

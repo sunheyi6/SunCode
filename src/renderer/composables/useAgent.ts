@@ -3,6 +3,7 @@ import { bridge } from '../api/bridge';
 import { useAgentStore } from '../stores/agent';
 import { useChatStore } from '../stores/chat';
 import { useSessionsStore } from '../stores/sessions';
+import { detectUiLanguage } from '../utils/ui-language';
 
 /**
  * Composable for agent interaction.
@@ -26,6 +27,7 @@ export function useAgent() {
       .saveMessage({
         role: 'user',
         content: [{ type: 'text', text }],
+        uiLanguage: detectUiLanguage(text),
       })
       .then(() => sessionsStore.refresh());
     bridge.prompt(text);

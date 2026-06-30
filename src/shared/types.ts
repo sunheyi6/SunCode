@@ -44,6 +44,8 @@ export interface Message {
   role: MessageRole;
   content: string | ContentBlock[];
   toolCallId?: string;
+  /** UI language selected from the user prompt for localized progress display. */
+  uiLanguage?: 'zh' | 'en';
   /** Only on assistant messages with tool calls */
   toolCalls?: ToolCallContent[];
   /** System prompt for this run (persisted for call trace panel). */
@@ -557,9 +559,20 @@ export type WorkerOutMessage =
     }
   | { type: 'goalEvent'; sessionId: string; event: GoalEvent }
   | { type: 'confirmRequest'; sessionId: string; toolCall: ToolCallContent }
-  | { type: 'planRequest'; sessionId: string; runId: string; planContent: string; planFilePath: string }
+  | {
+      type: 'planRequest';
+      sessionId: string;
+      runId: string;
+      planContent: string;
+      planFilePath: string;
+    }
   | { type: 'planStateChanged'; sessionId: string; phase: PlanPhase; planFilePath: string }
-  | { type: 'permissionCheck'; sessionId: string; toolName: string; params: Record<string, unknown> };
+  | {
+      type: 'permissionCheck';
+      sessionId: string;
+      toolName: string;
+      params: Record<string, unknown>;
+    };
 
 /** Streaming event types from the LLM */
 /**
@@ -886,6 +899,15 @@ export interface SubagentResult {
   thinking?: string;
   /** Sub-agent's internal tool calls with results (for display in SubagentCard). */
   internalCalls?: ToolCallContent[];
+  /** Ordered streaming trace blocks for the sub-agent's thinking and tool calls. */
+  internalBlocks?: SubagentTraceBlock[];
+}
+
+export interface SubagentTraceBlock {
+  id: string;
+  type: 'thinking' | 'tool_call';
+  thinking?: string;
+  toolCall?: ToolCallContent;
 }
 
 /** Runtime state of a sub-agent execution */
