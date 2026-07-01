@@ -7,7 +7,6 @@ import CallTracePanel from '../chat/CallTracePanel.vue';
 import ConfirmDialog from '../chat/ConfirmDialog.vue';
 import ConversationSidebar from './ConversationSidebar.vue';
 import GitPanel from './GitPanel.vue';
-import StatusBar from './StatusBar.vue';
 import ToastContainer from './ToastContainer.vue';
 import SettingsPanel from '../settings/SettingsPanel.vue';
 import { useConfirmDialog } from '../../composables/useConfirmDialog';
@@ -24,6 +23,12 @@ const tracePanelWidth = ref(380);
 const isResizing = ref(false);
 const isResizingTrace = ref(false);
 const showSettings = ref(false);
+const settingsSection = ref('general');
+
+function openSettingsAt(section: string): void {
+  settingsSection.value = section;
+  showSettings.value = true;
+}
 
 // Tool confirmation dialog (confirm_changes permission mode)
 const { confirmState, handleConfirm, handleDeny } = useConfirmDialog();
@@ -83,7 +88,7 @@ const traceSystemPrompt = computed(() => {
     <div class="app-main">
       <!-- Sidebar: conversation queue grouped by project -->
       <aside class="sidebar" :style="{ width: sidebarWidth + 'px' }">
-        <ConversationSidebar />
+        <ConversationSidebar @open-settings="openSettingsAt" />
         <!-- Settings button at bottom of sidebar -->
         <div class="sidebar-footer">
           <button class="settings-btn" title="设置 (Ctrl+,)" @click="showSettings = true">
@@ -103,6 +108,7 @@ const traceSystemPrompt = computed(() => {
 
         <!-- 调用轨迹 右侧边缘竖条标签 -->
         <div
+          v-if="chatStore.messages.length > 0"
           class="trace-edge-tab"
           :class="{ active: chatStore.showCallTrace }"
           :title="chatStore.showCallTrace ? '关闭调用轨迹' : '打开调用轨迹'"
@@ -130,11 +136,9 @@ const traceSystemPrompt = computed(() => {
       </template>
     </div>
 
-    <!-- Status Bar -->
-    <StatusBar />
 
     <!-- Settings Modal -->
-    <SettingsPanel v-if="showSettings" @close="showSettings = false" />
+    <SettingsPanel v-if="showSettings" :initial-section="settingsSection" @close="showSettings = false" />
 
     <!-- Tool Confirmation Dialog -->
     <ConfirmDialog
@@ -251,7 +255,7 @@ const traceSystemPrompt = computed(() => {
   background: var(--color-bg-secondary);
   border: 1px solid var(--border-color);
   border-right: none;
-  border-radius: 6px 0 0 6px;
+  border-radius: 8px 0 0 8px;
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: 12px;

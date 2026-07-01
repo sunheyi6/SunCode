@@ -38,13 +38,14 @@ function lastMessageContentKey(): string {
   // Only trigger on ~100 char chunks, not every character
   const thinkLen = Math.floor((last.thinking?.length ?? 0) / 100);
   const contentLen = Math.floor((last.content?.length ?? 0) / 100);
+  const blockLen = last.blocks?.length ?? 0;
   const toolOutputLen = Math.floor(
     (last.toolCalls?.reduce((sum, toolCall) => sum + (toolCall.partialOutput?.length ?? 0), 0) ??
       0) / 100,
   );
   const tcLen = last.toolCalls?.length ?? 0;
   const tcRunning = last.toolCalls?.filter((t) => t.status === 'running').length ?? 0;
-  return `${thinkLen}|${contentLen}|${toolOutputLen}|${tcLen}|${tcRunning}`;
+  return `${thinkLen}|${contentLen}|${blockLen}|${toolOutputLen}|${tcLen}|${tcRunning}`;
 }
 
 function onUserScroll(): void {
@@ -67,7 +68,6 @@ watch(
     if (key === lastKey) return;
     lastKey = key;
     if (!chatStore.isStreaming) return;
-    if (userScrolledUp.value) return;
     // Throttle: max one scroll per 150ms during streaming
     if (scrollTimer) return;
     scrollTimer = setTimeout(() => {
@@ -77,23 +77,13 @@ watch(
   },
 );
 
-// When streaming finishes, scroll to first line of answer
+// When streaming finishes, keep the newest content anchored at the bottom.
 watch(
   () => chatStore.isStreaming,
   (streaming) => {
     if (!streaming) {
       userScrolledUp.value = false;
-      setTimeout(() => {
-        const el = messageListRef.value;
-        if (!el) return;
-        const contentBlocks = el.querySelectorAll('.message-content');
-        const lastContent = contentBlocks[contentBlocks.length - 1];
-        if (lastContent) {
-          lastContent.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        } else {
-          scrollToBottom(true);
-        }
-      }, 100);
+      setTimeout(() => scrollToBottom(true), 100);
     }
   },
 );

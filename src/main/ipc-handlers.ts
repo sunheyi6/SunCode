@@ -21,7 +21,7 @@ import type {
   WorkerInMessage,
   WorkerOutMessage,
 } from '@shared/types';
-import { app, dialog, ipcMain, shell } from 'electron';
+import { app, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import {
   checkForUpdates,
   downloadUpdate,
@@ -715,6 +715,11 @@ export function registerIpcHandlers(wm: WindowManager): void {
       // Updates the native window title (shown in title bar on all platforms)
       mainWindow.setTitle(text ? `SunCode — ${text}` : 'SunCode');
     }
+  });
+
+  // Sync window chrome colors with the app's resolved theme (light / dark / system)
+  ipcMain.on('window:setTheme', (_event, theme: string) => {
+    nativeTheme.themeSource = theme as 'system' | 'light' | 'dark';
   });
 
   // ===== Git Info =====

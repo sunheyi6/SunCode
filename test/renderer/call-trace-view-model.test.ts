@@ -348,6 +348,49 @@ describe('buildInlineCallTrace', () => {
     ]);
   });
 
+  test('keeps answer fragments in the inline stream order', () => {
+    const message: ChatMessage = {
+      id: 'a-inline-text',
+      role: 'assistant',
+      content: 'found it',
+      thinking: 'read first',
+      timestamp: 1,
+      isStreaming: true,
+      uiLanguage: 'en',
+      blocks: [
+        { id: 'b1', type: 'thinking', thinking: 'read first' },
+        { id: 'b2', type: 'text', text: 'found it' },
+        {
+          id: 'b3',
+          type: 'tool_call',
+          toolCall: {
+            type: 'tool_call',
+            id: 'tc1',
+            name: 'bash',
+            arguments: '{"command":"bun test"}',
+          },
+        },
+      ],
+      toolCalls: [
+        {
+          type: 'tool_call',
+          id: 'tc1',
+          name: 'bash',
+          arguments: '{"command":"bun test"}',
+          status: 'running',
+        },
+      ],
+    };
+
+    const trace = buildInlineCallTrace(message);
+
+    expect(trace.entries).toMatchObject([
+      { kind: 'thinking', text: 'read first', isCurrent: false },
+      { kind: 'text', text: 'found it', isCurrent: false },
+      { kind: 'tools', label: 'Running 1 command', isCurrent: true },
+    ]);
+  });
+
   test('merges adjacent commands into a compact command count', () => {
     const message: ChatMessage = {
       id: 'a-commands',

@@ -99,7 +99,9 @@ function planStepIcon(status: string): string {
   return '○';
 }
 
-const showPanel = computed(() => gitStatus.value.isRepo || hasPlan.value);
+const showPanel = computed(
+  () => chatStore.messages.length > 0 && (gitStatus.value.isRepo || hasPlan.value),
+);
 
 // Track plan elapsed time
 const planElapsed = computed(() => {
@@ -461,7 +463,7 @@ watch(collapsed, (isCollapsed) => {
   margin-top: 6px;
   overflow: hidden;
   border: 1px solid var(--border-color-strong);
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--color-surface);
   color: var(--color-text);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);

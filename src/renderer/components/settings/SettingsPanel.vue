@@ -12,6 +12,12 @@ const emit = defineEmits<{
   close: [];
 }>();
 
+const props = withDefaults(defineProps<{
+  initialSection?: string;
+}>(), {
+  initialSection: 'general',
+});
+
 const settingsStore = useSettingsStore();
 const updateStore = useUpdateStore();
 const statsStore = useStatsStore();
@@ -19,7 +25,7 @@ const appVersion = ref('');
 const logPath = ref('');
 
 type Section = 'general' | 'models' | 'behavior' | 'mcp' | 'skills' | 'usage' | 'about';
-const activeSection = ref<Section>('general');
+const activeSection = ref<Section>(props.initialSection as Section);
 
 const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'general', label: '常规', icon: '⌘' },
@@ -695,7 +701,7 @@ function themeLabel(theme: AppSettings['theme']): string {
 
 .heading-pills span {
   padding: 7px 14px;
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--color-surface-hover);
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -758,7 +764,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   width: 240px;
   height: 40px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--color-surface);
   color: var(--color-text);
   font-size: 14px;
@@ -941,7 +947,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   height: 38px;
   flex: 0 0 auto;
   padding: 0 16px;
-  border-radius: 9px;
+  border-radius: 10px;
   background: #737373;
   color: #fff;
   font-weight: 600;

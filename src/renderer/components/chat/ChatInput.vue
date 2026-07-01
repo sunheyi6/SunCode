@@ -127,6 +127,7 @@ function closeCommandDropdown(): void {
 // Unified dropdown group: each dropdown keeps its own state but only one can be open.
 const dropdowns = useDropdownGroup();
 const workspaceDropdown = dropdowns.register('workspace');
+const branchDropdown = dropdowns.register('branch');
 const modelDropdown = dropdowns.register('model');
 const permissionDropdown = dropdowns.register('permission');
 const thinkingDropdown = dropdowns.register('thinking');
@@ -385,7 +386,12 @@ watch(
 <template>
   <div ref="inputRef" :class="chatInputClasses">
     <!-- Workspace info bar -->
-    <WorkspaceSelector :git-info="gitInfo" :dropdown="workspaceDropdown" />
+    <WorkspaceSelector
+      :git-info="gitInfo"
+      :dropdown="workspaceDropdown"
+      :branch-dropdown="branchDropdown"
+      @branch-change="refreshGitInfo"
+    />
 
     <div class="composer" :class="{ streaming: props.isStreaming }">
       <!-- Slash Command Dropdown (teleported to body) -->
@@ -479,11 +485,9 @@ watch(
   margin: 0 auto;
   padding: 0;
   overflow: visible;
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--color-bg-secondary) 88%, white);
-  box-shadow:
-    0 20px 48px rgba(0, 0, 0, 0.1),
-    0 1px 1px rgba(255, 255, 255, 0.7) inset;
+  border-radius: 20px;
+  background: var(--color-bg-secondary);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.2);
 }
 
 /* Workspace info bar */
@@ -571,12 +575,10 @@ watch(
 
 .chat-input-empty .composer {
   padding: 14px 16px;
-  border-color: color-mix(in srgb, var(--border-color-strong) 72%, white);
-  border-radius: 17px;
-  background: var(--color-bg);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.86) inset,
-    0 8px 24px rgba(0, 0, 0, 0.08);
+  border-color: var(--border-color-strong);
+  border-radius: 18px;
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
 .composer:has(.goal-indicator) {
@@ -737,7 +739,8 @@ watch(
   font-size: 14px;
 }
 
-.chat-input-empty :deep(.workspace-folder:hover) {
+.chat-input-empty :deep(.workspace-folder:hover),
+.chat-input-empty :deep(.git-branch:hover) {
   background: color-mix(in srgb, var(--color-surface-hover) 64%, transparent);
 }
 
@@ -838,7 +841,7 @@ watch(
   margin-left: 2px;
   padding: 0;
   flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--color-accent);
   color: var(--color-bg);
   font-size: 22px;
@@ -891,7 +894,7 @@ watch(
   max-height: 280px;
   overflow-y: auto;
   border: 1px solid var(--border-color-strong);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--color-bg);
   box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
   z-index: 100;

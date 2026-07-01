@@ -154,7 +154,7 @@ function highlightName(cmd: SlashCommand, indices: number[]): string {
   flex-direction: column;
   max-height: 220px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--color-bg);
   box-shadow: 0 4px 20px rgba(0,0,0,0.2);
   overflow: hidden;

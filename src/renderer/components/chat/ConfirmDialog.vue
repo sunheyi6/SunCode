@@ -83,7 +83,7 @@ const toolIcon = computed(() => {
   max-width: 90vw;
   background: var(--color-bg);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: 14px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28);
   overflow: hidden;
 }

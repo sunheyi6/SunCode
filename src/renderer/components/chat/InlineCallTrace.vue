@@ -1,18 +1,24 @@
 <script setup lang="ts">
-import type { ToolCallContent } from '@shared/types';
+import type { SubagentResult, ToolCallContent } from '@shared/types';
+import { computed, nextTick, ref, watch } from 'vue';
 import { commandSummary, parseToolArguments } from '../../utils/tool-presentation';
 import type { UiLanguage } from '../../utils/ui-language';
 import { buildSubagentInlineTrace, type InlineCallTraceEntry } from './call-trace-view-model';
+import StreamingText from './StreamingText.vue';
 
 const props = withDefaults(
   defineProps<{
     entries: InlineCallTraceEntry[];
     uiLanguage?: UiLanguage;
+    isStreaming?: boolean;
   }>(),
   {
     uiLanguage: 'zh',
+    isStreaming: false,
   },
 );
+
+// ── helpers (shared) ──
 
 function toolTitle(call: ToolCallContent): string {
   const args = parseToolArguments(call.arguments);
@@ -143,17 +149,240 @@ function localizedToolLabel(name: string): string {
 function emptyOutputLabel(): string {
   return props.uiLanguage === 'en' ? 'No output yet' : '暂无输出';
 }
+
+// ── streaming helpers ──
+
+function streamingToolLabel(call: ToolCallContent): string {
+  const args = parseToolArguments(call.arguments);
+  const target = toolTarget(args);
+  if (call.name === 'bash') {
+    const cmd = commandSummary(args);
+    return target ? `${cmd}` : cmd;
+  }
+  const label = localizedStreamingToolName(call.name);
+  return target ? `${label}: ${target}` : label;
+}
+
+function localizedStreamingToolName(name: string): string {
+  if (props.uiLanguage === 'en') {
+    switch (name) {
+      case 'read': return 'read';
+      case 'glob': return 'glob';
+      case 'grep': return 'grep';
+      case 'edit': return 'edit';
+      case 'write': return 'write';
+      case 'subagent': return 'subagent';
+      case 'bash': return 'bash';
+      default: return name;
+    }
+  }
+  // Chinese: use English short names for the tree view
+  switch (name) {
+    case 'read': return 'read';
+    case 'glob': return 'glob';
+    case 'grep': return 'grep';
+    case 'edit': return 'edit';
+    case 'write': return 'write';
+    case 'subagent': return 'subagent';
+    case 'bash': return 'bash';
+    default: return name;
+  }
+}
+
+function streamingStatusText(call: ToolCallContent): string {
+  if (call.status === 'running') {
+    return props.uiLanguage === 'en' ? 'Running' : '运行中';
+  }
+  if (call.status === 'error' || call.result?.success === false) {
+    return props.uiLanguage === 'en' ? 'Failed' : '失败';
+  }
+  if (call.status === 'done' || call.result?.success === true) {
+    return props.uiLanguage === 'en' ? 'Done ✓' : '已完成 ✓';
+  }
+  // No status yet — tool declared but not started
+  return props.uiLanguage === 'en' ? 'Waiting...' : '等待中...';
+}
+
+function streamingStatusClass(call: ToolCallContent): string {
+  if (call.status === 'running') return 'streaming-running';
+  if (call.status === 'error' || call.result?.success === false) return 'streaming-failed';
+  if (!call.status) return 'streaming-pending';
+  return 'streaming-done';
+}
+
+function showStreamingOutput(call: ToolCallContent): boolean {
+  return (call.status === 'running' || call.status === 'error') && Boolean(call.partialOutput);
+}
+
+// ── streaming output auto-scroll ──
+
+const outputRefs = ref<Map<string, HTMLElement>>(new Map());
+
+function setOutputRef(id: string, el: Element | null): void {
+  if (el) outputRefs.value.set(id, el as HTMLElement);
+}
+
+// Flatten all tool calls to watch their partialOutput
+const allPartialOutputs = computed(() => {
+  const vals: string[] = [];
+  for (const entry of props.entries) {
+    if (entry.kind === 'tools') {
+      for (const tc of entry.toolCalls) {
+        vals.push(tc.partialOutput || '');
+      }
+    }
+  }
+  return vals;
+});
+
+watch(
+  allPartialOutputs,
+  () => {
+    void nextTick(() => {
+      requestAnimationFrame(() => {
+        for (const [, el] of outputRefs.value) {
+          el.scrollTop = el.scrollHeight;
+        }
+      });
+    });
+  },
+  { deep: true },
+);
+
+// ── subagent helpers ──
+
+function subResultTrace(result: SubagentResult, isStreaming: boolean) {
+  return buildSubagentInlineTrace(result, isStreaming, props.uiLanguage);
+}
+
+// ── entry helpers ──
+
+/** Get the single tool call from an entry (entries have exactly 1 tool call during streaming). */
+function entryToolCall(entry: InlineCallTraceEntry): ToolCallContent | undefined {
+  if (entry.kind !== 'tools') return undefined;
+  return entry.toolCalls[0];
+}
+
+function isLastEntry(index: number): boolean {
+  return index === props.entries.length - 1;
+}
+
+function thinkingLabel(entry: InlineCallTraceEntry): string {
+  if (entry.kind !== 'thinking') return props.uiLanguage === 'en' ? 'Thinking' : '思考';
+  const label = props.uiLanguage === 'en' ? 'Thinking' : '思考';
+  return `${label} · ${entry.text.length}`;
+}
 </script>
 
 <template>
-  <div class="inline-call-trace">
+  <!-- ═══ Streaming tree view ═══ -->
+  <div v-if="isStreaming" class="streaming-trace-tree">
+    <div
+      v-for="(entry, entryIdx) in entries"
+      :key="entry.id"
+      class="tree-branch"
+      :class="{ 'tree-branch-last': isLastEntry(entryIdx) }"
+    >
+      <!-- Thinking line -->
+      <details v-if="entry.kind === 'thinking'" class="tree-details tree-thinking">
+        <summary class="tree-line tree-line-thinking">
+          <span class="tree-think-label">{{ thinkingLabel(entry) }}</span>
+        </summary>
+        <div class="tree-detail-body tree-think-text">
+          {{ entry.text }}
+        </div>
+      </details>
+
+      <!-- Text line -->
+      <div v-else-if="entry.kind === 'text'" class="tree-answer-fragment">
+        <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isCurrent" />
+      </div>
+
+      <!-- Tool line -->
+      <details v-else class="tree-details tree-tool-details">
+        <summary
+          class="tree-line tree-line-tool"
+          :class="{ 'tree-line-active': entry.hasRunning }"
+        >
+          <span class="tree-tool-label">{{ streamingToolLabel(entryToolCall(entry)!) }}</span>
+          <span
+            class="tree-tool-status"
+            :class="streamingStatusClass(entryToolCall(entry)!)"
+          >
+            <template v-if="entryToolCall(entry)!.status === 'running'">
+              <span class="status-progress-bar" />
+              {{ streamingStatusText(entryToolCall(entry)!) }}
+            </template>
+            <template v-else>
+              {{ streamingStatusText(entryToolCall(entry)!) }}
+            </template>
+          </span>
+        </summary>
+
+        <!-- Inline output for running tool -->
+        <div
+          v-if="showStreamingOutput(entryToolCall(entry)!)"
+          class="tree-output"
+        >
+          <pre
+            class="tree-output-text"
+            :ref="(el) => setOutputRef(entryToolCall(entry)!.id, el as Element)"
+          >{{ entryToolCall(entry)!.partialOutput?.trimEnd() }}</pre>
+        </div>
+
+        <!-- Subagent nested tree -->
+        <div v-if="hasSubagentResults(entryToolCall(entry)!)" class="tree-subagent">
+          <div
+            v-for="result in entryToolCall(entry)!.result?.subagentResults"
+            :key="result.agent"
+            class="tree-subagent-result"
+          >
+            <div class="tree-subagent-header">
+              <span class="tree-subagent-name">{{ result.agent }}</span>
+              <span class="tree-subagent-meta">
+                <template v-if="isRunningSubagent(entryToolCall(entry)!) && result.output === '执行中...'">
+                  {{ uiLanguage === 'en' ? 'Running' : '执行中' }}
+                </template>
+                <template v-else>
+                  {{ result.tokenUsage.total }} tokens · {{ result.toolCalls }}
+                </template>
+              </span>
+            </div>
+            <InlineCallTrace
+              v-if="subResultTrace(result, isRunningSubagent(entryToolCall(entry)!)).entries.length > 0"
+              :entries="subResultTrace(result, isRunningSubagent(entryToolCall(entry)!)).entries"
+              :ui-language="uiLanguage"
+              :is-streaming="isRunningSubagent(entryToolCall(entry)!)"
+            />
+            <pre
+              v-if="result.output && result.output !== '执行中...'"
+              class="tree-output-text tree-subagent-output"
+            >{{ subagentStatusText(result.output) }}</pre>
+            <div v-if="result.error" class="tree-error-text">{{ result.error }}</div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- ═══ Completed (details) view ═══ -->
+  <div v-else class="inline-call-trace">
     <template v-for="entry in entries" :key="entry.id">
-      <div
+      <details
         v-if="entry.kind === 'thinking'"
-        class="trace-node-text"
+        class="trace-thinking-details"
         :class="{ current: entry.isCurrent }"
       >
-        {{ entry.text }}
+        <summary class="trace-thinking-summary">{{ thinkingLabel(entry) }}</summary>
+        <div class="trace-node-text">{{ entry.text }}</div>
+      </details>
+
+      <div
+        v-else-if="entry.kind === 'text'"
+        class="trace-answer-fragment"
+        :class="{ current: entry.isCurrent }"
+      >
+        <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isCurrent" />
       </div>
 
       <details
@@ -192,7 +421,7 @@ function emptyOutputLabel(): string {
                     <span>{{ result.agent }}</span>
                     <span class="trace-subagent-meta">
                       <template v-if="isRunningSubagent(call) && result.output === '执行中...'">
-                        {{ props.uiLanguage === 'en' ? 'Running' : '执行中' }}
+                        {{ uiLanguage === 'en' ? 'Running' : '执行中' }}
                       </template>
                       <template v-else>
                         {{ result.tokenUsage.total }} tokens · {{ result.toolCalls }}
@@ -200,9 +429,9 @@ function emptyOutputLabel(): string {
                     </span>
                   </div>
                   <InlineCallTrace
-                    v-if="buildSubagentInlineTrace(result, isRunningSubagent(call), props.uiLanguage).entries.length > 0"
-                    :entries="buildSubagentInlineTrace(result, isRunningSubagent(call), props.uiLanguage).entries"
-                    :ui-language="props.uiLanguage"
+                    v-if="buildSubagentInlineTrace(result, isRunningSubagent(call), uiLanguage).entries.length > 0"
+                    :entries="buildSubagentInlineTrace(result, isRunningSubagent(call), uiLanguage).entries"
+                    :ui-language="uiLanguage"
                   />
                   <pre
                     v-if="result.output && result.output !== '执行中...'"
@@ -222,10 +451,289 @@ function emptyOutputLabel(): string {
 </template>
 
 <style scoped>
+/* ═══════════════════════════════════════════
+   Streaming tree view
+   ═══════════════════════════════════════════ */
+
+.streaming-trace-tree {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+}
+
+.tree-branch {
+  position: relative;
+  padding-left: 18px;
+}
+
+/* Vertical line */
+.tree-branch::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid var(--border-color);
+  pointer-events: none;
+}
+
+/* Last branch: truncate vertical line at connector level */
+.tree-branch-last::before {
+  height: 0.75em;
+}
+
+/* Horizontal connector */
+.tree-branch::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.75em;
+  width: 10px;
+  border-top: 1px solid var(--border-color);
+  pointer-events: none;
+}
+
+/* Thinking line */
+.tree-line {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 1.6em;
+  padding: 1px 0;
+}
+
+.tree-line-active {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.tree-line-active::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-accent) 24%, transparent) 45%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  animation: trace-shimmer-sweep 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes trace-shimmer-sweep {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+.tree-line-thinking {
+  padding: 2px 0 4px;
+}
+
+.tree-details {
+  min-width: 0;
+}
+
+.tree-details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.tree-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tree-details > summary::after {
+  content: '>';
+  display: inline-block;
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: currentColor;
+  opacity: 0.65;
+  transition: transform 0.15s;
+}
+
+.tree-details[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.tree-think-label {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.tree-think-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+}
+
+.tree-detail-body {
+  padding: 4px 0 8px;
+}
+
+.tree-answer-fragment {
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 3px 0 7px;
+}
+
+/* Tool line */
+.tree-line-tool {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.tree-tool-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.tree-tool-status {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.streaming-running {
+  color: var(--color-accent);
+}
+
+.streaming-done {
+  color: var(--color-green);
+}
+
+.streaming-failed {
+  color: var(--color-red);
+}
+
+.streaming-pending {
+  color: var(--color-text-muted);
+}
+
+/* Progress bar for running tools */
+.status-progress-bar {
+  display: inline-block;
+  width: 64px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  vertical-align: middle;
+  position: relative;
+}
+
+.status-progress-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-accent) 0px,
+    var(--color-accent) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  animation: progress-slide 0.7s linear infinite;
+}
+
+@keyframes progress-slide {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Inline output for running tool */
+.tree-output {
+  position: relative;
+  padding-left: 18px;
+  margin: 2px 0 6px;
+}
+
+.tree-output-text {
+  margin: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--color-bg-tertiary);
+}
+
+/* Subagent in streaming tree */
+.tree-subagent {
+  position: relative;
+  padding-left: 18px;
+  margin: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tree-subagent-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tree-subagent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tree-subagent-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.tree-subagent-meta {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  flex: 0 0 auto;
+}
+
+.tree-subagent-output {
+  margin-top: 2px;
+}
+
+.tree-error-text {
+  font-size: 11px;
+  color: var(--color-red);
+}
+
+/* ═══════════════════════════════════════════
+   Completed (details) view — unchanged
+   ═══════════════════════════════════════════ */
+
 .inline-call-trace {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .trace-node-text {
@@ -236,6 +744,53 @@ function emptyOutputLabel(): string {
 }
 
 .trace-node-text.current {
+  color: var(--color-text-secondary);
+}
+
+.trace-thinking-details {
+  color: var(--color-text-muted);
+}
+
+.trace-thinking-summary {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.trace-thinking-summary::-webkit-details-marker {
+  display: none;
+}
+
+.trace-thinking-summary::after {
+  content: '>';
+  display: inline-block;
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: currentColor;
+  opacity: 0.65;
+  transition: transform 0.15s;
+}
+
+.trace-thinking-details[open] > .trace-thinking-summary::after {
+  transform: rotate(90deg);
+}
+
+.trace-thinking-details .trace-node-text {
+  margin-top: 8px;
+  color: var(--color-text-secondary);
+}
+
+.trace-answer-fragment {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+}
+
+.trace-answer-fragment.current {
   color: var(--color-text-secondary);
 }
 

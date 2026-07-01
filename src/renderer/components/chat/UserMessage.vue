@@ -70,7 +70,7 @@ async function copyContent(text: string) {
   max-width: 85%;
   background: var(--color-accent);
   color: var(--color-bg);
-  border-radius: 16px 16px 4px 16px;
+  border-radius: 18px 18px 6px 18px;
   padding: 10px 16px;
 }
 

@@ -97,6 +97,7 @@ watch(
           v-if="resultTrace(r).entries.length > 0"
           class="sub-inline-trace"
           :entries="resultTrace(r).entries"
+          :is-streaming="isRunning"
         />
 
         <!-- Sub-agent's output -->
@@ -119,7 +120,7 @@ watch(
 <style scoped>
 .subagent-card {
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
   margin: 4px 0;
   transition: border-color 0.15s ease;

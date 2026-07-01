@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
+import { buildInlineCallTrace } from './call-trace-view-model';
 import InlineCallTrace from './InlineCallTrace.vue';
 import StreamingText from './StreamingText.vue';
-import { buildInlineCallTrace } from './call-trace-view-model';
 
 const props = defineProps<{
   message: ChatMessage;
@@ -18,6 +18,11 @@ const hasThinking = computed(
 const thinkingText = computed(() => props.message.thinking || '');
 const inlineTrace = computed(() => buildInlineCallTrace(props.message));
 const hasInlineTrace = computed(() => inlineTrace.value.entries.length > 0);
+const hasOrderedBlocks = computed(() => (props.message.blocks?.length ?? 0) > 0);
+const processEntries = computed(() =>
+  inlineTrace.value.entries.filter((entry) => entry.kind !== 'text'),
+);
+const hasProcessEntries = computed(() => processEntries.value.length > 0);
 const uiLanguage = computed(() => props.message.uiLanguage ?? 'zh');
 
 const copied = ref(false);
@@ -153,26 +158,28 @@ async function copyContent() {
           v-if="hasInlineTrace"
           :entries="inlineTrace.entries"
           :ui-language="uiLanguage"
+          :is-streaming="message.isStreaming"
         />
       </div>
 
-      <!-- Done: all blocks collapsed -->
-      <details v-if="!message.isStreaming && hasAnyThinkingContent" class="thinking-section">
+      <!-- Done: keep intermediate process hidden but available on demand -->
+      <details v-if="!message.isStreaming && hasProcessEntries" class="thinking-section">
         <summary class="thinking-summary thinking-summary-done">{{ thinkingSummary }}</summary>
         <div class="thinking-content">
           <InlineCallTrace
-            v-if="hasInlineTrace"
-            :entries="inlineTrace.entries"
+            :entries="processEntries"
             :ui-language="uiLanguage"
+            :is-streaming="false"
           />
-          <div v-else-if="thinkingText" class="trace-fallback-text">
-            {{ thinkingText }}
-          </div>
         </div>
       </details>
 
       <!-- Visible reply text -->
-      <div v-if="hasContent" class="message-content" :class="{ streaming: message.isStreaming }">
+      <div
+        v-if="hasContent && (!message.isStreaming || !hasOrderedBlocks)"
+        class="message-content"
+        :class="{ streaming: message.isStreaming }"
+      >
         <StreamingText :text="message.content" :is-streaming="message.isStreaming" />
       </div>
 

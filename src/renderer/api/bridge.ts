@@ -272,6 +272,10 @@ export const bridge = {
     api().setTitleBarOverlayText(text);
   },
 
+  setTheme(theme: string): void {
+    api().setTheme(theme);
+  },
+
   // ===== Auto Update =====
   checkForUpdates(): void {
     api().checkForUpdates();

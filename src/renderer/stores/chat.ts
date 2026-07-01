@@ -21,8 +21,9 @@ import { mergeStreamedToolCalls } from './tool-call-state';
 
 export interface ChatMessageBlock {
   id: string;
-  type: 'thinking' | 'tool_call';
+  type: 'thinking' | 'text' | 'tool_call';
   thinking?: string;
+  text?: string;
   toolCall?: ToolCallContent;
 }
 
@@ -74,6 +75,30 @@ function appendThinkingBlock(target: ChatMessage, thinkingDelta: string): void {
     type: 'thinking',
     thinking: thinkingDelta,
   });
+}
+
+function appendTextBlock(target: ChatMessage, textDelta: string): void {
+  if (!textDelta) return;
+  if (!target.blocks) target.blocks = [];
+
+  const lastBlock = target.blocks[target.blocks.length - 1];
+  if (lastBlock?.type === 'text') {
+    lastBlock.text = (lastBlock.text || '') + textDelta;
+    return;
+  }
+
+  target.blocks.push({
+    id: nextBlockId(),
+    type: 'text',
+    text: textDelta,
+  });
+}
+
+function textFromBlocks(blocks: ChatMessageBlock[] | undefined): string {
+  return (blocks ?? [])
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text || '')
+    .join('');
 }
 
 function appendSubagentThinkingBlock(target: SubagentResult, thinkingDelta: string): void {
@@ -136,6 +161,7 @@ export const useChatStore = defineStore('chat', () => {
   let currentAssistantMsg: ChatMessage | null = null;
   let lastParsedPlanLength = 0;
   let lastThinkingLength = 0;
+  let lastTextLength = 0;
   let lastToolCallCount = 0;
   let latestUiLanguage: UiLanguage = 'zh';
 
@@ -171,6 +197,7 @@ export const useChatStore = defineStore('chat', () => {
     };
     lastParsedPlanLength = 0;
     lastThinkingLength = 0;
+    lastTextLength = 0;
     lastToolCallCount = 0;
     messages.value.push(assistantMessage);
     // Vue wraps objects inserted into a reactive array. Keep the wrapped
@@ -216,6 +243,7 @@ export const useChatStore = defineStore('chat', () => {
           msg.maxTurns = event.maxTurns ?? 0;
         }
         lastThinkingLength = 0;
+        lastTextLength = 0;
         lastToolCallCount = 0;
         break;
 
@@ -251,10 +279,19 @@ export const useChatStore = defineStore('chat', () => {
         const data = event.data;
         if (!data) break;
 
-        target.content = data.text || '';
         target.thinking = data.thinking || '';
 
         if (!target.blocks) target.blocks = [];
+
+        const currentTextLen = data.text?.length ?? 0;
+        if (currentTextLen < lastTextLength) {
+          lastTextLength = 0;
+        }
+        if (currentTextLen > lastTextLength) {
+          appendTextBlock(target, data.text?.slice(lastTextLength) || '');
+          lastTextLength = currentTextLen;
+        }
+        target.content = textFromBlocks(target.blocks) || data.text || '';
 
         // Check if thinking has NEW content (length increased)
         const currentThinkingLen = data.thinking?.length ?? 0;
@@ -267,9 +304,14 @@ export const useChatStore = defineStore('chat', () => {
         const incoming = data.toolCalls || [];
         if (incoming.length > lastToolCallCount) {
           // Find the new tool calls
-          const existingIds = new Set(target.toolCalls?.map((t) => t.id) ?? []);
+          const existingBlockIds = new Set(
+            target.blocks
+              .filter((block) => block.type === 'tool_call')
+              .map((block) => block.toolCall?.id)
+              .filter((id): id is string => Boolean(id)),
+          );
           for (const tc of incoming) {
-            if (!existingIds.has(tc.id)) {
+            if (!existingBlockIds.has(tc.id)) {
               // Create a new block for this tool call
               target.blocks.push({
                 id: nextBlockId(),
@@ -557,6 +599,7 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = [];
     currentAssistantMsg = null;
     isStreaming.value = false;
+    showCallTrace.value = false;
   }
 
   function loadMessages(sessionId: string, sessionMessages: Message[]): void {

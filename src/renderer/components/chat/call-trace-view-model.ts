@@ -90,6 +90,12 @@ export type InlineCallTraceEntry =
       isCurrent: boolean;
     }
   | {
+      kind: 'text';
+      id: string;
+      text: string;
+      isCurrent: boolean;
+    }
+  | {
       kind: 'tools';
       id: string;
       label: string;
@@ -266,11 +272,21 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
       continue;
     }
 
+    if (block.type === 'text' && block.text) {
+      entries.push({
+        kind: 'text',
+        id: block.id,
+        text: block.text,
+        isCurrent: false,
+      });
+      continue;
+    }
+
     if (block.type === 'tool_call' && block.toolCall) {
       const latestToolCall =
         message.toolCalls?.find((toolCall) => toolCall.id === block.toolCall?.id) ?? block.toolCall;
       representedToolIds.add(latestToolCall.id);
-      pushToolGroup(entries, [latestToolCall], block.id, uiLanguage);
+      pushToolGroup(entries, [latestToolCall], block.id, uiLanguage, message.isStreaming);
     }
   }
 
@@ -286,7 +302,7 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
   const unrepresentedToolCalls = (message.toolCalls ?? []).filter(
     (toolCall) => !representedToolIds.has(toolCall.id),
   );
-  pushToolGroups(entries, unrepresentedToolCalls, `${message.id}:tools`, uiLanguage);
+  pushToolGroups(entries, unrepresentedToolCalls, `${message.id}:tools`, uiLanguage, message.isStreaming);
 
   const lastIndex = entries.length - 1;
   const markedEntries = entries.map((entry, index) => ({
@@ -332,7 +348,7 @@ export function buildSubagentInlineTrace(
         result.internalCalls?.find((toolCall) => toolCall.id === block.toolCall?.id) ??
         block.toolCall;
       representedToolIds.add(latestToolCall.id);
-      pushToolGroup(entries, [latestToolCall], block.id, uiLanguage);
+      pushToolGroup(entries, [latestToolCall], block.id, uiLanguage, isStreaming);
     }
   }
 
@@ -348,7 +364,7 @@ export function buildSubagentInlineTrace(
   const unrepresentedToolCalls = (result.internalCalls ?? []).filter(
     (toolCall) => !representedToolIds.has(toolCall.id),
   );
-  pushToolGroups(entries, unrepresentedToolCalls, `${result.agent}:tools`, uiLanguage);
+  pushToolGroups(entries, unrepresentedToolCalls, `${result.agent}:tools`, uiLanguage, isStreaming);
 
   const lastIndex = entries.length - 1;
   const markedEntries = entries.map((entry, index) => ({
@@ -374,13 +390,17 @@ function pushToolGroup(
   toolCalls: ToolCallContent[],
   fallbackId: string,
   language: UiLanguage,
+  isStreaming = false,
 ): void {
   if (toolCalls.length === 0) return;
-  const previous = entries[entries.length - 1];
-  if (previous?.kind === 'tools' && canMergeToolGroups(previous.toolCalls, toolCalls)) {
-    const mergedToolCalls = [...previous.toolCalls, ...toolCalls];
-    entries[entries.length - 1] = buildToolEntry(mergedToolCalls, previous.id, language);
-    return;
+  // During streaming, keep each tool call as a separate entry so the tree view can render individual lines
+  if (!isStreaming) {
+    const previous = entries[entries.length - 1];
+    if (previous?.kind === 'tools' && canMergeToolGroups(previous.toolCalls, toolCalls)) {
+      const mergedToolCalls = [...previous.toolCalls, ...toolCalls];
+      entries[entries.length - 1] = buildToolEntry(mergedToolCalls, previous.id, language);
+      return;
+    }
   }
 
   entries.push(buildToolEntry(toolCalls, fallbackId, language));
@@ -391,6 +411,7 @@ function pushToolGroups(
   toolCalls: ToolCallContent[],
   fallbackId: string,
   language: UiLanguage,
+  isStreaming = false,
 ): void {
   let groupIndex = 0;
   let group: ToolCallContent[] = [];
@@ -398,7 +419,7 @@ function pushToolGroups(
   for (const toolCall of toolCalls) {
     const previous = group[group.length - 1];
     if (previous && toolGroupKind(previous) !== toolGroupKind(toolCall)) {
-      pushToolGroup(entries, group, `${fallbackId}:${groupIndex}`, language);
+      pushToolGroup(entries, group, `${fallbackId}:${groupIndex}`, language, isStreaming);
       groupIndex += 1;
       group = [];
     }
@@ -406,7 +427,7 @@ function pushToolGroups(
   }
 
   if (group.length > 0) {
-    pushToolGroup(entries, group, `${fallbackId}:${groupIndex}`, language);
+    pushToolGroup(entries, group, `${fallbackId}:${groupIndex}`, language, isStreaming);
   }
 }
 

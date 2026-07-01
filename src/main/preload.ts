@@ -277,6 +277,11 @@ const suncodeAPI = {
   setTitleBarOverlayText(text: string): void {
     ipcRenderer.send('window:setTitleBarOverlayText', text);
   },
+
+  /** Sync window chrome colors to the resolved app theme */
+  setTheme(theme: string): void {
+    ipcRenderer.send('window:setTheme', theme);
+  },
   async getWorkingDir(): Promise<string> {
     return ipcRenderer.invoke('app:getWorkingDir');
   },

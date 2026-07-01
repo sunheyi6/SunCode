@@ -80,7 +80,7 @@ button {
   font-size: 13px;
   cursor: pointer;
   border: none;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--border-radius);
   padding: 6px 14px;
   background: var(--color-surface);
   color: var(--color-text);

@@ -349,7 +349,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--color-bg);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
 }

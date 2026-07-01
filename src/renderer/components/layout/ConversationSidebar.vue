@@ -1,17 +1,31 @@
 <script setup lang="ts">
 import type { SessionMeta } from '@shared/types';
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useSessionsStore } from '../../stores/sessions';
 import { useChatStore } from '../../stores/chat';
 import { useUpdateStore } from '../../stores/update';
+import { useSettingsStore } from '../../stores/settings';
 import { bridge } from '../../api/bridge';
 import { getVisibleSessionGroups } from './session-list';
+
+const emit = defineEmits<{
+  openSettings: [section: string];
+}>();
 
 const sessionsStore = useSessionsStore();
 const chatStore = useChatStore();
 const updateStore = useUpdateStore();
-const searchOpen = ref(false);
+const settingsStore = useSettingsStore();
 const searchQuery = ref('');
+const searchOpen = ref(false);
+const searchInputRef = ref<HTMLInputElement>();
+
+watch(searchOpen, async (open) => {
+  if (open) {
+    await nextTick();
+    searchInputRef.value?.focus();
+  }
+});
 const selectMode = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
 
@@ -194,51 +208,57 @@ function formatTime(value: string): string {
     </div>
 
     <div class="sidebar-actions">
-      <template v-if="!searchOpen && !selectMode">
+      <!-- Row 1: New conversation + actions -->
+      <div class="action-row">
         <button class="primary-action" @click="handleCreateSession()">
           <span class="action-icon">＋</span>
           <span>新建对话</span>
         </button>
         <button
           class="icon-action"
-          title="在新文件夹中新建对话"
-          @click="handleCreateSessionWithNewFolder"
-        >
-          📁
-        </button>
-        <button
-          class="icon-action"
-          title="全局查询"
-          @click="searchOpen = true"
+          :class="{ active: searchOpen }"
+          title="搜索对话"
+          @click="searchOpen = !searchOpen"
         >
           ⌕
         </button>
-        <button
-          v-if="sessionsStore.sessions.length > 0"
-          class="icon-action"
-          title="批量管理"
-          @click="enterSelectMode()"
-        >
-          ☰
-        </button>
-      </template>
-      <template v-else-if="selectMode">
-        <span class="select-count">已选 {{ selectedIds.size }} 项</span>
-        <button class="text-action" @click="exitSelectMode()">取消</button>
-      </template>
-      <template v-else>
-        <div class="global-search">
-          <span>⌕</span>
-          <input
-            v-model="searchQuery"
-            autofocus
-            placeholder="查询所有项目和对话..."
-            @keyup.escape="searchOpen = false"
-          />
-          <button v-if="searchQuery" @click="searchQuery = ''">×</button>
-          <button class="search-close" @click="searchOpen = false; searchQuery = ''">✕</button>
-        </div>
-      </template>
+        <template v-if="!selectMode">
+          <button
+            v-if="sessionsStore.sessions.length > 0"
+            class="icon-action"
+            title="批量管理"
+            @click="enterSelectMode()"
+          >
+            ☰
+          </button>
+        </template>
+        <template v-else>
+          <span class="select-count">已选 {{ selectedIds.size }} 项</span>
+          <button class="text-action" @click="exitSelectMode()">取消</button>
+        </template>
+      </div>
+
+      <!-- Search popup (toggles open) -->
+      <div v-if="searchOpen" class="action-row search-row">
+        <span class="search-icon">⌕</span>
+        <input
+          ref="searchInputRef"
+          v-model="searchQuery"
+          placeholder="搜索对话..."
+          @keyup.escape="searchOpen = false; searchQuery = ''"
+        />
+        <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">×</button>
+        <button class="search-close-btn" @click="searchOpen = false; searchQuery = ''">✕</button>
+      </div>
+
+      <!-- Row 2: Skills -->
+      <div class="action-row skills-row" @click="emit('openSettings', 'skills')">
+        <span class="skills-icon">$</span>
+        <span class="skills-label">技能</span>
+        <span v-if="settingsStore.settings.skills.length > 0" class="skills-count">
+          {{ settingsStore.settings.skills.length }}
+        </span>
+      </div>
     </div>
 
     <div class="conversation-list">
@@ -396,13 +416,20 @@ function formatTime(value: string): string {
 
 .sidebar-actions {
   display: flex;
-  gap: 4px;
-  align-items: center;
-  min-height: 54px;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 62%, transparent);
   -webkit-app-region: drag;
   app-region: drag;
+}
+
+.action-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .primary-action,
@@ -446,6 +473,11 @@ function formatTime(value: string): string {
   color: var(--color-text);
 }
 
+.icon-action.active {
+  background: var(--color-surface);
+  color: var(--color-accent);
+}
+
 .select-count {
   display: flex;
   flex: 1;
@@ -462,6 +494,8 @@ function formatTime(value: string): string {
   background: var(--color-surface);
   color: var(--color-text-secondary);
   font-size: 13px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .text-action:hover {
@@ -473,38 +507,105 @@ function formatTime(value: string): string {
 
 }
 
-.global-search {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 9px;
-  border: 1px solid var(--color-accent);
+/* Row 2: Search */
+.search-row {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
+  transition: border-color 0.15s;
 }
 
-.global-search input {
+.search-row:focus-within {
+  border-color: var(--color-accent);
+}
+
+.search-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.search-row input {
   min-width: 0;
   flex: 1;
-  padding: 7px 0;
+  padding: 6px 0;
   border: 0;
   background: transparent;
+  color: var(--color-text);
+  font-size: 13px;
+  outline: none;
 }
 
-.global-search button {
-  padding: 0 2px;
-  background: transparent;
+.search-row input::placeholder {
   color: var(--color-text-muted);
 }
 
-.search-close {
+.search-clear {
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
   font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.search-clear:hover {
+  color: var(--color-text);
+}
+
+.search-close-btn {
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.search-close-btn:hover {
+  color: var(--color-text);
+}
+
+/* Row 3: Skills */
+.skills-row {
+  height: 28px;
   padding: 0 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: var(--border-radius-sm);
+  transition: background 0.12s, color 0.12s;
+}
+
+.skills-row:hover {
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+.skills-icon {
+  font-size: 13px;
+  font-weight: 700;
+  margin-right: 6px;
+  color: var(--color-accent);
+}
+
+.skills-label {
+  flex: 1;
+}
+
+.skills-count {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
 }
 
 .select-all-row {

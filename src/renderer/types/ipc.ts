@@ -181,6 +181,7 @@ declare global {
 
       // Window
       setTitleBarOverlayText(text: string): void;
+      setTheme(theme: string): void;
       // Subagent
       onSubagentProgress(callback: (data: SessionSubagentProgressEvent) => void): () => void;
       // Goal

@@ -29,6 +29,7 @@ export const useSettingsStore = defineStore('settings', () => {
       applyTheme(settings.value.theme);
       applyFontSize(settings.value.fontSize);
       isLoaded.value = true;
+      bridge.setTheme(resolveTheme(settings.value.theme));
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -55,6 +56,7 @@ export const useSettingsStore = defineStore('settings', () => {
   function setTheme(theme: AppSettings['theme']): void {
     applyTheme(theme);
     update({ theme });
+    bridge.setTheme(resolveTheme(theme));
   }
 
   function applyFontSize(size: number): void {

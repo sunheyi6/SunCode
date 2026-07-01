@@ -3,6 +3,19 @@ import { beforeEach, describe, expect, test } from 'vitest';
 import { useChatStore } from '../../src/renderer/stores/chat';
 import type { ToolCallContent } from '../../src/shared/types';
 
+function blockSummary(
+  blocks: NonNullable<ReturnType<typeof useChatStore>['messages'][number]['blocks']> | undefined,
+) {
+  return (blocks ?? []).map((block) => ({
+    type: block.type,
+    thinking: block.thinking,
+    text: block.text,
+    toolCall: block.toolCall
+      ? { id: block.toolCall.id, status: block.toolCall.status }
+      : undefined,
+  }));
+}
+
 describe('chat store stream blocks', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -22,7 +35,7 @@ describe('chat store stream blocks', () => {
       'session-1',
     );
 
-    expect(store.messages[0]?.blocks).toMatchObject([
+    expect(blockSummary(store.messages[0]?.blocks)).toEqual([
       { type: 'thinking', thinking: 'The user' },
     ]);
   });
@@ -73,10 +86,78 @@ describe('chat store stream blocks', () => {
       'session-1',
     );
 
-    expect(store.messages[0]?.blocks).toMatchObject([
+    expect(blockSummary(store.messages[0]?.blocks)).toEqual([
       { type: 'thinking', thinking: 'Read first' },
       { type: 'tool_call', toolCall: { id: 'tool-1' } },
       { type: 'thinking', thinking: '\nThen inspect result' },
+    ]);
+  });
+
+  test('keeps answer fragments between thinking and tool call blocks', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+
+    store.handleStreamEvent(
+      { type: 'message_update', data: { text: '', thinking: 'Think first', toolCalls: [] } },
+      'session-1',
+    );
+    store.handleStreamEvent(
+      {
+        type: 'message_update',
+        data: { text: 'Here is what I found.', thinking: 'Think first', toolCalls: [] },
+      },
+      'session-1',
+    );
+    store.handleStreamEvent(
+      {
+        type: 'message_update',
+        data: {
+          text: 'Here is what I found.',
+          thinking: 'Think first',
+          toolCalls: [
+            {
+              type: 'tool_call',
+              id: 'tool-1',
+              name: 'read',
+              arguments: '{"file_path":"src/a.ts"}',
+            },
+          ],
+        },
+      },
+      'session-1',
+    );
+
+    expect(store.messages[0]?.content).toBe('Here is what I found.');
+    expect(blockSummary(store.messages[0]?.blocks)).toEqual([
+      { type: 'thinking', thinking: 'Think first' },
+      { type: 'text', text: 'Here is what I found.' },
+      { type: 'tool_call', toolCall: { id: 'tool-1' } },
+    ]);
+  });
+
+  test('creates a tool block even if tool execution starts before the stream snapshot arrives', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+
+    const toolCall: ToolCallContent = {
+      type: 'tool_call',
+      id: 'tool-1',
+      name: 'read',
+      arguments: '{"file_path":"src/a.ts"}',
+    };
+    store.startToolExecution(toolCall, 'session-1');
+    store.handleStreamEvent(
+      {
+        type: 'message_update',
+        data: { text: '', thinking: '', toolCalls: [toolCall] },
+      },
+      'session-1',
+    );
+
+    expect(blockSummary(store.messages[0]?.blocks)).toEqual([
+      { type: 'tool_call', toolCall: { id: 'tool-1', status: 'running' } },
     ]);
   });
 
@@ -114,7 +195,7 @@ describe('chat store stream blocks', () => {
       'session-1',
     );
 
-    expect(store.messages[0]?.blocks).toMatchObject([
+    expect(blockSummary(store.messages[0]?.blocks)).toEqual([
       { type: 'thinking', thinking: 'First turn thinking' },
       { type: 'tool_call', toolCall: { id: 'tool-1' } },
       { type: 'thinking', thinking: 'Second turn thinking' },
@@ -199,7 +280,7 @@ describe('chat store stream blocks', () => {
 
     const result = store.messages[0]?.toolCalls?.[0]?.result?.subagentResults?.[0];
 
-    expect(result?.internalBlocks).toMatchObject([
+    expect(blockSummary(result?.internalBlocks)).toEqual([
       { type: 'thinking', thinking: 'Read first' },
       { type: 'tool_call', toolCall: { id: 'read-1', status: 'done' } },
       { type: 'thinking', thinking: '\nThen inspect result' },
