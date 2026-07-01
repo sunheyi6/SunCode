@@ -6,6 +6,8 @@ import type { UiLanguage } from '../../utils/ui-language';
 import { buildSubagentInlineTrace, type InlineCallTraceEntry } from './call-trace-view-model';
 import StreamingText from './StreamingText.vue';
 
+const INLINE_TEXT_LIMIT = 80;
+
 const props = withDefaults(
   defineProps<{
     entries: InlineCallTraceEntry[];
@@ -163,6 +165,11 @@ function streamingToolLabel(call: ToolCallContent): string {
   return target ? `${label}: ${target}` : label;
 }
 
+function streamingToolEntryLabel(call: ToolCallContent): string {
+  const prefix = props.uiLanguage === 'en' ? 'Tool' : '工具';
+  return `${prefix} · ${streamingToolLabel(call)}`;
+}
+
 function localizedStreamingToolName(name: string): string {
   if (props.uiLanguage === 'en') {
     switch (name) {
@@ -267,9 +274,23 @@ function isLastEntry(index: number): boolean {
   return index === props.entries.length - 1;
 }
 
+function isShortInlineText(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && trimmed.length <= INLINE_TEXT_LIMIT && !trimmed.includes('\n');
+}
+
+function inlineTextPreview(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
 function thinkingLabel(entry: InlineCallTraceEntry): string {
   if (entry.kind !== 'thinking') return props.uiLanguage === 'en' ? 'Thinking' : '思考';
-  const label = props.uiLanguage === 'en' ? 'Thinking' : '思考';
+  return props.uiLanguage === 'en' ? 'Thinking' : '思考';
+}
+
+function outputEntryLabel(entry: InlineCallTraceEntry): string {
+  if (entry.kind !== 'text') return props.uiLanguage === 'en' ? 'Output' : '输出';
+  const label = props.uiLanguage === 'en' ? 'Output' : '输出';
   return `${label} · ${entry.text.length}`;
 }
 </script>
@@ -284,7 +305,14 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
       :class="{ 'tree-branch-last': isLastEntry(entryIdx) }"
     >
       <!-- Thinking line -->
-      <details v-if="entry.kind === 'thinking'" class="tree-details tree-thinking">
+      <div
+        v-if="entry.kind === 'thinking' && isShortInlineText(entry.text)"
+        class="tree-line tree-inline-text-line tree-line-thinking"
+      >
+        <span class="tree-think-label">{{ thinkingLabel(entry) }}</span>
+        <span class="tree-inline-text">{{ inlineTextPreview(entry.text) }}</span>
+      </div>
+      <details v-else-if="entry.kind === 'thinking'" class="tree-details tree-thinking">
         <summary class="tree-line tree-line-thinking">
           <span class="tree-think-label">{{ thinkingLabel(entry) }}</span>
         </summary>
@@ -294,9 +322,23 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
       </details>
 
       <!-- Text line -->
-      <div v-else-if="entry.kind === 'text'" class="tree-answer-fragment">
-        <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isCurrent" />
+      <div
+        v-else-if="entry.kind === 'text' && isShortInlineText(entry.text)"
+        class="tree-line tree-inline-text-line tree-line-output"
+      >
+        <span class="tree-output-label">{{ outputEntryLabel(entry) }}</span>
+        <span class="tree-inline-text tree-inline-output-text">
+          {{ inlineTextPreview(entry.text) }}
+        </span>
       </div>
+      <details v-else-if="entry.kind === 'text'" class="tree-details tree-output-details" open>
+        <summary class="tree-line tree-line-output">
+          <span class="tree-output-label">{{ outputEntryLabel(entry) }}</span>
+        </summary>
+        <div class="tree-answer-fragment">
+          <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isCurrent" />
+        </div>
+      </details>
 
       <!-- Tool line -->
       <details v-else class="tree-details tree-tool-details">
@@ -304,7 +346,7 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
           class="tree-line tree-line-tool"
           :class="{ 'tree-line-active': entry.hasRunning }"
         >
-          <span class="tree-tool-label">{{ streamingToolLabel(entryToolCall(entry)!) }}</span>
+          <span class="tree-tool-label">{{ streamingToolEntryLabel(entryToolCall(entry)!) }}</span>
           <span
             class="tree-tool-status"
             :class="streamingStatusClass(entryToolCall(entry)!)"
@@ -368,8 +410,17 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
   <!-- ═══ Completed (details) view ═══ -->
   <div v-else class="inline-call-trace">
     <template v-for="entry in entries" :key="entry.id">
+      <div
+        v-if="entry.kind === 'thinking' && isShortInlineText(entry.text)"
+        class="trace-inline-text-row trace-thinking-inline"
+        :class="{ current: entry.isCurrent }"
+      >
+        <span class="trace-inline-label">{{ thinkingLabel(entry) }}</span>
+        <span class="trace-inline-text">{{ inlineTextPreview(entry.text) }}</span>
+      </div>
+
       <details
-        v-if="entry.kind === 'thinking'"
+        v-else-if="entry.kind === 'thinking'"
         class="trace-thinking-details"
         :class="{ current: entry.isCurrent }"
       >
@@ -378,12 +429,24 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
       </details>
 
       <div
-        v-else-if="entry.kind === 'text'"
-        class="trace-answer-fragment"
+        v-else-if="entry.kind === 'text' && isShortInlineText(entry.text)"
+        class="trace-inline-text-row trace-output-inline"
         :class="{ current: entry.isCurrent }"
       >
-        <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isCurrent" />
+        <span class="trace-inline-label">{{ outputEntryLabel(entry) }}</span>
+        <span class="trace-inline-text">{{ inlineTextPreview(entry.text) }}</span>
       </div>
+
+      <details
+        v-else-if="entry.kind === 'text'"
+        class="trace-output-details"
+        :class="{ current: entry.isCurrent }"
+      >
+        <summary class="trace-output-summary">{{ outputEntryLabel(entry) }}</summary>
+        <div class="trace-answer-fragment">
+          <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isCurrent" />
+        </div>
+      </details>
 
       <details
         v-else
@@ -535,6 +598,10 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
   padding: 2px 0 4px;
 }
 
+.tree-line-output {
+  padding: 2px 0 4px;
+}
+
 .tree-details {
   min-width: 0;
 }
@@ -569,6 +636,31 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
   color: var(--color-text-muted);
 }
 
+.tree-output-label {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.tree-inline-text-line {
+  min-width: 0;
+}
+
+.tree-inline-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.tree-inline-output-text {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
 .tree-think-text {
   font-size: 12px;
   line-height: 1.6;
@@ -585,6 +677,10 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
   font-size: 14px;
   line-height: 1.6;
   padding: 3px 0 7px;
+}
+
+.tree-output-details .tree-answer-fragment {
+  padding: 2px 0 8px;
 }
 
 /* Tool line */
@@ -751,7 +847,34 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
   color: var(--color-text-muted);
 }
 
-.trace-thinking-summary {
+.trace-inline-text-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.trace-inline-label {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.trace-inline-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.trace-output-inline .trace-inline-text {
+  color: var(--color-text);
+}
+
+.trace-thinking-summary,
+.trace-output-summary {
   display: inline-flex;
   align-items: center;
   cursor: pointer;
@@ -760,11 +883,13 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
   line-height: 1.4;
 }
 
-.trace-thinking-summary::-webkit-details-marker {
+.trace-thinking-summary::-webkit-details-marker,
+.trace-output-summary::-webkit-details-marker {
   display: none;
 }
 
-.trace-thinking-summary::after {
+.trace-thinking-summary::after,
+.trace-output-summary::after {
   content: '>';
   display: inline-block;
   margin-left: 8px;
@@ -775,13 +900,18 @@ function thinkingLabel(entry: InlineCallTraceEntry): string {
   transition: transform 0.15s;
 }
 
-.trace-thinking-details[open] > .trace-thinking-summary::after {
+.trace-thinking-details[open] > .trace-thinking-summary::after,
+.trace-output-details[open] > .trace-output-summary::after {
   transform: rotate(90deg);
 }
 
 .trace-thinking-details .trace-node-text {
   margin-top: 8px;
   color: var(--color-text-secondary);
+}
+
+.trace-output-details .trace-answer-fragment {
+  margin-top: 8px;
 }
 
 .trace-answer-fragment {

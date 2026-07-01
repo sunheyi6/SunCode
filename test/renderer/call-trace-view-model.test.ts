@@ -93,15 +93,30 @@ describe('buildCallTraceOutline', () => {
       }),
       sections: expect.arrayContaining([
         expect.objectContaining({ kind: 'input', itemCount: 1, defaultOpen: false }),
-        expect.objectContaining({ kind: 'thinking', charCount: 10, defaultOpen: false }),
-        expect.objectContaining({ kind: 'tools', itemCount: 1, defaultOpen: false }),
+        expect.objectContaining({
+          kind: 'thinking',
+          title: '思考',
+          charCount: 10,
+          defaultOpen: false,
+        }),
+        expect.objectContaining({
+          kind: 'tools',
+          title: '工具 · 1 个',
+          itemCount: 1,
+          defaultOpen: false,
+        }),
       ]),
     });
     expect(outline.entries[2]).toMatchObject({
       kind: 'turn',
       turnNumber: 2,
       sections: expect.arrayContaining([
-        expect.objectContaining({ kind: 'response', charCount: 4, defaultOpen: false }),
+        expect.objectContaining({
+          kind: 'response',
+          title: '输出 · 4 字符',
+          charCount: 4,
+          defaultOpen: false,
+        }),
       ]),
     });
   });

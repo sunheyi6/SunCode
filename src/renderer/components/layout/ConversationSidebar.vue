@@ -112,6 +112,11 @@ const visibleGroupedSessions = computed(() =>
   getVisibleSessionGroups(groupedSessions.value, expandedSessionGroups.value),
 );
 
+const activeGroupPath = computed(() =>
+  sessionsStore.sessions.find((session) => session.id === sessionsStore.activeSessionId)
+    ?.workingDirectory ?? '',
+);
+
 const allDisplayedIds = computed(() => {
   const ids: string[] = [];
   for (const group of visibleGroupedSessions.value) {
@@ -174,12 +179,26 @@ async function deleteSelected(): Promise<void> {
   exitSelectMode();
 }
 
+async function createSessionInGroup(path: string): Promise<void> {
+  await sessionsStore.createSession(path);
+}
+
+function groupTone(path: string): string {
+  const tones = ['yellow', 'mint', 'blue', 'violet', 'rose'];
+  let hash = 0;
+  for (const ch of path) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return tones[hash % tones.length] ?? 'yellow';
+}
+
 function formatTime(value: string): string {
   const date = new Date(value);
   const today = new Date();
   if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return '今天';
   }
+  const elapsed = today.getTime() - date.getTime();
+  const days = Math.max(1, Math.floor(elapsed / 86_400_000));
+  if (days < 30) return `${days}天`;
   return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
 }
 </script>

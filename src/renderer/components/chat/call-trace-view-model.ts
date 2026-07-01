@@ -193,7 +193,7 @@ function buildSections(turn: TurnDetail, toolCalls: ToolCallContent[]): CallTrac
   if (turn.response.thinking) {
     sections.push({
       kind: 'thinking',
-      title: `思考 · ${turn.response.thinking.length} 字符`,
+      title: '思考',
       text: turn.response.thinking,
       charCount: turn.response.thinking.length,
       defaultOpen: false,
@@ -214,7 +214,7 @@ function buildSections(turn: TurnDetail, toolCalls: ToolCallContent[]): CallTrac
   if (turn.response.text) {
     sections.push({
       kind: 'response',
-      title: `回复 · ${turn.response.text.length} 字符`,
+      title: `输出 · ${turn.response.text.length} 字符`,
       text: turn.response.text,
       charCount: turn.response.text.length,
       defaultOpen: false,
