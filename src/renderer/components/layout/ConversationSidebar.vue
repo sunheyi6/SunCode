@@ -84,8 +84,9 @@ function projectName(path: string): string {
 
 const filteredSessions = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
-  if (!query) return sessionsStore.sortedSessions;
-  return sessionsStore.sortedSessions.filter(
+  const nonEmptySessions = sessionsStore.sortedSessions.filter((session) => session.messageCount > 0);
+  if (!query) return nonEmptySessions;
+  return nonEmptySessions.filter(
     (session) =>
       session.name.toLowerCase().includes(query) ||
       session.workingDirectory.toLowerCase().includes(query),
@@ -227,38 +228,38 @@ function formatTime(value: string): string {
     </div>
 
     <div class="sidebar-actions">
-      <!-- Row 1: New conversation + actions -->
-      <div class="action-row">
-        <button class="primary-action" @click="handleCreateSession()">
-          <span class="action-icon">＋</span>
-          <span>新建对话</span>
+      <div class="sidebar-nav">
+        <span class="app-mark" aria-label="SunCode">S</span>
+        <button class="nav-arrow" title="后退">←</button>
+        <button class="nav-arrow muted" title="前进">→</button>
+      </div>
+
+      <div class="command-stack">
+        <button class="command-row" @click="handleCreateSession()">
+          <span class="command-icon command-plus">＋</span>
+          <span class="command-label">新建任务</span>
+          <span class="command-shortcut">Ctrl+N</span>
         </button>
         <button
-          class="icon-action"
+          class="command-row"
           :class="{ active: searchOpen }"
           title="搜索对话"
           @click="searchOpen = !searchOpen"
         >
-          ⌕
+          <span class="command-icon">⌕</span>
+          <span class="command-label">搜索</span>
+          <span class="command-shortcut">Ctrl+K</span>
         </button>
-        <template v-if="!selectMode">
-          <button
-            v-if="sessionsStore.sessions.length > 0"
-            class="icon-action"
-            title="批量管理"
-            @click="enterSelectMode()"
-          >
-            ☰
-          </button>
-        </template>
-        <template v-else>
-          <span class="select-count">已选 {{ selectedIds.size }} 项</span>
-          <button class="text-action" @click="exitSelectMode()">取消</button>
-        </template>
+        <button class="command-row" @click="emit('openSettings', 'skills')">
+          <span class="command-icon">✣</span>
+          <span class="command-label">技能</span>
+          <span v-if="settingsStore.settings.skills.length > 0" class="command-shortcut">
+            {{ settingsStore.settings.skills.length }}
+          </span>
+        </button>
       </div>
 
-      <!-- Search popup (toggles open) -->
-      <div v-if="searchOpen" class="action-row search-row">
+      <div v-if="searchOpen" class="search-row">
         <span class="search-icon">⌕</span>
         <input
           ref="searchInputRef"
@@ -267,16 +268,29 @@ function formatTime(value: string): string {
           @keyup.escape="searchOpen = false; searchQuery = ''"
         />
         <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">×</button>
-        <button class="search-close-btn" @click="searchOpen = false; searchQuery = ''">✕</button>
       </div>
 
-      <!-- Row 2: Skills -->
-      <div class="action-row skills-row" @click="emit('openSettings', 'skills')">
-        <span class="skills-icon">$</span>
-        <span class="skills-label">技能</span>
-        <span v-if="settingsStore.settings.skills.length > 0" class="skills-count">
-          {{ settingsStore.settings.skills.length }}
-        </span>
+      <div class="scope-toolbar">
+        <button class="scope-chip active" type="button">
+          <span>#</span>
+          <span>分组</span>
+        </button>
+        <button class="scope-chip" type="button" @click="handleCreateSessionWithNewFolder()">
+          <span>□</span>
+          <span>项目</span>
+        </button>
+        <span class="scope-spacer" />
+        <button class="scope-icon" title="展开/收起">↙</button>
+        <button class="scope-icon" title="按分组">#</button>
+        <button
+          v-if="!selectMode"
+          class="scope-icon"
+          title="批量管理"
+          @click="enterSelectMode()"
+        >
+          ▱
+        </button>
+        <button v-else class="scope-text" @click="exitSelectMode()">取消 {{ selectedIds.size }}</button>
       </div>
     </div>
 
@@ -291,20 +305,35 @@ function formatTime(value: string): string {
         <span>{{ allSelected ? '取消全选' : '全选' }}</span>
       </label>
 
-      <section v-for="group in visibleGroupedSessions" :key="group.path" class="project-group">
+      <section
+        v-for="group in visibleGroupedSessions"
+        :key="group.path"
+        class="project-group"
+        :class="[
+          `tone-${groupTone(group.path)}`,
+          { active: group.path === activeGroupPath },
+        ]"
+      >
         <div
           class="project-heading"
           :class="{ collapsed: collapsedGroups.has(group.path) }"
           :title="group.path"
           @click="toggleGroup(group.path)"
         >
-          <span class="project-chevron">{{ collapsedGroups.has(group.path) ? '▶' : '▼' }}</span>
-          <span class="project-icon">◇</span>
+          <span class="project-icon">#</span>
           <span class="project-name">{{ projectName(group.path) }}</span>
+          <span class="project-chevron">{{ collapsedGroups.has(group.path) ? '›' : '⌄' }}</span>
           <span class="project-count">{{ group.totalCount }}</span>
+          <button
+            class="project-add"
+            title="在此项目中新建任务"
+            @click.stop="createSessionInGroup(group.path)"
+          >
+            ⊕
+          </button>
         </div>
 
-        <template v-if="!collapsedGroups.has(group.path)">
+        <div v-if="!collapsedGroups.has(group.path)" class="project-sessions">
           <div
             v-for="session in group.sessions"
             :key="session.id"
@@ -328,10 +357,13 @@ function formatTime(value: string): string {
               @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
             >
               <span class="conversation-mark" :class="{ running: chatStore.streamingSessionIds.has(session.id) }" />
-              <span class="conversation-copy">
-                <span class="conversation-name">{{ session.name }}</span>
-                <span class="conversation-time">{{ formatTime(session.updated) }}</span>
-              </span>
+              <span class="conversation-name">{{ session.name }}</span>
+              <span
+                v-if="chatStore.streamingSessionIds.has(session.id)"
+                class="conversation-spinner"
+                aria-hidden="true"
+              />
+              <span class="conversation-time">{{ formatTime(session.updated) }}</span>
             </button>
 
             <!-- Delete button on hover (hidden in select mode) -->
@@ -353,7 +385,7 @@ function formatTime(value: string): string {
           >
             显示其余 {{ group.hiddenCount }} 个对话
           </button>
-        </template>
+        </div>
       </section>
 
       <div v-if="groupedSessions.length === 0" class="empty-conversations">
@@ -852,5 +884,416 @@ function formatTime(value: string): string {
 
 .batch-delete-btn:disabled {
   opacity: 0.35;
+}
+
+/* Codex-style project sidebar */
+.conversation-sidebar {
+  padding-top: 0;
+  --sidebar-panel-bg: #e9e9ec;
+  --sidebar-panel-surface: #f7f7f8;
+  --sidebar-panel-hover: #dedee1;
+  --sidebar-panel-active: #d9d9dc;
+  --sidebar-panel-text: #252528;
+  --sidebar-panel-secondary: #77777d;
+  --sidebar-panel-muted: #a0a0a7;
+  --sidebar-panel-line: #cfcfd4;
+  background: var(--sidebar-panel-bg);
+  color: var(--sidebar-panel-text);
+}
+
+.sidebar-actions {
+  gap: 14px;
+  padding: 14px 14px 8px;
+  border-bottom: 0;
+}
+
+.sidebar-nav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 30px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.app-mark {
+  display: inline-flex;
+  width: 23px;
+  height: 23px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: #111114;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.nav-arrow {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sidebar-panel-secondary);
+  font-size: 20px;
+  line-height: 20px;
+}
+
+.nav-arrow.muted {
+  color: var(--sidebar-panel-muted);
+}
+
+.command-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.command-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 0 0 7px;
+  border: 0;
+  background: transparent;
+  color: var(--sidebar-panel-text);
+  text-align: left;
+}
+
+.command-row:hover,
+.command-row.active {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.command-icon {
+  display: inline-flex;
+  width: 19px;
+  height: 19px;
+  align-items: center;
+  justify-content: center;
+  color: var(--sidebar-panel-text);
+  font-size: 21px;
+  line-height: 1;
+}
+
+.command-plus {
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  font-size: 15px;
+}
+
+.command-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sidebar-panel-text);
+  font-size: 15px;
+  font-weight: 450;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-shortcut {
+  color: var(--sidebar-panel-muted);
+  font-size: 14px;
+}
+
+.search-row {
+  height: 34px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--sidebar-panel-surface);
+}
+
+.scope-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.scope-chip {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sidebar-panel-secondary);
+  font-size: 14px;
+}
+
+.scope-chip.active {
+  background: var(--sidebar-panel-surface);
+  color: var(--sidebar-panel-text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.scope-spacer {
+  flex: 1;
+}
+
+.scope-icon,
+.scope-text {
+  display: inline-flex;
+  min-width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--sidebar-panel-secondary);
+  font-size: 16px;
+}
+
+.scope-text {
+  font-size: 12px;
+}
+
+.scope-icon:hover,
+.scope-text:hover {
+  background: var(--sidebar-panel-hover);
+}
+
+.conversation-list {
+  padding: 12px 12px 14px 18px;
+  scrollbar-color: var(--sidebar-panel-muted) transparent;
+}
+
+.project-group {
+  --project-color: var(--color-yellow);
+  position: relative;
+}
+
+.project-group + .project-group {
+  margin-top: 24px;
+}
+
+.project-group.tone-yellow { --project-color: #ffd23f; }
+.project-group.tone-mint { --project-color: #58e1bd; }
+.project-group.tone-blue { --project-color: #69a7ff; }
+.project-group.tone-violet { --project-color: #b893ff; }
+.project-group.tone-rose { --project-color: #ff8fa3; }
+
+.project-heading {
+  display: grid;
+  grid-template-columns: 25px minmax(0, auto) 14px minmax(24px, auto) 24px;
+  align-items: center;
+  gap: 8px;
+  min-height: 31px;
+  padding: 0 7px 0 2px;
+  color: var(--sidebar-panel-text);
+  font-size: 16px;
+  font-weight: 450;
+  text-transform: none;
+}
+
+.project-heading:hover {
+  background: transparent;
+  color: var(--sidebar-panel-text);
+}
+
+.project-icon {
+  display: inline-flex;
+  width: 25px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  border-radius: 50%;
+  background: var(--project-color);
+  color: color-mix(in srgb, #000 65%, var(--project-color));
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.project-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--sidebar-panel-text);
+  line-height: 25px;
+}
+
+.project-chevron {
+  display: inline-flex;
+  width: 14px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  color: var(--sidebar-panel-muted);
+  font-size: 0;
+  line-height: 0;
+}
+
+.project-chevron::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.project-heading.collapsed .project-chevron::before {
+  transform: translateX(-1px) rotate(-45deg);
+}
+
+.project-count {
+  justify-self: end;
+  min-width: 24px;
+  padding: 1px 7px 2px;
+  border-radius: 999px;
+  background: var(--sidebar-panel-hover);
+  color: var(--sidebar-panel-secondary);
+  font-size: 14px;
+  font-weight: 450;
+}
+
+.project-add {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sidebar-panel-secondary);
+  font-size: 17px;
+}
+
+.project-add:hover {
+  background: var(--sidebar-panel-surface);
+  color: var(--sidebar-panel-text);
+}
+
+.project-sessions {
+  position: relative;
+  margin-top: 7px;
+  padding-left: 26px;
+}
+
+.project-sessions::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--project-color);
+}
+
+.conversation-row {
+  min-width: 0;
+  border-radius: 7px;
+}
+
+.conversation-row + .conversation-row {
+  margin-top: 2px;
+}
+
+.conversation-row:hover,
+.conversation-row:hover .conversation-item {
+  background: transparent;
+}
+
+.conversation-row.active {
+  background: transparent;
+}
+
+.conversation-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  min-height: 35px;
+  padding: 0 10px 0 13px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--sidebar-panel-text);
+}
+
+.conversation-row:hover .conversation-item {
+  background: color-mix(in srgb, var(--sidebar-panel-hover) 70%, transparent);
+}
+
+.conversation-row.active .conversation-item,
+.conversation-item.active {
+  background: var(--sidebar-panel-active);
+  color: var(--sidebar-panel-text);
+}
+
+.conversation-mark {
+  display: none;
+}
+
+.conversation-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sidebar-panel-text);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-time {
+  align-self: center;
+  color: var(--sidebar-panel-secondary);
+  font-size: 16px;
+  line-height: 1;
+  transition: opacity 0.12s ease;
+}
+
+.conversation-row:hover .conversation-time {
+  opacity: 0;
+}
+
+.conversation-spinner {
+  width: 16px;
+  height: 16px;
+  align-self: center;
+  border: 2px solid color-mix(in srgb, var(--sidebar-panel-muted) 40%, transparent);
+  border-top-color: var(--sidebar-panel-secondary);
+  border-radius: 50%;
+  animation: update-spin 0.8s linear infinite;
+}
+
+.conversation-row .delete-btn {
+  top: 50%;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: var(--sidebar-panel-surface);
+  font-size: 16px;
+}
+
+.select-all-row {
+  padding-left: 8px;
+}
+
+.show-more-sessions {
+  margin-left: 4px;
+  color: var(--sidebar-panel-secondary);
+}
+
+.empty-conversations {
+  color: var(--sidebar-panel-secondary);
 }
 </style>

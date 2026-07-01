@@ -18,7 +18,7 @@ const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
 
-const sidebarWidth = ref(260);
+const sidebarWidth = ref(320);
 const tracePanelWidth = ref(380);
 const isResizing = ref(false);
 const isResizingTrace = ref(false);
@@ -40,7 +40,7 @@ function startResize(e: MouseEvent): void {
 
   function onMove(moveEvent: MouseEvent): void {
     const delta = moveEvent.clientX - startX;
-    sidebarWidth.value = Math.max(180, Math.min(500, startWidth + delta));
+    sidebarWidth.value = Math.max(260, Math.min(500, startWidth + delta));
   }
 
   function onUp(): void {
@@ -172,19 +172,20 @@ const traceSystemPrompt = computed(() => {
 
 /* Sidebar */
 .sidebar {
-  background: var(--color-bg-secondary);
+  background: #e9e9ec;
   overflow: hidden;
   flex-shrink: 0;
   user-select: none;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border-color);
+  border-right: 1px solid #d7d7dc;
 }
 
 /* Settings button at sidebar bottom */
 .sidebar-footer {
   padding: 8px 10px 10px;
-  border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-top: 1px solid #d7d7dc;
+  background: #e9e9ec;
   flex-shrink: 0;
 }
 
@@ -197,15 +198,15 @@ const traceSystemPrompt = computed(() => {
   background: transparent;
   border: none;
   border-radius: var(--border-radius-sm);
-  color: var(--color-text-secondary);
+  color: #77777d;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.12s;
 }
 
 .settings-btn:hover {
-  background: var(--color-surface-hover);
-  color: var(--color-text);
+  background: #dedee1;
+  color: #252528;
 }
 
 .settings-icon {
