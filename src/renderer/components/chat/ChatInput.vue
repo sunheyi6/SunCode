@@ -199,9 +199,20 @@ const placeholderText = computed(() =>
 );
 
 function onDocumentClick(event: MouseEvent): void {
-  if (!inputRef.value?.contains(event.target as Node)) {
-    dropdowns.closeAll();
+  // Only relevant when at least one dropdown is open
+  if (!dropdowns.isAnyOpen.value) return;
+
+  const target = event.target as Node;
+  // Walk up ancestors to find if the click landed inside any .control-dropdown
+  let el: Node | null = target;
+  while (el && el !== document.body) {
+    if (el instanceof HTMLElement && el.classList.contains('control-dropdown')) {
+      return; // Clicked inside an open dropdown — let it handle itself
+    }
+    el = el.parentNode;
   }
+  // Click was outside all dropdowns — close them
+  dropdowns.closeAll();
 }
 
 function resizeTextarea(): void {

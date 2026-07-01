@@ -165,9 +165,9 @@ onUnmounted(() => {
   app-region: drag;
 }
 
-.welcome-empty button,
-.welcome-empty input,
-.welcome-empty textarea {
+.welcome-empty :deep(button),
+.welcome-empty :deep(input),
+.welcome-empty :deep(textarea) {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
