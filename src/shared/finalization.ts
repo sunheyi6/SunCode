@@ -28,3 +28,60 @@ export function isIncompleteProgressText(text: string): boolean {
 
   return INCOMPLETE_PROGRESS_PATTERNS.some((pattern) => pattern.test(normalized));
 }
+
+export function sanitizeStructuredMessageLeak(text: string): string {
+  if (!text.includes('"suncode.message"')) return text;
+
+  const leakStart = findStructuredMessageStart(text);
+  if (leakStart < 0) return text;
+
+  const prefix = text.slice(0, leakStart);
+  const candidate = text.slice(leakStart).trim();
+  const parsedText = parseStructuredMessageText(candidate) ?? extractStructuredMessageText(candidate);
+  if (parsedText === undefined) return text;
+
+  return `${prefix}${parsedText}`.trim();
+}
+
+function findStructuredMessageStart(text: string): number {
+  const typeIndex = text.indexOf('"suncode.message"');
+  if (typeIndex < 0) return -1;
+
+  const braceIndex = text.lastIndexOf('{', typeIndex);
+  return braceIndex;
+}
+
+function parseStructuredMessageText(candidate: string): string | undefined {
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+    if (!isRecord(parsed) || parsed.type !== 'suncode.message') return undefined;
+
+    const content = parsed.content;
+    if (!isRecord(content) || typeof content.text !== 'string') return '';
+    return content.text;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractStructuredMessageText(candidate: string): string | undefined {
+  const match = candidate.match(
+    /"content"\s*:\s*\{[\s\S]*?"text"\s*:\s*"((?:\\.|[^"\\])*)"/,
+  );
+  if (!match) return undefined;
+
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return match[1]
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\\\/g, '\\');
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}

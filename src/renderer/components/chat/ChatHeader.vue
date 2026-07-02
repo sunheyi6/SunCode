@@ -217,8 +217,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 60px;
-  padding: 10px 154px 8px 20px;
+  height: 44px;
+  padding: 5px 132px 5px 16px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
   background: transparent;
   flex-shrink: 0;
@@ -244,11 +244,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 42px;
+  height: 34px;
   max-width: 760px;
-  padding: 0 12px;
+  padding: 0 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--color-surface) 94%, transparent);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -282,8 +282,8 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 42px;
+  gap: 6px;
+  height: 34px;
 }
 
 .header-bg {
@@ -438,8 +438,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: var(--border-radius-sm, 4px);
   background: color-mix(in srgb, var(--color-surface) 86%, transparent);
@@ -454,7 +454,7 @@ onBeforeUnmount(() => {
 }
 
 .more-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 </style>

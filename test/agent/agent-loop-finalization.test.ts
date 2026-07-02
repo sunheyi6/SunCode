@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { isIncompleteProgressText } from '../../src/shared/finalization';
+import {
+  isIncompleteProgressText,
+  sanitizeStructuredMessageLeak,
+} from '../../src/shared/finalization';
 
 describe('agent loop finalization guards', () => {
   it('detects unfinished progress text as not final', () => {
@@ -26,5 +29,35 @@ describe('agent loop finalization guards', () => {
         '最终结果：$v0 = 3628800。验证：修复后的解释器重新运行通过，10! 的结果与预期一致。',
       ),
     ).toBe(false);
+  });
+
+  it('unwraps a structured assistant message leaked as final text', () => {
+    const leaked = JSON.stringify(
+      {
+        type: 'suncode.message',
+        version: 1,
+        role: 'assistant',
+        content: { text: '已完成，运行结果是 hello world。' },
+      },
+      null,
+      2,
+    );
+
+    expect(sanitizeStructuredMessageLeak(leaked)).toBe('已完成，运行结果是 hello world。');
+  });
+
+  it('recovers text from a malformed structured assistant message leak', () => {
+    const leaked = `{
+  "type": "suncode.message",
+  "version": 1,
+  "role": "assistant",
+  "content": {
+    "text": "完成，输出 hello world。"
+
+   ]
+  }
+}`;
+
+    expect(sanitizeStructuredMessageLeak(leaked)).toBe('完成，输出 hello world。');
   });
 });

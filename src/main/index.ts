@@ -68,7 +68,7 @@ function createMainWindow(): BrowserWindow {
     titleBarOverlay: {
       color: chromeColors.background,
       symbolColor: chromeColors.foreground,
-      height: isMac ? 38 : 60,
+      height: isMac ? 34 : 44,
     },
   });
   win.setMenuBarVisibility(false);

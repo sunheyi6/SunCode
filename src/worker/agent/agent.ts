@@ -18,7 +18,7 @@ import type {
   ToolResult,
 } from '@shared/types';
 import { loadMemories, saveMemory, type MemoryEntry } from './memory';
-import { buildExtractionContexts, extractAndSaveLessons } from './lessons';
+import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
 import { createMcpManager } from '../mcp/manager';
 import { createModelRegistry } from '../models/registry';
 import { createToolRegistry } from '../tools/registry';
@@ -407,19 +407,13 @@ export class Agent {
     const agentsMdContent = await loadAgentsMd(this.workingDir);
 
     // Load auto-generated memories from prior sessions (with semantic search)
-    const lastUserMsg = this.messages.find((m) => m.role === 'user');
-    const userQuery = lastUserMsg
-      ? typeof lastUserMsg.content === 'string'
-        ? lastUserMsg.content
-        : lastUserMsg.content
-            .filter((b) => b.type === 'text')
-            .map((b) => ('text' in b ? b.text : ''))
-            .join(' ')
-      : '';
+    const userQuery = latestUserText(this.messages);
     const memoryContent = await loadMemories(this.workingDir, userQuery);
+    const relevantLessonsContent = loadRelevantLessons(this.workingDir, userQuery);
 
-    // Share memory with sub-agents
+    // Share retrieved context with sub-agents
     this.dispatcher?.updateMemoryContent(memoryContent);
+    this.dispatcher?.updateRelevantLessonsContent(relevantLessonsContent);
 
     // Build context budget policy from settings + model info
     const contextBudgetPolicy = buildContextBudgetPolicy(
@@ -441,6 +435,7 @@ export class Agent {
       skillsContent,
       agentsMdContent,
       memoryContent,
+      relevantLessonsContent,
       planModeInstructions,
       abortSignal: this.abortController!.signal,
       runId,
@@ -568,9 +563,11 @@ export class Agent {
     const skillsContent = await skillsLoader.loadAll();
     const agentsMdContent = await loadAgentsMd(this.workingDir);
     const memoryContent = await loadMemories(this.workingDir, goalDef.description);
+    const relevantLessonsContent = loadRelevantLessons(this.workingDir, goalDef.description);
 
-    // Share memory with sub-agents
+    // Share retrieved context with sub-agents
     this.dispatcher?.updateMemoryContent(memoryContent);
+    this.dispatcher?.updateRelevantLessonsContent(relevantLessonsContent);
 
     const contextBudgetPolicy = buildContextBudgetPolicy(
       this.settings,
@@ -586,6 +583,7 @@ export class Agent {
       skillsContent,
       agentsMdContent,
       memoryContent,
+      relevantLessonsContent,
       abortSignal: this.abortController!.signal,
       sessionId: this.sessionId,
       onStream: (event: StreamEvent) => {
@@ -797,6 +795,18 @@ export class Agent {
   getWorkingDir(): string {
     return this.workingDir;
   }
+}
+
+function latestUserText(messages: Message[]): string {
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
+  if (!lastUserMsg) return '';
+
+  return typeof lastUserMsg.content === 'string'
+    ? lastUserMsg.content
+    : lastUserMsg.content
+        .filter((b) => b.type === 'text')
+        .map((b) => ('text' in b ? b.text : ''))
+        .join(' ');
 }
 
 /**

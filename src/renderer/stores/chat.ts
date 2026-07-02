@@ -77,12 +77,12 @@ function appendThinkingBlock(target: ChatMessage, thinkingDelta: string): void {
   });
 }
 
-function appendTextBlock(target: ChatMessage, textDelta: string): void {
+function appendTextBlock(target: ChatMessage, textDelta: string, forceNewBlock = false): void {
   if (!textDelta) return;
   if (!target.blocks) target.blocks = [];
 
   const lastBlock = target.blocks[target.blocks.length - 1];
-  if (lastBlock?.type === 'text') {
+  if (!forceNewBlock && lastBlock?.type === 'text') {
     lastBlock.text = (lastBlock.text || '') + textDelta;
     return;
   }
@@ -94,11 +94,42 @@ function appendTextBlock(target: ChatMessage, textDelta: string): void {
   });
 }
 
+function replaceTextBlocksFrom(target: ChatMessage, startIndex: number, text: string): void {
+  if (!target.blocks) target.blocks = [];
+
+  target.blocks = target.blocks.filter((block, index) => index < startIndex || block.type !== 'text');
+  if (text) appendTextBlock(target, text, true);
+}
+
 function textFromBlocks(blocks: ChatMessageBlock[] | undefined): string {
   return (blocks ?? [])
     .filter((block) => block.type === 'text')
     .map((block) => block.text || '')
     .join('');
+}
+
+function textFromMessageContent(content: Message['content']): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((block) => block.type === 'text')
+    .map((block) => ('text' in block ? block.text : ''))
+    .join('');
+}
+
+function thinkingFromMessageContent(content: Message['content']): string {
+  if (typeof content === 'string') return '';
+  return content
+    .filter((block) => block.type === 'thinking')
+    .map((block) => ('text' in block ? block.text : ''))
+    .join('');
+}
+
+function applyFinalMessageToUi(target: ChatMessage, finalMessage: Message): void {
+  const content = textFromMessageContent(finalMessage.content);
+  const taskPlan = parseTaskPlan(content, false) ?? undefined;
+  target.content = taskPlan ? stripPlanFromContent(content) : content;
+  target.thinking = thinkingFromMessageContent(finalMessage.content) || target.thinking;
+  target.taskPlan = taskPlan;
 }
 
 function appendSubagentThinkingBlock(target: SubagentResult, thinkingDelta: string): void {
@@ -163,6 +194,7 @@ export const useChatStore = defineStore('chat', () => {
   let lastThinkingLength = 0;
   let lastTextLength = 0;
   let lastToolCallCount = 0;
+  let currentTurnBlockStartIndex = 0;
   let latestUiLanguage: UiLanguage = 'zh';
 
   /** ID of the renderer's currently visible session. */
@@ -199,6 +231,7 @@ export const useChatStore = defineStore('chat', () => {
     lastThinkingLength = 0;
     lastTextLength = 0;
     lastToolCallCount = 0;
+    currentTurnBlockStartIndex = 0;
     messages.value.push(assistantMessage);
     // Vue wraps objects inserted into a reactive array. Keep the wrapped
     // instance so stream mutations update the rendered message.
@@ -225,6 +258,7 @@ export const useChatStore = defineStore('chat', () => {
       isStreaming: true,
       uiLanguage: latestUiLanguage,
     };
+    currentTurnBlockStartIndex = 0;
     pendingAssistantMessages.set(sessionId, msg);
     return msg;
   }
@@ -245,6 +279,7 @@ export const useChatStore = defineStore('chat', () => {
         lastThinkingLength = 0;
         lastTextLength = 0;
         lastToolCallCount = 0;
+        currentTurnBlockStartIndex = msg?.blocks?.length ?? 0;
         break;
 
       case 'turn_end':
@@ -277,7 +312,35 @@ export const useChatStore = defineStore('chat', () => {
         if (!target) break;
 
         const data = event.data;
-        if (!data) break;
+        if (!data) {
+          if (event.type === 'message_end' && event.message) {
+            applyFinalMessageToUi(target, event.message);
+            target.isStreaming = false;
+            streamingSessionIds.delete(sessionId);
+            if (sessionId === activeSessionId) {
+              isStreaming.value = false;
+            }
+
+            void bridge.saveMessage(
+              buildPersistedAssistantMessage({
+                visibleContent: target.content,
+                thinking: target.thinking,
+                toolCalls: target.toolCalls,
+                systemPrompt: target.systemPrompt,
+                turnDetails: target.turnDetails,
+                uiLanguage: target.uiLanguage,
+                finalMessage: event.message,
+              }),
+              sessionId,
+            );
+
+            if (sessionId === activeSessionId) {
+              currentAssistantMsg = null;
+            }
+            pendingAssistantMessages.delete(sessionId);
+          }
+          break;
+        }
 
         target.thinking = data.thinking || '';
 
@@ -285,10 +348,14 @@ export const useChatStore = defineStore('chat', () => {
 
         const currentTextLen = data.text?.length ?? 0;
         if (currentTextLen < lastTextLength) {
-          lastTextLength = 0;
-        }
-        if (currentTextLen > lastTextLength) {
-          appendTextBlock(target, data.text?.slice(lastTextLength) || '');
+          replaceTextBlocksFrom(target, currentTurnBlockStartIndex, data.text || '');
+          lastTextLength = currentTextLen;
+        } else if (currentTextLen > lastTextLength) {
+          appendTextBlock(
+            target,
+            data.text?.slice(lastTextLength) || '',
+            lastTextLength === 0 && target.blocks.length === currentTurnBlockStartIndex,
+          );
           lastTextLength = currentTextLen;
         }
         target.content = textFromBlocks(target.blocks) || data.text || '';
@@ -357,30 +424,36 @@ export const useChatStore = defineStore('chat', () => {
         }
 
         if (event.type === 'message_end') {
+          if (event.message) {
+            applyFinalMessageToUi(target, event.message);
+          }
+
           target.isStreaming = false;
           streamingSessionIds.delete(sessionId);
           if (sessionId === activeSessionId) {
             isStreaming.value = false;
           }
 
-          // Persist completed message to the session that originated the run.
-          void bridge.saveMessage(
-            buildPersistedAssistantMessage({
-              visibleContent: target.content,
-              thinking: target.thinking,
-              toolCalls: target.toolCalls,
-              systemPrompt: target.systemPrompt,
-              turnDetails: target.turnDetails,
-              uiLanguage: target.uiLanguage,
-              finalMessage: event.message,
-            }),
-            sessionId,
-          );
+          if (event.message) {
+            // Persist completed message to the session that originated the run.
+            void bridge.saveMessage(
+              buildPersistedAssistantMessage({
+                visibleContent: target.content,
+                thinking: target.thinking,
+                toolCalls: target.toolCalls,
+                systemPrompt: target.systemPrompt,
+                turnDetails: target.turnDetails,
+                uiLanguage: target.uiLanguage,
+                finalMessage: event.message,
+              }),
+              sessionId,
+            );
 
-          if (sessionId === activeSessionId) {
-            currentAssistantMsg = null;
+            if (sessionId === activeSessionId) {
+              currentAssistantMsg = null;
+            }
+            pendingAssistantMessages.delete(sessionId);
           }
-          pendingAssistantMessages.delete(sessionId);
         }
         break;
       }
@@ -616,18 +689,8 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = sessionMessages
       .filter((message) => message.role === 'user' || message.role === 'assistant')
       .map((message) => {
-        const blocks = typeof message.content === 'string' ? [] : message.content;
-        const content =
-          typeof message.content === 'string'
-            ? message.content
-            : blocks
-                .filter((block) => block.type === 'text')
-                .map((block) => ('text' in block ? block.text : ''))
-                .join('');
-        const thinking = blocks
-          .filter((block) => block.type === 'thinking')
-          .map((block) => ('text' in block ? block.text : ''))
-          .join('');
+        const content = textFromMessageContent(message.content);
+        const thinking = thinkingFromMessageContent(message.content);
 
         const taskPlan = parseTaskPlan(content, false) ?? undefined;
         const displayContent = taskPlan ? stripPlanFromContent(content) : content;

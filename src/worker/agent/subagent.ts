@@ -51,6 +51,7 @@ export interface SubagentDispatchOptions {
   ancestorStack: string[];
   callbacks: SubagentCallbacks;
   memoryContent?: string;
+  relevantLessonsContent?: string;
 }
 
 const MAX_DEPTH = 3;
@@ -78,6 +79,11 @@ export class SubagentDispatcher {
   /** Update memory content for sub-agent runs. */
   updateMemoryContent(memoryContent: string): void {
     this.opts.memoryContent = memoryContent;
+  }
+
+  /** Update lesson context for sub-agent runs. */
+  updateRelevantLessonsContent(relevantLessonsContent: string): void {
+    this.opts.relevantLessonsContent = relevantLessonsContent;
   }
 
   /** Dispatch one or more sub-agent calls in parallel with a concurrency cap. */
@@ -305,6 +311,7 @@ export class SubagentDispatcher {
       skillsContent: '',
       agentsMdContent: '',
       memoryContent: this.opts.memoryContent || '',
+      relevantLessonsContent: this.opts.relevantLessonsContent || '',
       abortSignal: signal,
       runId: executionId,
       // Use parent session + agent name for cache affinity across subagent invocations

@@ -1,7 +1,9 @@
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { useChatStore } from '../../src/renderer/stores/chat';
-import type { ToolCallContent } from '../../src/shared/types';
+import type { Message, ToolCallContent } from '../../src/shared/types';
+
+const saveMessageMock = vi.fn();
 
 function blockSummary(
   blocks: NonNullable<ReturnType<typeof useChatStore>['messages'][number]['blocks']> | undefined,
@@ -19,6 +21,13 @@ function blockSummary(
 describe('chat store stream blocks', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    saveMessageMock.mockReset();
+    saveMessageMock.mockResolvedValue(undefined);
+    (globalThis as typeof globalThis & { window: Window }).window = {
+      suncode: {
+        saveMessage: saveMessageMock,
+      } as unknown as NonNullable<Window['suncode']>,
+    } as unknown as Window;
   });
 
   test('merges consecutive thinking deltas into a single block', () => {
@@ -134,6 +143,103 @@ describe('chat store stream blocks', () => {
       { type: 'text', text: 'Here is what I found.' },
       { type: 'tool_call', toolCall: { id: 'tool-1' } },
     ]);
+  });
+
+  test('replaces the current turn text when the final stream snapshot is shorter', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+    store.handleStreamEvent({ type: 'turn_start', turnCount: 1, maxTurns: 5 }, 'session-1');
+    store.handleStreamEvent(
+      {
+        type: 'message_update',
+        data: {
+          text: '{\n  "type": "suncode.message",\n  "content": {\n    "text": "完成"',
+          thinking: '',
+          toolCalls: [],
+        },
+      },
+      'session-1',
+    );
+    store.handleStreamEvent(
+      {
+        type: 'message_update',
+        data: { text: '完成', thinking: '', toolCalls: [] },
+      },
+      'session-1',
+    );
+
+    expect(store.messages[0]?.content).toBe('完成');
+    expect(blockSummary(store.messages[0]?.blocks)).toEqual([{ type: 'text', text: '完成' }]);
+  });
+
+  test('keeps previous turn text when replacing the current turn text', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+    store.handleStreamEvent({ type: 'turn_start', turnCount: 1, maxTurns: 5 }, 'session-1');
+    store.handleStreamEvent(
+      { type: 'message_update', data: { text: '先检查。', thinking: '', toolCalls: [] } },
+      'session-1',
+    );
+    store.handleStreamEvent({ type: 'turn_start', turnCount: 2, maxTurns: 5 }, 'session-1');
+    store.handleStreamEvent(
+      { type: 'message_update', data: { text: 'raw leaked protocol text', thinking: '', toolCalls: [] } },
+      'session-1',
+    );
+    store.handleStreamEvent(
+      {
+        type: 'message_update',
+        data: { text: '已完成。', thinking: '', toolCalls: [] },
+      },
+      'session-1',
+    );
+
+    expect(store.messages[0]?.content).toBe('先检查。已完成。');
+    expect(blockSummary(store.messages[0]?.blocks)).toEqual([
+      { type: 'text', text: '先检查。' },
+      { type: 'text', text: '已完成。' },
+    ]);
+  });
+
+  test('waits for final message before persisting assistant content', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+    store.handleStreamEvent({ type: 'turn_start', turnCount: 1, maxTurns: 5 }, 'session-1');
+    store.handleStreamEvent(
+      { type: 'message_update', data: { text: '我先看看。', thinking: '', toolCalls: [] } },
+      'session-1',
+    );
+    store.handleStreamEvent({ type: 'turn_start', turnCount: 2, maxTurns: 5 }, 'session-1');
+    store.handleStreamEvent(
+      { type: 'message_update', data: { text: '最终回答。', thinking: '', toolCalls: [] } },
+      'session-1',
+    );
+
+    store.handleStreamEvent(
+      {
+        type: 'message_end',
+        data: { text: '最终回答。', thinking: '', toolCalls: [], isFinished: true },
+      },
+      'session-1',
+    );
+
+    expect(store.messages[0]?.content).toBe('我先看看。最终回答。');
+    expect(saveMessageMock).not.toHaveBeenCalled();
+
+    const finalMessage: Message = {
+      role: 'assistant',
+      content: [{ type: 'text', text: '最终回答。' }],
+    };
+    store.handleStreamEvent({ type: 'message_end', message: finalMessage }, 'session-1');
+
+    expect(store.messages[0]?.content).toBe('最终回答。');
+    expect(saveMessageMock).toHaveBeenCalledOnce();
+    expect(saveMessageMock.mock.calls[0]?.[0]).toMatchObject({
+      role: 'assistant',
+      content: finalMessage.content,
+    });
   });
 
   test('creates a tool block even if tool execution starts before the stream snapshot arrives', () => {

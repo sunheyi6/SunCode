@@ -9,6 +9,7 @@ export interface StructuredSystemPromptInput {
   guidelines: string[];
   tools: Array<Pick<ToolDefinition, 'name' | 'description' | 'parameters'> & { snippet: string }>;
   memoryContent?: string;
+  relevantLessonsContent?: string;
   agentsMdContent?: string;
   planModeInstructions?: string;
   skillsContent?: string;
@@ -44,6 +45,7 @@ export function buildStructuredSystemPrompt(input: StructuredSystemPromptInput):
     })),
     context: {
       memory: input.memoryContent,
+      relevantLessons: input.relevantLessonsContent,
       projectInstructions: input.agentsMdContent,
       planModeInstructions: input.planModeInstructions,
       skills: input.skillsContent,

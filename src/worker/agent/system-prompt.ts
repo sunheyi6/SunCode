@@ -14,6 +14,8 @@ export interface SystemPromptInput {
   agentsMdContent?: string;
   /** Optional: Auto-generated memories from prior sessions */
   memoryContent?: string;
+  /** Optional: Retrieved failure lessons relevant to the current request */
+  relevantLessonsContent?: string;
   /** Optional: Plan mode instructions (only when plan mode is active) */
   planModeInstructions?: string;
 }
@@ -31,6 +33,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     customPrompt,
     agentsMdContent,
     memoryContent,
+    relevantLessonsContent,
     planModeInstructions,
   } = input;
 
@@ -50,6 +53,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     agentsMdContent,
     planModeInstructions,
     skillsContent,
+    relevantLessonsContent,
     currentDate: date,
     workingDirectory: promptCwd,
   });
@@ -107,6 +111,9 @@ function getToolGuidelines(toolNames: string[]): string[] {
   }
   result.push('Be concise in your responses');
   result.push('Show file paths clearly when working with files');
+  result.push(
+    'If context.relevantLessons is present, review it before acting and apply its solution when it matches the current code and request. If a similar failure happens again, use search_lessons for details.',
+  );
   return result;
 }
 

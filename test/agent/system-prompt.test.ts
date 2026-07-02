@@ -25,6 +25,7 @@ interface StructuredPromptForTest {
   tools: Array<{ name: string; description: string; snippet: string }>;
   context: {
     memory?: string;
+    relevantLessons?: string;
     projectInstructions?: string;
     planModeInstructions?: string;
     skills?: string;
@@ -110,6 +111,7 @@ describe('buildSystemPrompt', () => {
   it('stores optional context in named fields', () => {
     const prompt = parsePrompt({
       memoryContent: 'Test memory',
+      relevantLessonsContent: 'Use the known fix first',
       agentsMdContent: '# Project Rules',
       planModeInstructions: 'Plan first',
       skillsContent: 'SKILL: test',
@@ -117,6 +119,7 @@ describe('buildSystemPrompt', () => {
 
     expect(prompt.context).toEqual({
       memory: 'Test memory',
+      relevantLessons: 'Use the known fix first',
       projectInstructions: '# Project Rules',
       planModeInstructions: 'Plan first',
       skills: 'SKILL: test',

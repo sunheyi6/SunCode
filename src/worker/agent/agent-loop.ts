@@ -1,5 +1,6 @@
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import { MAX_TURNS } from '@shared/constants';
+import { sanitizeStructuredMessageLeak } from '@shared/finalization';
 import type {
   AppSettings,
   ContentBlock,
@@ -58,6 +59,8 @@ export interface AgentLoopInput {
   planModeInstructions?: string;
   /** Auto-generated memories from prior sessions. */
   memoryContent?: string;
+  /** Retrieved failure lessons relevant to this request. */
+  relevantLessonsContent?: string;
   abortSignal: AbortSignal;
   /** Unique identifier for this run (used for event logging). */
   runId: string;
@@ -124,6 +127,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     skillsContent,
     agentsMdContent,
     memoryContent,
+    relevantLessonsContent,
     planModeInstructions,
     abortSignal,
     runId,
@@ -229,6 +233,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         permissionMode: effectivePermissionMode,
         agentsMdContent,
         memoryContent,
+        relevantLessonsContent,
         planModeInstructions: livePlanModeInstructions,
       });
       if (systemPrompt !== lastSystemPrompt) {
@@ -353,6 +358,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           diag.milestone('RECOVERY', 'tool_calls_from_text', { count: toolCalls.length });
         }
       }
+      assistantText = sanitizeStructuredMessageLeak(assistantText);
 
       // ===== Turn Decision =====
       // Compute whether we need another turn based on tool calls and signals.

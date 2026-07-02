@@ -40,6 +40,7 @@ import { buildStructuredTaskPrompt } from './model-structured-content';
 
 const LESSONS_DIR = '.suncode/lessons';
 const LESSONS_INDEX = 'LESSONS.md';
+const MAX_RELEVANT_LESSONS_CHARS = 1500;
 
 function lessonsDir(workingDir: string): string {
   return join(workingDir, LESSONS_DIR);
@@ -133,6 +134,8 @@ function parseLessonMarkdown(content: string, slug: string): LessonEntry {
       return Array.isArray(arr) ? arr : [];
     } catch {
       return raw
+        .replace(/^\[/, '')
+        .replace(/\]$/, '')
         .split(',')
         .map((k) => k.trim())
         .filter(Boolean);
@@ -144,7 +147,12 @@ function parseLessonMarkdown(content: string, slug: string): LessonEntry {
       const arr = JSON.parse(raw);
       return Array.isArray(arr) ? arr : [];
     } catch {
-      return raw ? [raw] : [];
+      return raw
+        .replace(/^\[/, '')
+        .replace(/\]$/, '')
+        .split(',')
+        .map((file) => file.trim())
+        .filter(Boolean);
     }
   };
 
@@ -390,6 +398,33 @@ export function quickMatchLesson(
   const query = `${toolName} ${errorText.slice(0, 100)}`;
   const results = searchLessons(workingDir, query, undefined, 1);
   return results.length > 0 ? results[0]! : null;
+}
+
+/**
+ * Load a compact lesson context for the next model turn.
+ * This is intentionally short: it gives the model the top matching lessons
+ * without bloating the system prompt with the whole lesson library.
+ */
+export function loadRelevantLessons(workingDir: string, query: string, maxResults = 3): string {
+  const results = searchLessons(workingDir, query, undefined, maxResults);
+  if (results.length === 0) return '';
+
+  const lines: string[] = [
+    '以下是与当前请求相似的历史教训。行动前先判断是否适用；若与实际代码冲突，以代码为准。',
+    '',
+  ];
+
+  for (const result of results) {
+    const full = loadLessonFile(workingDir, result.entry.slug);
+    const entry = full || result.entry;
+    lines.push(`- ${entry.title}`);
+    if (entry.problem) lines.push(`  问题: ${entry.problem}`);
+    if (entry.rootCause) lines.push(`  根因: ${entry.rootCause}`);
+    if (entry.solution) lines.push(`  正确做法: ${entry.solution}`);
+    if (entry.files.length > 0) lines.push(`  相关文件: ${entry.files.join(', ')}`);
+  }
+
+  return lines.join('\n').slice(0, MAX_RELEVANT_LESSONS_CHARS);
 }
 
 // ---- Similarity (for deduplication) ----
