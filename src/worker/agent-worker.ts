@@ -185,10 +185,9 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
         return;
       }
       console.log('[Worker] Aborting session=', sid.slice(-8));
-      withSessionLock(sid, async () => {
-        const agent = getAgent(sid);
-        agent?.abort();
-      });
+      // Direct call — no lock: abort() only sets a flag + calls abortController.abort(),
+      // which is idempotent and must interrupt the running prompt immediately.
+      getAgent(sid)?.abort();
       break;
     }
 
@@ -199,10 +198,9 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
         return;
       }
       console.log('[Worker] Soft-stopping session=', sid.slice(-8));
-      withSessionLock(sid, async () => {
-        const agent = getAgent(sid);
-        agent?.requestStop();
-      });
+      // Direct call — no lock: requestStop() only sets a flag + calls abortController.abort(),
+      // which is idempotent and must interrupt the running prompt immediately.
+      getAgent(sid)?.requestStop();
       break;
     }
 

@@ -61,14 +61,16 @@ watch(
   },
 );
 
-// During streaming, only auto-scroll if user hasn't manually scrolled up
+// Auto-scroll when the last message content changes, unless user manually scrolled up.
+// This covers streaming text, tool execution results, and subagent progress — all of
+// which can change content height without changing messages.length.
 watch(
   () => lastMessageContentKey(),
   (key) => {
     if (key === lastKey) return;
     lastKey = key;
-    if (!chatStore.isStreaming) return;
-    // Throttle: max one scroll per 150ms during streaming
+    if (userScrolledUp.value) return;
+    // Throttle: max one scroll per 150ms
     if (scrollTimer) return;
     scrollTimer = setTimeout(() => {
       scrollTimer = null;

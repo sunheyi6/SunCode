@@ -45,7 +45,7 @@ function handleSend(text: string): void {
 }
 
 function handleStop(): void {
-  abort();
+  stop();
   const killed = killAllBgProcesses();
   if (killed > 0) {
     showToast(`已停止 ${killed} 个后台进程`, 'warning');
