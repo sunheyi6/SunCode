@@ -424,8 +424,8 @@ function formatTime(value: string): string {
         删除选中 ({{ selectedIds.size }})
       </button>
     </div>
+    </template>
   </div>
-  </template>
 </template>
 
 <style scoped>
