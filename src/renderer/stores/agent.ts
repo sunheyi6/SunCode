@@ -99,6 +99,13 @@ export const useAgentStore = defineStore('agent', () => {
     return pendingPrompts.value.shift() || null;
   }
 
+  function updatePrompt(id: string, text: string): boolean {
+    const prompt = pendingPrompts.value.find((p) => p.id === id);
+    if (!prompt) return false;
+    prompt.text = text;
+    return true;
+  }
+
   function removePrompt(id: string): void {
     const index = pendingPrompts.value.findIndex((prompt) => prompt.id === id);
     if (index >= 0) pendingPrompts.value.splice(index, 1);
@@ -134,6 +141,7 @@ export const useAgentStore = defineStore('agent', () => {
     takePrompt,
     takeLatestPrompt,
     takeFirstPrompt,
+    updatePrompt,
     removePrompt,
     reset,
   };

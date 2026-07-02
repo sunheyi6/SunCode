@@ -1,12 +1,51 @@
 <script setup lang="ts">
+import { nextTick, ref } from 'vue';
 import { useAgentStore } from '../../stores/agent';
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const emit = defineEmits<{
   sendNow: [id: string];
   remove: [id: string];
 }>();
 
 const agentStore = useAgentStore();
+
+// Editing state
+const editingId = ref<string | null>(null);
+const editText = ref('');
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function startEdit(prompt: { id: string; text: string }): void {
+  editingId.value = prompt.id;
+  editText.value = prompt.text;
+  void nextTick(() => {
+    const el = document.querySelector<HTMLInputElement>('.edit-input');
+    el?.focus();
+    el?.select();
+  });
+}
+
+function confirmEdit(): void {
+  if (editingId.value && editText.value.trim()) {
+    agentStore.updatePrompt(editingId.value, editText.value.trim());
+  }
+  editingId.value = null;
+  editText.value = '';
+}
+
+function cancelEdit(): void {
+  editingId.value = null;
+  editText.value = '';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function onEditKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Enter') {
+    confirmEdit();
+  } else if (e.key === 'Escape') {
+    cancelEdit();
+  }
+}
 </script>
 
 <template>
@@ -29,20 +68,37 @@ const agentStore = useAgentStore();
         <span v-if="index === 0" class="first-badge">
           即将发送
         </span>
-        <button
-          class="guide-btn"
-          title="中断当前回答并立即发送本条消息"
-          @click="emit('sendNow', prompt.id)"
-        >
-          引导
-        </button>
-        <button
-          class="remove-btn"
-          title="从队列中移除"
-          @click="emit('remove', prompt.id)"
-        >
-          ✕
-        </button>
+        <template v-if="editingId === prompt.id">
+          <input
+            v-model="editText"
+            class="edit-input"
+            @keydown="onEditKeydown"
+            @blur="confirmEdit"
+          />
+        </template>
+        <template v-else>
+          <button
+            class="guide-btn"
+            title="中断当前回答并立即发送本条消息"
+            @click="emit('sendNow', prompt.id)"
+          >
+            引导
+          </button>
+          <button
+            class="edit-btn"
+            title="编辑"
+            @click="startEdit(prompt)"
+          >
+            编辑
+          </button>
+          <button
+            class="remove-btn"
+            title="从队列中移除"
+            @click="emit('remove', prompt.id)"
+          >
+            ✕
+          </button>
+        </template>
       </div>
     </div>
   </div>
@@ -167,6 +223,36 @@ const agentStore = useAgentStore();
   font-size: 12px;
   cursor: pointer;
   transition: all 0.12s ease;
+}
+
+.edit-btn {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.edit-btn:hover {
+  border-color: var(--color-text-muted);
+  background: var(--color-surface-hover);
+}
+
+.edit-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 12px;
+  outline: none;
 }
 
 .remove-btn:hover {

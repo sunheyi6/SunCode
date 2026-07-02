@@ -623,7 +623,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   return {
     finalMessage: {
       role: 'assistant',
-      content: `已达到最大轮次限制（${settings.maxTurns}轮）。请尝试更具体的提问，或调整设置中的最大轮次。`,
+      content: [
+        {
+          type: 'text' as const,
+          text: `已达到最大轮次限制（${settings.maxTurns}轮）。请尝试更具体的提问，或调整设置中的最大轮次。`,
+        },
+      ],
     },
     turnCount,
     tokenUsage,
