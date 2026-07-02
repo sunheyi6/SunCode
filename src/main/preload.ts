@@ -31,9 +31,14 @@ const suncodeAPI = {
     ipcRenderer.send('agent:prompt', text);
   },
 
-  /** Abort the current agent run */
+  /** Abort the current agent run (hard stop). */
   abort(): void {
     ipcRenderer.send('agent:abort');
+  },
+
+  /** Soft-stop the current agent run (model will summarize before ending). */
+  stop(): void {
+    ipcRenderer.send('agent:stop');
   },
 
   /** Continue the agent (after tool confirmation, etc.) */

@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useAgent } from '../../composables/useAgent';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
 import { useToast } from '../../composables/useToast';
+import { useAgentStore } from '../../stores/agent';
 import { useChatStore } from '../../stores/chat';
 import { useSettingsStore } from '../../stores/settings';
 import ChatHeader from './ChatHeader.vue';
@@ -12,9 +13,10 @@ import MessageList from './MessageList.vue';
 import PendingPromptQueue from './PendingPromptQueue.vue';
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-const { send, abort, interruptAndSend, isStreaming } = useAgent();
+const { send, stop, interruptAndSend, isStreaming } = useAgent();
 const chatStore = useChatStore();
 const settingsStore = useSettingsStore();
+const agentStore = useAgentStore();
 const { killAll: killAllBgProcesses } = useBackgroundProcesses();
 const { showToast } = useToast();
 
@@ -50,10 +52,14 @@ function handleStop(): void {
   }
 }
 
-// ESC to abort
+function handleRemove(id: string): void {
+  agentStore.removePrompt(id);
+}
+
+// ESC to stop
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && isStreaming.value) {
-    abort();
+    stop();
     const killed = killAllBgProcesses();
     if (killed > 0) {
       showToast(`已停止 ${killed} 个后台进程`, 'warning');
@@ -87,7 +93,7 @@ onUnmounted(() => {
       </div>
 
       <MessageList />
-      <PendingPromptQueue @send-now="interruptAndSend" />
+      <PendingPromptQueue @send-now="interruptAndSend" @remove="handleRemove" />
     </template>
 
     <!-- Empty state: centered welcome content only (input stays at bottom) -->
@@ -114,7 +120,7 @@ onUnmounted(() => {
         </div>
         <div class="welcome-content">
           <h2>{{ welcomeMessage }}</h2>
-          <PendingPromptQueue @send-now="interruptAndSend" />
+          <PendingPromptQueue @send-now="interruptAndSend" @remove="handleRemove" />
           <ChatInput
             @send="handleSend"
             @stop="handleStop"

@@ -392,8 +392,9 @@ watch(
 
 <template>
   <div ref="inputRef" :class="chatInputClasses">
-    <!-- Workspace info bar -->
+    <!-- Workspace info bar (only shown before conversation starts) -->
     <WorkspaceSelector
+      v-if="isEmptyConversation"
       :git-info="gitInfo"
       :dropdown="workspaceDropdown"
       :branch-dropdown="branchDropdown"
@@ -494,7 +495,6 @@ watch(
   overflow: visible;
   border-radius: 20px;
   background: var(--color-bg-secondary);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.2);
 }
 
 /* Workspace info bar */

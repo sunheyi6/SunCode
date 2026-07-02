@@ -49,6 +49,10 @@ export class Agent {
   private messages: Message[] = [];
   private abortController: AbortController | null = null;
   private isRunning = false;
+  /** Whether the user requested a soft stop (with summary) vs hard abort. */
+  private stopRequested = false;
+  /** Monotonic counter to detect stale finally blocks after abort + new run. */
+  private runGeneration = 0;
   private turnCount = 0;
   private totalTokens = { input: 0, output: 0, total: 0 };
   /** Token usage from the currently active run — merged into totalTokens on completion. */
@@ -273,6 +277,7 @@ export class Agent {
     this.isRunning = true;
     this.abortController = new AbortController();
     this.turnCount = 0;
+    const generation = ++this.runGeneration;
 
     // Add user message
     const userMessage: Message = {
@@ -302,6 +307,8 @@ export class Agent {
       maxWallTimeMs: this.settings.goalMaxWallTimeMs,
     });
 
+    let summarizeAfterStop = false;
+
     try {
       if (goalDef) {
         await this.runGoalLoop(runId, goalDef);
@@ -310,8 +317,13 @@ export class Agent {
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        this.onRunEvent({ type: 'run_aborted', runId, timestamp: new Date().toISOString() });
-        this.emitStatus('idle');
+        if (this.stopRequested) {
+          this.stopRequested = false;
+          summarizeAfterStop = true;
+        } else {
+          this.onRunEvent({ type: 'run_aborted', runId, timestamp: new Date().toISOString() });
+          this.emitStatus('idle');
+        }
       } else {
         this.onRunEvent({
           type: 'run_failed',
@@ -323,8 +335,15 @@ export class Agent {
         this.emitStatus('error');
       }
     } finally {
-      this.isRunning = false;
-      this.abortController = null;
+      if (this.runGeneration === generation) {
+        this.isRunning = false;
+        this.abortController = null;
+      }
+    }
+
+    // After the main run, inject a summary turn if the user requested a soft stop
+    if (summarizeAfterStop) {
+      await this.runStopSummary();
     }
   }
 
@@ -332,6 +351,7 @@ export class Agent {
     if (this.isRunning) return;
     this.isRunning = true;
     this.abortController = new AbortController();
+    const generation = ++this.runGeneration;
     this.activeRunTokens = { input: 0, output: 0, total: 0 };
     this.emitStatus('thinking');
 
@@ -363,15 +383,28 @@ export class Agent {
         this.emitStatus('idle');
       }
     } finally {
-      this.isRunning = false;
-      this.abortController = null;
+      if (this.runGeneration === generation) {
+        this.isRunning = false;
+        this.abortController = null;
+      }
     }
   }
 
   abort(): void {
+    this.stopRequested = false;
     this.abortController?.abort();
-    this.isRunning = false;
-    this.emitStatus('idle');
+    // isRunning is reset by the running prompt()/continue() finally block
+    // when it catches the AbortError — we do NOT reset it here to avoid
+    // a race where a new run starts before the stale finally cleans up.
+  }
+
+  /**
+   * Request a soft stop: abort the current model call, then inject a
+   * summary request so the model can wrap up before the run ends.
+   */
+  requestStop(): void {
+    this.stopRequested = true;
+    this.abortController?.abort();
   }
 
   /**
@@ -384,7 +417,44 @@ export class Agent {
     this.onPlanApprovalRequest = handler;
   }
 
-  private async runLoop(runId: string): Promise<void> {
+  /**
+   * After a soft stop, run a single text-only turn so the model can
+   * summarize what it accomplished before the conversation ends.
+   */
+  private async runStopSummary(): Promise<void> {
+    this.isRunning = true;
+    this.abortController = new AbortController();
+    this.emitStatus('thinking');
+
+    // Append the summary request as a user message
+    this.messages.push({
+      role: 'user',
+      content: [{ type: 'text', text: '用户停止了对话。请简要总结你刚才完成的操作和改动。' }],
+    });
+
+    const runId = crypto.randomUUID();
+    const modelName = `${this.settings.activeProvider}/${this.settings.activeModel}`;
+    this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString(), modelName });
+    this.onRunEvent({
+      type: 'turn.prompt',
+      runId,
+      input: '[stop-summary]',
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      await this.runLoop(runId, true);
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        this.onRunEvent({ type: 'run_aborted', runId, timestamp: new Date().toISOString() });
+      }
+    } finally {
+      this.isRunning = false;
+      this.abortController = null;
+    }
+  }
+
+  private async runLoop(runId: string, summaryMode = false): Promise<void> {
     const modelRegistry = createModelRegistry();
     const model = await modelRegistry.getModel(
       this.settings.activeProvider,
@@ -422,11 +492,17 @@ export class Agent {
       ? buildPlanModeInstructions(getPlanState()!, this.turnCount)
       : undefined;
 
+    const effectiveTools = summaryMode ? [] : this.getEffectiveTools();
+    // Summary mode: single turn, no tools (text-only wrap-up)
+    const effectiveSettings = summaryMode
+      ? { ...this.settings, maxTurns: 1, planModeEnabled: false }
+      : this.settings;
+
     const result = await runAgentLoop({
       model,
       messages: this.messages,
-      tools: this.getEffectiveTools(),
-      settings: this.settings,
+      tools: effectiveTools,
+      settings: effectiveSettings,
       workingDir: this.workingDir,
       skillsContent,
       agentsMdContent,

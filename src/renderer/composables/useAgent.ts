@@ -33,11 +33,11 @@ export function useAgent() {
     bridge.prompt(text);
   }
 
-  function scheduleLatestPrompt(): void {
+  function scheduleNextPrompt(): void {
     if (nextPromptTimer) clearTimeout(nextPromptTimer);
     nextPromptTimer = setTimeout(() => {
       nextPromptTimer = null;
-      const prompt = agentStore.takeLatestPrompt();
+      const prompt = agentStore.takeFirstPrompt();
       if (prompt) dispatch(prompt.text);
     }, 120);
   }
@@ -63,7 +63,7 @@ export function useAgent() {
       bridge.onError((data) => {
         agentStore.setError(data.message);
         chatStore.handleStreamEvent({ type: 'error', error: data.message }, data.sessionId);
-        scheduleLatestPrompt();
+        scheduleNextPrompt();
       }),
     );
 
@@ -114,7 +114,7 @@ export function useAgent() {
           tokenUsage: agentStore.status.tokenUsage,
           modelName: agentStore.status.modelName,
         });
-        scheduleLatestPrompt();
+        scheduleNextPrompt();
       }),
     );
 
@@ -157,6 +157,12 @@ export function useAgent() {
     });
   }
 
+  function stop(): void {
+    bridge.stop();
+    chatStore.finishCurrentResponse();
+    // Don't set idle — agent will resume for the summary turn
+  }
+
   function interruptAndSend(id: string): void {
     const prompt = agentStore.takePrompt(id);
     if (!prompt) return;
@@ -195,6 +201,7 @@ export function useAgent() {
   return {
     send,
     abort,
+    stop,
     interruptAndSend,
     continue: continueAgent,
     isStreaming: isBusy,

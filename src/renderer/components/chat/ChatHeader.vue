@@ -151,12 +151,6 @@ onBeforeUnmount(() => {
       <span v-if="folderName" class="header-folder" :title="activeSession?.workingDirectory">
         {{ folderName }}
       </span>
-    </div>
-
-    <div class="header-actions">
-      <span v-if="activeSession && runningBgCount > 0" class="header-bg" title="后台运行中">
-        ↻ {{ runningBgCount }} 个后台
-      </span>
 
       <div
         v-if="activeSession?.workingDirectory"
@@ -199,6 +193,12 @@ onBeforeUnmount(() => {
           <div v-if="branchMenuError" class="branch-menu-error">{{ branchMenuError }}</div>
         </div>
       </div>
+    </div>
+
+    <div class="header-actions">
+      <span v-if="activeSession && runningBgCount > 0" class="header-bg" title="后台运行中">
+        ↻ {{ runningBgCount }} 个后台
+      </span>
 
       <button class="more-btn" title="更多">
         <svg viewBox="0 0 24 24" fill="currentColor">
@@ -218,9 +218,9 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   height: 44px;
-  padding: 5px 132px 5px 16px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-  background: transparent;
+  padding: 5px 14px 5px 16px;
+  border-bottom: 1px solid #d7d7dc;
+  background: #e9e9ec;
   flex-shrink: 0;
   /* The entire header is a drag region for the frameless window.
      Only interactive elements (buttons, links) are excluded. */
@@ -243,14 +243,13 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   height: 34px;
   max-width: 760px;
-  padding: 0 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .header-title {
@@ -270,8 +269,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
   padding: 3px 8px;
   border-radius: 999px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
+  background: #dedee1;
+  color: #77777d;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -292,8 +291,8 @@ onBeforeUnmount(() => {
   gap: 3px;
   padding: 2px 8px;
   border-radius: var(--border-radius-sm);
-  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
-  color: var(--color-accent);
+  background: #dedee1;
+  color: #252528;
   font-weight: 550;
   font-size: 11px;
 }
@@ -310,17 +309,17 @@ onBeforeUnmount(() => {
   padding: 2px 8px;
   border: none;
   border-radius: var(--border-radius-sm);
-  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  background: transparent;
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: #77777d;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
 .header-git:hover:not(:disabled) {
-  background: var(--color-surface-hover);
-  color: var(--color-text-secondary);
+  background: #dedee1;
+  color: #252528;
 }
 
 .header-git:disabled {
@@ -442,15 +441,15 @@ onBeforeUnmount(() => {
   height: 24px;
   border: none;
   border-radius: var(--border-radius-sm, 4px);
-  background: color-mix(in srgb, var(--color-surface) 86%, transparent);
-  color: var(--color-text-muted);
+  background: transparent;
+  color: #77777d;
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease;
 }
 
 .more-btn:hover {
-  background: var(--color-surface-hover, #eaeaea);
-  color: var(--color-text);
+  background: #dedee1;
+  color: #252528;
 }
 
 .more-btn svg {

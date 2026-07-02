@@ -101,6 +101,7 @@ declare global {
       // Agent
       prompt(text: string): void;
       abort(): void;
+      stop(): void;
       continue(): void;
       onStreamEvent(callback: (data: SessionStreamEvent) => void): () => void;
       onStatusChange(callback: (data: SessionStatusEvent) => void): () => void;

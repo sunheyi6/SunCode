@@ -95,6 +95,15 @@ export const useAgentStore = defineStore('agent', () => {
     return pendingPrompts.value.pop() || null;
   }
 
+  function takeFirstPrompt(): PendingPrompt | null {
+    return pendingPrompts.value.shift() || null;
+  }
+
+  function removePrompt(id: string): void {
+    const index = pendingPrompts.value.findIndex((prompt) => prompt.id === id);
+    if (index >= 0) pendingPrompts.value.splice(index, 1);
+  }
+
   function reset(): void {
     status.value = {
       state: 'idle',
@@ -124,6 +133,8 @@ export const useAgentStore = defineStore('agent', () => {
     enqueuePrompt,
     takePrompt,
     takeLatestPrompt,
+    takeFirstPrompt,
+    removePrompt,
     reset,
   };
 });

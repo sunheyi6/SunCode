@@ -535,6 +535,7 @@ export interface PreExecutedToolCall {
 export type WorkerInMessage =
   | { type: 'prompt'; sessionId: string; text: string; attachments?: string[] }
   | { type: 'abort'; sessionId: string }
+  | { type: 'stop'; sessionId: string }
   | { type: 'continue'; sessionId: string }
   | { type: 'config'; settings: AppSettings }
   | { type: 'setWorkingDir'; sessionId: string; path: string }

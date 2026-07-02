@@ -47,6 +47,10 @@ export const bridge = {
     api().abort();
   },
 
+  stop(): void {
+    api().stop();
+  },
+
   continue(): void {
     api().continue();
   },

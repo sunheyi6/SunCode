@@ -348,6 +348,14 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
+  ipcMain.on('agent:stop', () => {
+    try {
+      if (currentSessionId) sendToWorker({ type: 'stop', sessionId: currentSessionId });
+    } catch (err) {
+      console.error('[Main] agent:stop failed:', (err as Error).message);
+    }
+  });
+
   ipcMain.on('agent:continue', () => {
     try {
       if (currentSessionId) sendToWorker({ type: 'continue', sessionId: currentSessionId });

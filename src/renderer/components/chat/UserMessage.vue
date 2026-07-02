@@ -68,8 +68,8 @@ async function copyContent(text: string) {
 
 .message-bubble {
   max-width: 85%;
-  background: var(--color-accent);
-  color: var(--color-bg);
+  background: #d9d9dc;
+  color: #252528;
   border-radius: 18px 18px 6px 18px;
   padding: 10px 16px;
 }

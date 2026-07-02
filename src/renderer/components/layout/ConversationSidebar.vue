@@ -8,8 +8,13 @@ import { useSettingsStore } from '../../stores/settings';
 import { useUpdateStore } from '../../stores/update';
 import { getVisibleSessionGroups } from './session-list';
 
+const props = defineProps<{
+  collapsed: boolean;
+}>();
+
 const emit = defineEmits<{
   openSettings: [section: string];
+  toggleCollapse: [];
 }>();
 
 const sessionsStore = useSessionsStore();
@@ -121,6 +126,18 @@ const activeGroupPath = computed(
       ?.workingDirectory ?? '',
 );
 
+// When entering a conversation, auto-collapse other folder groups
+watch(activeGroupPath, (newPath) => {
+  if (!newPath) return;
+  const next = new Set<string>();
+  for (const group of groupedSessions.value) {
+    if (group.path !== newPath) {
+      next.add(group.path);
+    }
+  }
+  collapsedGroups.value = next;
+});
+
 const allDisplayedIds = computed(() => {
   const ids: string[] = [];
   for (const group of visibleGroupedSessions.value) {
@@ -208,7 +225,16 @@ function formatTime(value: string): string {
 </script>
 
 <template>
-  <div class="conversation-sidebar">
+  <div class="conversation-sidebar" :class="{ collapsed: props.collapsed }">
+    <!-- Collapsed state: only show the app mark as toggle button -->
+    <template v-if="props.collapsed">
+      <div class="sidebar-collapsed-strip">
+        <button class="app-mark app-mark-btn" aria-label="展开侧栏" @click="emit('toggleCollapse')">S</button>
+      </div>
+    </template>
+
+    <!-- Expanded state: full sidebar -->
+    <template v-else>
     <!-- Update button: shows at top when update available or downloading -->
     <div
       v-if="updateStore.status.state === 'update-available' || updateStore.status.state === 'downloading'"
@@ -231,11 +257,9 @@ function formatTime(value: string): string {
     </div>
 
     <div class="sidebar-actions">
-      <div class="sidebar-nav">
-        <span class="app-mark" aria-label="SunCode">S</span>
-        <button class="nav-arrow" title="后退">←</button>
-        <button class="nav-arrow muted" title="前进">→</button>
-      </div>
+        <div class="sidebar-nav">
+          <button class="app-mark app-mark-btn" aria-label="折叠侧栏" @click="emit('toggleCollapse')">S</button>
+        </div>
 
       <div class="command-stack">
         <button class="command-row" @click="handleCreateSession()">
@@ -278,13 +302,7 @@ function formatTime(value: string): string {
           <span>#</span>
           <span>分组</span>
         </button>
-        <button class="scope-chip" type="button" @click="handleCreateSessionWithNewFolder()">
-          <span>□</span>
-          <span>项目</span>
-        </button>
         <span class="scope-spacer" />
-        <button class="scope-icon" title="展开/收起">↙</button>
-        <button class="scope-icon" title="按分组">#</button>
         <button
           v-if="!selectMode"
           class="scope-icon"
@@ -933,6 +951,29 @@ function formatTime(value: string): string {
   line-height: 1;
 }
 
+.app-mark-btn {
+  border: 0;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.app-mark-btn:hover {
+  opacity: 0.85;
+}
+
+/* ── Collapsed sidebar strip ── */
+.sidebar-collapsed-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 14px;
+}
+
+.conversation-sidebar.collapsed {
+  overflow: visible;
+}
+
 .nav-arrow {
   width: 22px;
   height: 22px;
@@ -970,7 +1011,7 @@ function formatTime(value: string): string {
 
 .command-row:hover,
 .command-row.active {
-  background: transparent;
+  background: var(--sidebar-panel-surface);
   color: var(--color-text);
 }
 

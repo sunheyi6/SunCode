@@ -18,12 +18,17 @@ const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
 
+const sidebarCollapsed = ref(false);
 const sidebarWidth = ref(320);
 const tracePanelWidth = ref(380);
 const isResizing = ref(false);
 const isResizingTrace = ref(false);
 const showSettings = ref(false);
 const settingsSection = ref('general');
+
+function toggleSidebar(): void {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+}
 
 function openSettingsAt(section: string): void {
   settingsSection.value = section;
@@ -88,10 +93,18 @@ const traceSystemPrompt = computed(() => {
   <div class="app-layout">
     <div class="app-main">
       <!-- Sidebar: conversation queue grouped by project -->
-      <aside class="sidebar" :style="{ width: sidebarWidth + 'px' }">
-        <ConversationSidebar @open-settings="openSettingsAt" />
-        <!-- Settings button at bottom of sidebar -->
-        <div class="sidebar-footer">
+      <aside
+        class="sidebar"
+        :class="{ collapsed: sidebarCollapsed }"
+        :style="{ width: sidebarCollapsed ? '48px' : sidebarWidth + 'px' }"
+      >
+        <ConversationSidebar
+          :collapsed="sidebarCollapsed"
+          @open-settings="openSettingsAt"
+          @toggle-collapse="toggleSidebar"
+        />
+        <!-- Settings button at bottom of sidebar (hidden when collapsed) -->
+        <div v-if="!sidebarCollapsed" class="sidebar-footer">
           <button class="settings-btn" title="设置 (Ctrl+,)" @click="showSettings = true">
             <span class="settings-icon">⚙️</span>
             <span class="settings-label">设置</span>
@@ -181,6 +194,11 @@ const traceSystemPrompt = computed(() => {
   display: flex;
   flex-direction: column;
   border-right: 1px solid #d7d7dc;
+  transition: width 0.2s ease;
+}
+
+.sidebar.collapsed {
+  overflow: visible;
 }
 
 /* Settings button at sidebar bottom */

@@ -29,6 +29,26 @@ const backgroundProcessMonitor = new BackgroundProcessMonitor((item, exitCode) =
   });
 });
 
+/**
+ * Per-session serialization lock.
+ * Messages that mutate agent state (prompt, continue, abort, stop) are
+ * serialized per session so that concurrent handleMessage invocations
+ * cannot race on Agent.isRunning / abortController.
+ */
+const sessionLocks = new Map<string, Promise<void>>();
+
+function withSessionLock(sessionId: string, fn: () => Promise<void>): void {
+  const prev = sessionLocks.get(sessionId) ?? Promise.resolve();
+  // fn runs after prev completes, even if prev rejected
+  const next = prev.then(fn, fn).then(() => {
+    // Clean up the lock entry when this is still the latest chain link.
+    if (sessionLocks.get(sessionId) === next) {
+      sessionLocks.delete(sessionId);
+    }
+  });
+  sessionLocks.set(sessionId, next);
+}
+
 /** Pending confirmations waiting for user response.
  *  Keyed by toolCallId (LLM-generated UUID, collision-safe across sessions). */
 const pendingConfirmations = new Map<
@@ -146,13 +166,15 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
         return;
       }
       console.log('[Worker] Dispatching prompt:', msg.text.slice(0, 50), 'session=', sid.slice(-8));
-      try {
-        await agent.prompt(msg.text);
-        console.log('[Worker] Prompt completed session=', sid.slice(-8));
-      } catch (error) {
-        console.error('[Worker] Prompt error:', error);
-        post({ type: 'error', sessionId: sid, message: (error as Error).message });
-      }
+      withSessionLock(sid, async () => {
+        try {
+          await agent.prompt(msg.text);
+          console.log('[Worker] Prompt completed session=', sid.slice(-8));
+        } catch (error) {
+          console.error('[Worker] Prompt error:', error);
+          post({ type: 'error', sessionId: sid, message: (error as Error).message });
+        }
+      });
       break;
     }
 
@@ -163,8 +185,24 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
         return;
       }
       console.log('[Worker] Aborting session=', sid.slice(-8));
-      const agent = getAgent(sid);
-      agent?.abort();
+      withSessionLock(sid, async () => {
+        const agent = getAgent(sid);
+        agent?.abort();
+      });
+      break;
+    }
+
+    case 'stop': {
+      const sid = msg.sessionId;
+      if (!sid) {
+        console.error('[Worker] stop: missing sessionId');
+        return;
+      }
+      console.log('[Worker] Soft-stopping session=', sid.slice(-8));
+      withSessionLock(sid, async () => {
+        const agent = getAgent(sid);
+        agent?.requestStop();
+      });
       break;
     }
 
@@ -177,12 +215,14 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
       const agent = getAgent(sid);
       if (!agent) return;
       console.log('[Worker] Continue session=', sid.slice(-8));
-      try {
-        await agent.continue();
-      } catch (error) {
-        console.error('[Worker] Continue error:', error);
-        post({ type: 'error', sessionId: sid, message: (error as Error).message });
-      }
+      withSessionLock(sid, async () => {
+        try {
+          await agent.continue();
+        } catch (error) {
+          console.error('[Worker] Continue error:', error);
+          post({ type: 'error', sessionId: sid, message: (error as Error).message });
+        }
+      });
       break;
     }
 
@@ -204,33 +244,35 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
         return;
       }
       console.log('[Worker] Working dir set:', msg.path, 'session=', sid.slice(-8));
-      const existing = agents.get(sid);
-      if (existing) {
-        await existing.setWorkingDir(msg.path);
-        console.log('[Worker] Working dir updated session=', sid.slice(-8));
-      } else {
-        const cbs = createCallbacks(sid);
-        const newAgent = new Agent(
-          msg.path,
-          settings,
-          cbs.onStream,
-          cbs.onStatus,
-          cbs.onToolStart,
-          cbs.onToolEnd,
-          cbs.onToolProgress,
-          cbs.onDone,
-          cbs.onError,
-          cbs.onBgProcessStarted,
-          cbs.onBgProcessCompleted,
-          cbs.onBgProcessPortsVerified,
-          cbs.onRunEvent,
-          cbs.onSubagentEvent,
-          cbs.onGoalEvent,
-          cbs.requestConfirmation,
-        );
-        agents.set(sid, newAgent);
-        console.log('[Worker] Agent created session=', sid.slice(-8));
-      }
+      withSessionLock(sid, async () => {
+        const existing = agents.get(sid);
+        if (existing) {
+          await existing.setWorkingDir(msg.path);
+          console.log('[Worker] Working dir updated session=', sid.slice(-8));
+        } else {
+          const cbs = createCallbacks(sid);
+          const newAgent = new Agent(
+            msg.path,
+            settings,
+            cbs.onStream,
+            cbs.onStatus,
+            cbs.onToolStart,
+            cbs.onToolEnd,
+            cbs.onToolProgress,
+            cbs.onDone,
+            cbs.onError,
+            cbs.onBgProcessStarted,
+            cbs.onBgProcessCompleted,
+            cbs.onBgProcessPortsVerified,
+            cbs.onRunEvent,
+            cbs.onSubagentEvent,
+            cbs.onGoalEvent,
+            cbs.requestConfirmation,
+          );
+          agents.set(sid, newAgent);
+          console.log('[Worker] Agent created session=', sid.slice(-8));
+        }
+      });
       break;
     }
 
