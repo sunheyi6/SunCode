@@ -425,6 +425,7 @@ function formatTime(value: string): string {
       </button>
     </div>
   </div>
+  </template>
 </template>
 
 <style scoped>
