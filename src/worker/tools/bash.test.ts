@@ -13,6 +13,20 @@ import {
 } from './bash';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const windowsPowerShellOptions =
+  process.platform === 'win32' ? { windowsShell: 'powershell' as const } : undefined;
+
+async function removeTempDir(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EBUSY' || attempt === 19) throw error;
+      await wait(500);
+    }
+  }
+}
 
 describe('bash tool details', () => {
   test('returns command metadata and stdout', async () => {
@@ -122,7 +136,9 @@ describe('bash tool details', () => {
 
     try {
       const command = 'npm --workspace @maka/desktop run start';
-      const result = await createBashTool(dir).execute({ command });
+      const result = await createBashTool(dir, undefined, windowsPowerShellOptions).execute({
+        command,
+      });
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Background service');
@@ -134,7 +150,7 @@ describe('bash tool details', () => {
       if (result.pid) killProcessTree(result.pid);
       await wait(500);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await removeTempDir(dir);
     }
   });
 
@@ -249,8 +265,11 @@ describe('bash tool details', () => {
         join(tempDir, 'service-output.js'),
         "console.log('startup-log-line'); setTimeout(() => {}, 2000);\n",
       );
-      const command = 'node service-output.js';
-      const result = await createBashTool(tempDir).execute({
+      const command =
+        process.platform === 'win32'
+          ? 'cmd /c "echo startup-log-line & ping 127.0.0.1 -n 3 > nul"'
+          : 'node service-output.js';
+      const result = await createBashTool(tempDir, undefined, windowsPowerShellOptions).execute({
         command,
         run_in_background: true,
         background_mode: 'service',
@@ -269,7 +288,7 @@ describe('bash tool details', () => {
       if (result.pid) killProcessTree(result.pid);
       await wait(500);
     } finally {
-      await rm(tempDir, { recursive: true, force: true });
+      await removeTempDir(tempDir);
     }
   });
 
@@ -362,7 +381,7 @@ describe('bash tool details', () => {
       expect(result.details.stderr).toContain('e');
       expect(result.details.stderr.length).toBeLessThan(51000);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await removeTempDir(dir);
     }
   });
 });

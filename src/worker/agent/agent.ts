@@ -32,8 +32,18 @@ import type { ContextBudgetPolicy } from '@shared/types';
 import { DEFAULT_CONTEXT_BUDGET_POLICY } from '@shared/constants';
 import { runGoalLoop, extractGoalDefinition } from './goal-loop';
 import { createDefaultStopHookRegistry } from './stop-hooks';
-import { isPlanModeActive, getPlanPermissionMode, isToolAllowedInPlanMode, getPlanState, buildPlanModeInstructions } from './plan-mode';
-import { createEnterPlanModeTool, createExitPlanModeTool, type PlanToolCallbacks } from '../tools/plan-tools';
+import {
+  isPlanModeActive,
+  getPlanPermissionMode,
+  isToolAllowedInPlanMode,
+  getPlanState,
+  buildPlanModeInstructions,
+} from './plan-mode';
+import {
+  createEnterPlanModeTool,
+  createExitPlanModeTool,
+  type PlanToolCallbacks,
+} from '../tools/plan-tools';
 
 export class Agent {
   private workingDir: string;
@@ -134,39 +144,10 @@ export class Agent {
         },
       });
 
-      // Load built-in tools
-      const registry = createToolRegistry(
-        this.workingDir,
-        {
-          onBackgroundStart: (proc) => this.onBackgroundStart(proc),
-          onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
-          onBackgroundPortsVerified: (pid, ports) => this.onBackgroundPortsVerified(pid, ports),
-        },
-        this.settings,
-        { protectedPids: [process.ppid] },
-      );
-      // Register subagent tool separately (after dispatcher is created)
-      // to avoid circular import between tools/registry.ts and agent/subagent.ts
-      registry.register(createSubagentTool(this.dispatcher));
-
-      // Register plan mode tools
-      const planCallbacks: PlanToolCallbacks = {
-        getWorkingDir: () => this.workingDir,
-        getPermissionMode: () => this.settings.permissionMode,
-        onPlanApprovalRequest: async (planContent, planFilePath) => {
-          if (this.onPlanApprovalRequest) {
-            return this.onPlanApprovalRequest(planContent, planFilePath);
-          }
-          return false;
-        },
-      };
-      registry.register(createEnterPlanModeTool(planCallbacks));
-      registry.register(createExitPlanModeTool(planCallbacks));
-
-      this.tools = registry.getAll();
+      this.tools = this.createBuiltInTools();
 
       // Load MCP tools
-      const mcpManager = createMcpManager(this.settings.mcpServers);
+      const mcpManager = createMcpManager(this.settings.mcpServers ?? []);
       const mcpTools = await mcpManager.connectAll();
       this.tools.push(...mcpTools);
 
@@ -185,11 +166,13 @@ export class Agent {
   /** Return tools filtered by the current permission mode. */
   private getEffectiveTools(): Tool[] {
     // Plan mode overrides user-selected permission mode
-    const effectiveMode = isPlanModeActive() ? getPlanPermissionMode() : this.settings.permissionMode;
+    const effectiveMode = isPlanModeActive()
+      ? getPlanPermissionMode()
+      : this.settings.permissionMode;
 
     if (effectiveMode === 'plan') {
       // In plan mode: only read-only tools + plan management tools
-      const planAllowedTools = new Set(['EnterPlanMode', 'ExitPlanMode']);
+      const planAllowedTools = new Set(['EnterPlanMode', 'ExitPlanMode', 'write', 'edit']);
       return this.tools.filter((t) => t.isReadonly || planAllowedTools.has(t.name));
     }
     return this.tools;
@@ -200,6 +183,7 @@ export class Agent {
     if (this.dispatcher) {
       this.dispatcher.updateOptions({ settings });
     }
+    this.replaceBuiltInTools();
   }
 
   /**
@@ -234,9 +218,12 @@ export class Agent {
       });
     }
 
-    // Rebuild built-in tools
+    this.replaceBuiltInTools();
+  }
+
+  private createBuiltInTools(): Tool[] {
     const registry = createToolRegistry(
-      path,
+      this.workingDir,
       {
         onBackgroundStart: (proc) => this.onBackgroundStart(proc),
         onBackgroundComplete: (pid, code) => this.onBackgroundComplete(pid, code),
@@ -245,15 +232,18 @@ export class Agent {
       this.settings,
       { protectedPids: [process.ppid] },
     );
+
     if (this.dispatcher) {
       registry.register(createSubagentTool(this.dispatcher));
     }
 
-    // Register plan mode tools
     const planCallbacks: PlanToolCallbacks = {
       getWorkingDir: () => this.workingDir,
       getPermissionMode: () => this.settings.permissionMode,
+      getPlanApprovalMode: () => this.settings.planApprovalMode ?? 'interactive',
       onPlanApprovalRequest: async (planContent, planFilePath) => {
+        if (this.settings.planApprovalMode === 'auto_approve') return true;
+        if (this.settings.planApprovalMode === 'disabled') return false;
         if (this.onPlanApprovalRequest) {
           return this.onPlanApprovalRequest(planContent, planFilePath);
         }
@@ -263,9 +253,11 @@ export class Agent {
     registry.register(createEnterPlanModeTool(planCallbacks));
     registry.register(createExitPlanModeTool(planCallbacks));
 
-    const newBuiltInTools = registry.getAll();
+    return registry.getAll();
+  }
 
-    // Replace built-in tools while keeping MCP tools
+  private replaceBuiltInTools(): void {
+    const newBuiltInTools = this.createBuiltInTools();
     const builtInNames = new Set(newBuiltInTools.map((t) => t.name));
     this.tools = [...newBuiltInTools, ...this.tools.filter((t) => !builtInNames.has(t.name))];
   }
@@ -301,7 +293,12 @@ export class Agent {
     const modelName = `${this.settings.activeProvider}/${this.settings.activeModel}`;
     this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString(), modelName });
     // Record the user's original prompt in the run log
-    this.onRunEvent({ type: 'turn.prompt', runId, input: text, timestamp: new Date().toISOString() });
+    this.onRunEvent({
+      type: 'turn.prompt',
+      runId,
+      input: text,
+      timestamp: new Date().toISOString(),
+    });
 
     // Detect /goal prefix → run autonomous goal loop
     const goalDef = extractGoalDefinition(text, {
@@ -346,7 +343,12 @@ export class Agent {
     const modelName = `${this.settings.activeProvider}/${this.settings.activeModel}`;
     this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString(), modelName });
     // Record continuation prompt in the run log
-    this.onRunEvent({ type: 'turn.prompt', runId, input: '[continue]', timestamp: new Date().toISOString() });
+    this.onRunEvent({
+      type: 'turn.prompt',
+      runId,
+      input: '[continue]',
+      timestamp: new Date().toISOString(),
+    });
 
     try {
       await this.runLoop(runId);
@@ -380,7 +382,9 @@ export class Agent {
    * Set the plan approval request handler.
    * Called by the main process to wire up the IPC-based plan approval flow.
    */
-  setPlanApprovalHandler(handler: (planContent: string, planFilePath: string) => Promise<boolean>): void {
+  setPlanApprovalHandler(
+    handler: (planContent: string, planFilePath: string) => Promise<boolean>,
+  ): void {
     this.onPlanApprovalRequest = handler;
   }
 
@@ -407,7 +411,10 @@ export class Agent {
     const userQuery = lastUserMsg
       ? typeof lastUserMsg.content === 'string'
         ? lastUserMsg.content
-        : lastUserMsg.content.filter((b) => b.type === 'text').map((b) => ('text' in b ? b.text : '')).join(' ')
+        : lastUserMsg.content
+            .filter((b) => b.type === 'text')
+            .map((b) => ('text' in b ? b.text : ''))
+            .join(' ')
       : '';
     const memoryContent = await loadMemories(this.workingDir, userQuery);
 
@@ -755,7 +762,12 @@ export class Agent {
         summary: '',
       };
 
-      await saveMemory(this.workingDir, entry, this.settings.activeProvider, this.settings.activeModel);
+      await saveMemory(
+        this.workingDir,
+        entry,
+        this.settings.activeProvider,
+        this.settings.activeModel,
+      );
     } catch {
       // Best-effort — never let memory failures break the agent
     }

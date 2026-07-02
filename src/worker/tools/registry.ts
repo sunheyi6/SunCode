@@ -85,11 +85,15 @@ export function createToolRegistry(
   bashOptions?: BashToolOptions,
 ): ToolRegistry {
   const registry = new ToolRegistry();
+  const bashToolOptions: BashToolOptions = {
+    ...bashOptions,
+    windowsShell: settings?.windowsShell,
+  };
 
   registry.register(createReadTool(workingDir));
   registry.register(createWriteTool(workingDir));
   registry.register(createEditTool(workingDir));
-  registry.register(createBashTool(workingDir, callbacks, bashOptions));
+  registry.register(createBashTool(workingDir, callbacks, bashToolOptions));
   registry.register(createGrepTool(workingDir));
   registry.register(createGlobTool(workingDir));
   registry.register(createLsTool(workingDir));

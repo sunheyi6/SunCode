@@ -13,8 +13,16 @@
  * - Results are collected and returned alongside the stream output
  */
 
-import type { RunEvent, RunId, ToolCallContent, ToolResult, PreExecutedToolCall } from '@shared/types';
+import type {
+  RunEvent,
+  RunId,
+  ToolCallContent,
+  ToolResult,
+  PreExecutedToolCall,
+} from '@shared/types';
 import type { Tool } from '../tools/types';
+import { isToolAllowedInPlanMode } from './plan-mode';
+import { DEFAULT_TOOL_TIMEOUT_MS } from '@shared/constants';
 
 // ===== Tool Execution Callbacks =====
 
@@ -68,12 +76,9 @@ export class StreamingToolExecutor {
       return;
     }
 
-    // Read-only tools can execute immediately
-    // Write tools are deferred if in confirm_changes mode
-    const needsConfirmation = this.confirmMode && !tool.isReadonly;
-
-    if (needsConfirmation) {
-      // Defer execution until after streaming completes
+    // Only read-only tools can execute immediately. Mutating tools are
+    // deferred to the main executor so confirmation and Plan Mode guards apply.
+    if (!tool.isReadonly) {
       this.deferredCalls.push(toolCall);
       return;
     }
@@ -153,7 +158,25 @@ export class StreamingToolExecutor {
       };
     }
 
-    return tool.execute(params);
+    if (!isToolAllowedInPlanMode(toolCall.name, params)) {
+      return {
+        toolCallId: toolCall.id,
+        name: toolCall.name,
+        success: false,
+        output: '',
+        error: `Tool "${toolCall.name}" is not allowed while Plan Mode is awaiting approval.`,
+      };
+    }
+
+    return Promise.race([
+      tool.execute(params),
+      new Promise<ToolResult>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Tool execution timed out after ${DEFAULT_TOOL_TIMEOUT_MS / 1000}s`)),
+          DEFAULT_TOOL_TIMEOUT_MS,
+        ),
+      ),
+    ]);
   }
 
   /**

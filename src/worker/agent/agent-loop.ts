@@ -21,6 +21,15 @@ import { executeTools } from './tool-executor';
 import { StreamingToolExecutor } from './streaming-executor';
 import { buildStructuredTextMessage } from './model-structured-content';
 import { formatToolResultForModel } from './tool-result-content';
+import {
+  buildPlanModeInstructions,
+  getPlanPermissionMode,
+  getPlanState,
+  isPlanModeActive,
+  incrementPlanTurn,
+  isPlanMaxTurnsExceeded,
+  forceExitPlanMode,
+} from './plan-mode';
 
 const TRACE_MESSAGE_CONTENT_LIMIT = 20_000;
 
@@ -166,28 +175,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     `model=${settings.activeProvider}/${settings.activeModel} tools=${tools.length} maxTurns=${settings.maxTurns || MAX_TURNS}`,
   );
 
-  // Build tool definitions for the LLM
-  const toolDefs = tools.map((t) => t.getDefinition());
-
-  // Build system prompt
-  const systemPrompt = buildSystemPrompt({
-    workingDir,
-    tools: toolDefs,
-    skillsContent,
-    permissionMode: settings.permissionMode,
-    agentsMdContent,
-    memoryContent,
-    planModeInstructions,
-  });
-
-  // Prepend system message
-  contextMessages.unshift({ role: 'system', content: systemPrompt });
-
-  // No prefix injection — user message goes to model as-is.
-  // Follows pi-agent-core's approach: keep the prompt minimal.
-
-  // Emit system prompt for call trace panel
-  onStream({ type: 'system_prompt', systemPrompt });
+  let lastSystemPrompt = '';
 
   console.log(
     `[AgentLoop] Starting with model=${settings.activeProvider}/${settings.activeModel}, tools=${tools.length}`,
@@ -211,6 +199,47 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     input.onTurnStart?.(turnCount, settings.maxTurns || MAX_TURNS, { ...tokenUsage });
 
     try {
+      // Plan mode turn limit enforcement — must check before building system prompt
+      if (isPlanModeActive()) {
+        const exceeded = incrementPlanTurn();
+        if (exceeded || isPlanMaxTurnsExceeded()) {
+          console.log('[AgentLoop] Plan mode max turns exceeded, force-exiting plan mode');
+          diag.milestone('PLAN_MODE', 'force_exit_turn_limit');
+          forceExitPlanMode();
+          // Inject a user message so the model knows it can now implement
+          contextMessages.push({
+            role: 'user',
+            content: 'Plan mode turn limit exceeded. Proceed directly with implementation based on what you have explored so far. Do NOT re-enter plan mode.',
+          });
+        }
+      }
+
+      const effectivePermissionMode = currentPermissionMode(settings.permissionMode);
+      const effectiveTools = filterToolsForPermission(tools, effectivePermissionMode);
+      const toolDefs = effectiveTools.map((t) => t.getDefinition());
+      const livePlanState = getPlanState();
+      const livePlanModeInstructions =
+        livePlanState && isPlanModeActive()
+          ? buildPlanModeInstructions(livePlanState, turnCount)
+          : planModeInstructions;
+      const systemPrompt = buildSystemPrompt({
+        workingDir,
+        tools: toolDefs,
+        skillsContent,
+        permissionMode: effectivePermissionMode,
+        agentsMdContent,
+        memoryContent,
+        planModeInstructions: livePlanModeInstructions,
+      });
+      if (systemPrompt !== lastSystemPrompt) {
+        if (contextMessages[0]?.role === 'system') {
+          contextMessages[0] = { role: 'system', content: systemPrompt };
+        } else {
+          contextMessages.unshift({ role: 'system', content: systemPrompt });
+        }
+        lastSystemPrompt = systemPrompt;
+        onStream({ type: 'system_prompt', systemPrompt });
+      }
 
       // Build context for pi-ai
       const piContext = {
@@ -240,7 +269,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         });
       }
 
-
       // Capture request message summaries for turn_detail event
       const requestMsgSummaries = lastMsgsForLog.map((m) => {
         const contentStr = getModelMessageTraceContent(m);
@@ -269,9 +297,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // ===== Streaming Tool Pre-Executor =====
       // Create executor that can start read-only tools during LLM streaming
       const streamingExecutor = new StreamingToolExecutor(
-        tools,
+        effectiveTools,
         workingDir,
-        settings.permissionMode === 'confirm_changes',
+        effectivePermissionMode === 'confirm_changes',
         {
           runId,
           onToolStart,
@@ -304,10 +332,27 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         onToolCallComplete: (tc) => streamingExecutor.onToolCallComplete(tc),
       });
 
-      const { assistantText, thinkingText, toolCalls } = streamResult;
+      const { assistantText: rawAssistantText, thinkingText, toolCalls: rawToolCalls } = streamResult;
       tokenUsage.input += streamResult.tokenUsage.input;
       tokenUsage.output += streamResult.tokenUsage.output;
       tokenUsage.total += streamResult.tokenUsage.total;
+
+      // ===== Defensive parse: extract tool calls from suncode.message JSON in text =====
+      // Some providers (DeepSeek) may output tool calls as JSON inside the text content
+      // instead of using the API's native tool_calls field. This fallback catches those.
+      let assistantText = rawAssistantText;
+      let toolCalls = rawToolCalls;
+      if (toolCalls.length === 0 && assistantText) {
+        const recovered = tryParseToolCallsFromText(assistantText);
+        if (recovered) {
+          toolCalls = recovered.toolCalls;
+          assistantText = recovered.cleanedText;
+          console.log(
+            `[AgentLoop] Recovered ${toolCalls.length} tool calls from suncode.message text (fallback parse)`,
+          );
+          diag.milestone('RECOVERY', 'tool_calls_from_text', { count: toolCalls.length });
+        }
+      }
 
       // ===== Turn Decision =====
       // Compute whether we need another turn based on tool calls and signals.
@@ -479,8 +524,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       if (remainingCalls.length > 0) {
         const deferredResult = await executeTools({
           toolCalls: remainingCalls,
-          tools,
-          settings: settings,
+          tools: effectiveTools,
+          settings: { ...settings, permissionMode: effectivePermissionMode },
           workingDir,
           runId,
           onToolStart,
@@ -648,7 +693,6 @@ function convertMessage(msg: Message): Record<string, unknown> {
         text: buildStructuredTextMessage({
           role: structuredRole,
           text: block.text,
-          toolCalls: msg.toolCalls,
         }),
       };
     }
@@ -692,7 +736,6 @@ function convertMessage(msg: Message): Record<string, unknown> {
               text: buildStructuredTextMessage({
                 role: structuredRole,
                 text: textContent,
-                toolCalls: msg.toolCalls,
               }),
             },
             ...toolCalls,
@@ -711,6 +754,23 @@ function convertToolDef(tool: ToolDefinition): Record<string, unknown> {
     description: tool.description,
     parameters: tool.parameters,
   };
+}
+
+function currentPermissionMode(
+  configuredMode: AppSettings['permissionMode'],
+): AppSettings['permissionMode'] {
+  if (!isPlanModeActive()) return configuredMode;
+  return getPlanPermissionMode() ?? configuredMode;
+}
+
+function filterToolsForPermission(
+  allTools: Tool[],
+  permissionMode: AppSettings['permissionMode'],
+): Tool[] {
+  if (permissionMode !== 'plan') return allTools;
+
+  const planAllowedTools = new Set(['EnterPlanMode', 'ExitPlanMode', 'write', 'edit']);
+  return allTools.filter((tool) => tool.isReadonly || planAllowedTools.has(tool.name));
 }
 
 function safeParseJson(str: string): unknown {
@@ -776,4 +836,49 @@ function truncateTraceContent(content: string): string {
   const headLength = Math.floor((TRACE_MESSAGE_CONTENT_LIMIT - marker.length) / 2);
   const tailLength = TRACE_MESSAGE_CONTENT_LIMIT - marker.length - headLength;
   return content.slice(0, headLength) + marker + content.slice(-tailLength);
+}
+
+/**
+ * Try to extract tool calls from suncode.message JSON embedded in assistant text.
+ * Returns null if no valid tool calls are found.
+ */
+function tryParseToolCallsFromText(
+  text: string,
+): { toolCalls: ToolCallContent[]; cleanedText: string } | null {
+  // Look for suncode.message JSON — may appear at the start or within the text
+  const jsonMatch = text.match(/\{\s*"type"\s*:\s*"suncode\.message"[\s\S]*?\}/);
+  if (!jsonMatch) return null;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    return null;
+  }
+
+  const rawToolCalls = parsed.toolCalls as Array<Record<string, unknown>> | undefined;
+  if (!rawToolCalls || !Array.isArray(rawToolCalls) || rawToolCalls.length === 0) {
+    return null;
+  }
+
+  const toolCalls: ToolCallContent[] = [];
+  for (const tc of rawToolCalls) {
+    const id = (tc.id as string) || `fallback_${Date.now()}_${toolCalls.length}`;
+    const name = tc.name as string;
+    const args = tc.arguments;
+    if (!name) continue;
+    toolCalls.push({
+      type: 'tool_call',
+      id,
+      name,
+      arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}),
+    });
+  }
+
+  if (toolCalls.length === 0) return null;
+
+  // Remove the JSON block from the text to avoid polluting context
+  const cleanedText = text.replace(jsonMatch[0], '').trim();
+
+  return { toolCalls, cleanedText };
 }

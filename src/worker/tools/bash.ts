@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -16,6 +16,43 @@ function getPowerShellPath(): string {
   if (process.platform !== 'win32') return 'powershell.exe';
   const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
   return `${systemRoot}/System32/WindowsPowerShell/v1.0/powershell.exe`;
+}
+
+export type WindowsShellPreference = 'auto' | 'git_bash' | 'powershell';
+
+type ResolvedShell = {
+  path: string;
+  type: 'bash' | 'powershell';
+};
+
+function pathEntries(): string[] {
+  return (process.env.PATH || process.env.Path || '')
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function findGitBashPath(): string | undefined {
+  const candidates = [
+    process.env.ProgramFiles ? `${process.env.ProgramFiles}\\Git\\bin\\bash.exe` : undefined,
+    process.env['ProgramFiles(x86)']
+      ? `${process.env['ProgramFiles(x86)']}\\Git\\bin\\bash.exe`
+      : undefined,
+    process.env.LocalAppData ? `${process.env.LocalAppData}\\Programs\\Git\\bin\\bash.exe` : undefined,
+    ...pathEntries()
+      .filter((entry) => /\\Git\\(cmd|bin|usr\\bin)$/i.test(entry))
+      .map((entry) => `${entry}\\bash.exe`),
+  ];
+
+  return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+}
+
+export function resolveWindowsShell(preference: WindowsShellPreference = 'auto'): ResolvedShell {
+  if (preference !== 'powershell') {
+    const gitBash = findGitBashPath();
+    if (gitBash) return { path: gitBash, type: 'bash' };
+  }
+  return { path: getPowerShellPath(), type: 'powershell' };
 }
 
 /** Maximum output lines before tail truncation. */
@@ -41,6 +78,7 @@ export interface BashToolCallbacks {
 
 export interface BashToolOptions {
   protectedPids?: number[];
+  windowsShell?: WindowsShellPreference;
 }
 
 /**
@@ -447,14 +485,15 @@ function buildChildProcessEnv(): NodeJS.ProcessEnv {
 
 export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks, options?: BashToolOptions) {
   const protectedPids = options?.protectedPids || [];
+  const windowsShell = options?.windowsShell ?? 'auto';
 
   return new (class BashTool extends BaseTool {
     readonly name = 'bash';
     readonly description = `Executes a shell command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds.
 
-IMPORTANT: Each invocation runs in a fresh shell. On Windows PowerShell, use ; to run commands sequentially, for example \`cd D:/project/app; npm run dev\`. On Linux/macOS bash, use && when later commands should only run after earlier commands succeed.
+IMPORTANT: Each invocation runs in a fresh shell. On Windows, the configured shell is used. With Git Bash or Linux/macOS bash, use && when later commands should only run after earlier commands succeed. With Windows PowerShell, use ; to run commands sequentially, for example \`cd D:/project/app; npm run dev\`.
 
-On Windows this runs Windows PowerShell (powershell.exe, always preinstalled). Windows PowerShell 5 does not support &&. It supports: ; for command sequencing, double quotes for strings with spaces, single quotes for literals, Select-String for searching files (instead of grep), Get-ChildItem for directory listing (instead of ls).
+On Windows the default shell preference is automatic: user-selected shell first, then Git Bash when installed, otherwise Windows PowerShell (powershell.exe, always preinstalled). Windows PowerShell 5 does not support &&. It supports: ; for command sequencing, double quotes for strings with spaces, single quotes for literals, Select-String for searching files (instead of grep), Get-ChildItem for directory listing (instead of ls).
 
 On Linux/macOS this runs bash.
 
@@ -565,9 +604,13 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
       }
       const effectiveCommand = killResult.rewritten;
 
-      const shell = process.platform === 'win32' ? getPowerShellPath() : '/bin/bash';
-      const shellArgs =
+      const resolvedShell =
         process.platform === 'win32'
+          ? resolveWindowsShell(windowsShell)
+          : { path: '/bin/bash', type: 'bash' as const };
+      const shell = resolvedShell.path;
+      const shellArgs =
+        resolvedShell.type === 'powershell'
           ? ['-NoProfile', '-NonInteractive', '-Command', effectiveCommand]
           : ['-c', effectiveCommand];
 
@@ -624,17 +667,16 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
             resolveResult(result);
           };
 
-          const commandDetails = (exitCode: number | null = null) => ({
+          const commandDetails = (exitCode: number | null = null, stdout = combinedOutput) => ({
             type: 'command' as const,
             command,
             cwd,
             exitCode,
-            stdout: combinedOutput,
+            stdout,
             stderr: '',
           });
 
-          const observedOutputSection = (): string => {
-            const observed = truncateTail(combinedOutput, MAX_OUTPUT_LINES, MAX_OUTPUT_BYTES).text;
+          const observedOutputSection = (observed: string): string => {
             return observed
               ? `\n\nObserved output during startup window:\n${observed}`
               : '\n\nObserved output during startup window:\n(no observed output yet)';
@@ -804,11 +846,12 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                 }
 
                 observeProcessEvidence();
+                const observed = truncateTail(combinedOutput, MAX_OUTPUT_LINES, MAX_OUTPUT_BYTES).text;
 
                 resolveOnce(
                   this.success(
-                    `Background service still running after ${serviceObservationMs}ms observation (launcher PID: ${pid})\nCommand: ${command}\nThis does not confirm the app is ready. Do not treat the launcher PID as the app process; use the latest output, a startup_marker, reachable port, visible window, or process CommandLine/AppPath evidence for readiness.${observedOutputSection()}`,
-                    commandDetails(),
+                    `Background service still running after ${serviceObservationMs}ms observation (launcher PID: ${pid})\nCommand: ${command}\nThis does not confirm the app is ready. Do not treat the launcher PID as the app process; use the latest output, a startup_marker, reachable port, visible window, or process CommandLine/AppPath evidence for readiness.${observedOutputSection(observed)}`,
+                    commandDetails(null, observed),
                   ),
                 );
               }, serviceObservationMs);

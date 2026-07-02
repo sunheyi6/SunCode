@@ -45,6 +45,7 @@ export function isImplementing(): boolean {
 export function enterPlanMode(
   workingDir: string,
   currentPermissionMode: AppSettings['permissionMode'],
+  maxTurns: number = DEFAULT_PLAN_MAX_TURNS,
 ): PlanState {
   if (planState) {
     throw new Error('Already in plan mode');
@@ -60,6 +61,8 @@ export function enterPlanMode(
     phase: 'exploring',
     savedPermissionMode: currentPermissionMode,
     planFilePath,
+    planTurnCount: 0,
+    maxTurns,
   };
 
   return planState;
@@ -76,8 +79,14 @@ export function exitPlanMode(wasApproved: boolean): PlanState['savedPermissionMo
   }
 
   const restoredMode = planState.savedPermissionMode;
+  if (!wasApproved) {
+    planState.phase = 'exploring';
+    planState.approved = false;
+    return 'plan';
+  }
+
   planState = null;
-  return wasApproved ? restoredMode : 'plan';
+  return restoredMode;
 }
 
 /**
@@ -105,8 +114,13 @@ export function getPlanPermissionMode(): AppSettings['permissionMode'] | null {
  * Check if a tool is allowed during the exploring phase.
  * Exploring allows only read-only tools + write to the plan file.
  */
-export function isToolAllowedInPlanMode(toolName: string, params: Record<string, unknown>): boolean {
+export function isToolAllowedInPlanMode(
+  toolName: string,
+  params: Record<string, unknown>,
+): boolean {
   if (!planState || planState.phase !== 'exploring') return true;
+
+  if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') return true;
 
   // Read-only tools are always allowed
   const readOnlyTools = ['read', 'grep', 'glob', 'ls', 'find', 'web_search', 'web_fetch'];
@@ -129,15 +143,63 @@ export function isToolAllowedInPlanMode(toolName: string, params: Record<string,
  *   Turn 1: full instructions
  *   Turn 2-4: silent
  *   Turn 5: sparse reminder
+ *   At 60% of maxTurns: warning with remaining turns
+ *   At 80%+ of maxTurns: urgent warning every turn
  *   Every 25 turns: full refresh
  */
 export function getPlanModeReminder(turnCount: number): string | null {
   if (!planState || planState.phase !== 'exploring') return null;
 
+  const { planTurnCount, maxTurns } = planState;
+  const ratio = planTurnCount / maxTurns;
+
+  if (ratio >= 1.0) return PLAN_MODE_FORCE_EXIT;
+
+  if (ratio >= 0.8) {
+    const remaining = maxTurns - planTurnCount;
+    return PLAN_MODE_URGENT(remaining);
+  }
+
+  if (ratio >= 0.6) {
+    const remaining = maxTurns - planTurnCount;
+    return PLAN_MODE_WARNING(remaining);
+  }
+
   if (turnCount === 1) return PLAN_MODE_FULL_INSTRUCTIONS;
   if (turnCount === 5) return PLAN_MODE_SPARSE_REMINDER;
   if (turnCount % 25 === 0) return PLAN_MODE_FULL_INSTRUCTIONS;
   return null;
+}
+
+/**
+ * Increment the plan mode turn counter.
+ * Returns true if the max turns limit has been exceeded.
+ */
+export function incrementPlanTurn(): boolean {
+  if (!planState) return false;
+  planState.planTurnCount++;
+  return planState.planTurnCount > planState.maxTurns;
+}
+
+/**
+ * Check whether plan mode has exceeded its turn limit and must exit.
+ */
+export function isPlanMaxTurnsExceeded(): boolean {
+  if (!planState) return false;
+  return planState.planTurnCount > planState.maxTurns;
+}
+
+/**
+ * Force-exit plan mode due to turn limit exceeded.
+ * Approves the plan automatically and restores permissions.
+ */
+export function forceExitPlanMode(): PlanState['savedPermissionMode'] {
+  if (!planState) {
+    throw new Error('Not in plan mode');
+  }
+  const restoredMode = planState.savedPermissionMode;
+  planState = null;
+  return restoredMode;
 }
 
 /**
@@ -168,15 +230,78 @@ You are currently in **plan mode**. You voluntarily reduced your permissions to 
 // ===== Helpers =====
 
 const WORDS = [
-  'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel',
-  'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar', 'papa',
-  'quebec', 'romeo', 'sierra', 'tango', 'uniform', 'victor', 'whiskey', 'xray',
-  'yankee', 'zulu', 'eagle', 'falcon', 'hawk', 'owl', 'raven', 'swift',
-  'badger', 'otter', 'panda', 'koala', 'tiger', 'wolf', 'bear', 'deer',
-  'coral', 'crystal', 'ember', 'flint', 'glacier', 'horizon', 'island', 'jasper',
-  'krypton', 'lagoon', 'meadow', 'nebula', 'oasis', 'prism', 'quartz', 'reef',
-  'aurora', 'breeze', 'comet', 'dawn', 'eclipse', 'frost', 'gale', 'harbor',
-  'iris', 'jade', 'kiwi', 'lotus', 'maple', 'nova', 'opal', 'pine',
+  'alpha',
+  'bravo',
+  'charlie',
+  'delta',
+  'echo',
+  'foxtrot',
+  'golf',
+  'hotel',
+  'india',
+  'juliet',
+  'kilo',
+  'lima',
+  'mike',
+  'november',
+  'oscar',
+  'papa',
+  'quebec',
+  'romeo',
+  'sierra',
+  'tango',
+  'uniform',
+  'victor',
+  'whiskey',
+  'xray',
+  'yankee',
+  'zulu',
+  'eagle',
+  'falcon',
+  'hawk',
+  'owl',
+  'raven',
+  'swift',
+  'badger',
+  'otter',
+  'panda',
+  'koala',
+  'tiger',
+  'wolf',
+  'bear',
+  'deer',
+  'coral',
+  'crystal',
+  'ember',
+  'flint',
+  'glacier',
+  'horizon',
+  'island',
+  'jasper',
+  'krypton',
+  'lagoon',
+  'meadow',
+  'nebula',
+  'oasis',
+  'prism',
+  'quartz',
+  'reef',
+  'aurora',
+  'breeze',
+  'comet',
+  'dawn',
+  'eclipse',
+  'frost',
+  'gale',
+  'harbor',
+  'iris',
+  'jade',
+  'kiwi',
+  'lotus',
+  'maple',
+  'nova',
+  'opal',
+  'pine',
 ];
 
 function generatePlanSlug(): string {
@@ -187,6 +312,23 @@ function generatePlanSlug(): string {
 }
 
 // ===== Plan Mode Prompt Templates =====
+
+function PLAN_MODE_WARNING(remaining: number): string {
+  return `**⚠️ Plan mode turn limit approaching:** ${remaining} turns remaining before automatic exit.
+Speed up your exploration — focus on the key files needed to form a plan.
+Write your plan and call ExitPlanMode soon.`;
+}
+
+function PLAN_MODE_URGENT(remaining: number): string {
+  return `**🚨 URGENT: Plan mode about to time out!** Only ${remaining} turn${remaining === 1 ? '' : 's'} left.
+Write your plan to the plan file NOW and call ExitPlanMode immediately.
+Do NOT read more files — synthesize what you know.`;
+}
+
+const PLAN_MODE_FORCE_EXIT = `**🛑 Plan mode turn limit EXCEEDED.**
+You have spent too many turns exploring. The system will automatically approve your
+partial plan and switch to implementation mode. Write whatever plan you have to the
+plan file NOW and call ExitPlanMode in this same turn.`;
 
 const PLAN_MODE_FULL_INSTRUCTIONS = `## Plan Mode — Full Instructions
 

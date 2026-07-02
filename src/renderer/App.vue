@@ -11,9 +11,8 @@ const settingsStore = useSettingsStore();
 const updateStore = useUpdateStore();
 
 onMounted(async () => {
-  await settingsStore.load();
-  await modelsStore.initAll();
-  await updateStore.init();
+  const settings = await settingsStore.load();
+  await Promise.all([modelsStore.initAll(settings), updateStore.init()]);
 });
 </script>
 

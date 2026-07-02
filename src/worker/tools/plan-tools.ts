@@ -19,14 +19,13 @@ import {
 
 export interface PlanToolCallbacks {
   /** Request user approval for a plan. Returns true if approved, false if rejected. */
-  onPlanApprovalRequest: (
-    planContent: string,
-    planFilePath: string,
-  ) => Promise<boolean>;
+  onPlanApprovalRequest: (planContent: string, planFilePath: string) => Promise<boolean>;
   /** Get the current working directory. */
   getWorkingDir: () => string;
   /** Get the current permission mode. */
   getPermissionMode: () => string;
+  /** Get the plan approval behavior for this surface. */
+  getPlanApprovalMode?: () => 'interactive' | 'auto_approve' | 'disabled';
 }
 
 // ===== EnterPlanMode Tool =====
@@ -49,6 +48,12 @@ export function createEnterPlanModeTool(callbacks: PlanToolCallbacks): Tool {
       try {
         if (isPlanModeActive()) {
           return this.failure('Already in plan mode. Use ExitPlanMode to exit.');
+        }
+
+        if (callbacks.getPlanApprovalMode?.() === 'disabled') {
+          return this.failure(
+            'Plan mode is disabled for this run. Continue implementing directly with the available permissions.',
+          );
         }
 
         const workingDir = callbacks.getWorkingDir();
@@ -106,7 +111,9 @@ export function createExitPlanModeTool(callbacks: PlanToolCallbacks): Tool {
 
         const planContent = params.plan as string;
         if (!planContent || planContent.trim().length === 0) {
-          return this.failure('Plan content is required. Provide your complete plan as the "plan" argument.');
+          return this.failure(
+            'Plan content is required. Provide your complete plan as the "plan" argument.',
+          );
         }
 
         // Write the plan to the plan file
@@ -129,9 +136,9 @@ export function createExitPlanModeTool(callbacks: PlanToolCallbacks): Tool {
 
         exitPlanMode(false);
         return this.failure(
-          `Plan was not approved. Plan mode has been exited.\n\n` +
+          `Plan was not approved. You remain in plan mode.\n\n` +
             `Review the user's feedback and adjust your approach. ` +
-            `You can re-enter plan mode with EnterPlanMode when ready.`,
+            `Update the plan file and call ExitPlanMode again when ready.`,
         );
       } catch (error) {
         return this.failure(`Failed to exit plan mode: ${error}`);

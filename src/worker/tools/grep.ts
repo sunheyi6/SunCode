@@ -133,6 +133,178 @@ export function createGrepTool(workingDir: string) {
       };
 
       return new Promise((resolveResult) => {
+        const self = this;
+        let matchCount = 0;
+        let matchLimitReached = false;
+        let linesTruncated = false;
+        let fallbackTried = false;
+
+        /** Format collected matches into the output string. */
+        async function formatMatches(
+          matchesList: Array<{ filePath: string; lineNumber: number; lineText?: string }>,
+        ): Promise<string> {
+          const outputLines: string[] = [];
+          for (const match of matchesList) {
+            if (contextVal === 0 && match.lineText !== undefined) {
+              const relativePath = formatPath(match.filePath);
+              const sanitized = match.lineText
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '')
+                .replace(/\n$/, '');
+              const { text: truncatedText, wasTruncated } = truncateLine(sanitized);
+              if (wasTruncated) linesTruncated = true;
+              outputLines.push(`${relativePath}:${match.lineNumber}: ${truncatedText}`);
+            } else {
+              const relativePath = formatPath(match.filePath);
+              const fileLines = await getFileLines(match.filePath);
+              if (!fileLines.length) {
+                outputLines.push(`${relativePath}:${match.lineNumber}: (unable to read file)`);
+                continue;
+              }
+              const block: string[] = [];
+              const ctxStart =
+                contextVal > 0 ? Math.max(1, match.lineNumber - contextVal) : match.lineNumber;
+              const ctxEnd =
+                contextVal > 0
+                  ? Math.min(fileLines.length, match.lineNumber + contextVal)
+                  : match.lineNumber;
+              for (let cur = ctxStart; cur <= ctxEnd; cur++) {
+                const lineText = fileLines[cur - 1] ?? '';
+                const sanitized = lineText.replace(/\r/g, '');
+                const isMatchLine = cur === match.lineNumber;
+                const { text: truncatedText, wasTruncated } = truncateLine(sanitized);
+                if (wasTruncated) linesTruncated = true;
+                if (isMatchLine) {
+                  block.push(`${relativePath}:${cur}: ${truncatedText}`);
+                } else {
+                  block.push(`${relativePath}-${cur}- ${truncatedText}`);
+                }
+              }
+              outputLines.push(...block);
+            }
+          }
+          let output = outputLines.join('\n');
+          const notices: string[] = [];
+          if (matchLimitReached) {
+            notices.push(
+              `${effectiveLimit} matches limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
+            );
+          }
+          const truncation = truncateHead(output, { maxBytes: DEFAULT_MAX_BYTES });
+          if (truncation.truncated) {
+            notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+          }
+          if (linesTruncated) {
+            notices.push(
+              `Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use read tool to see full lines`,
+            );
+          }
+          if (notices.length > 0) {
+            output = `${truncation.content}\n\n[${notices.join('. ')}]`;
+          } else {
+            output = truncation.content;
+          }
+          return output;
+        }
+
+        /** Fallback: use system grep when ripgrep is not available. */
+        function runSystemGrepFallback(): void {
+          if (fallbackTried) {
+            resolveResult(
+              self.failure(
+                'Neither ripgrep (rg) nor system grep is available. ' +
+                  'Install rg from https://github.com/BurntSushi/ripgrep/releases ' +
+                  'or use glob + read to explore files.',
+              ),
+            );
+            return;
+          }
+          fallbackTried = true;
+
+          // Reset match state for the fallback attempt
+          matchCount = 0;
+          matchLimitReached = false;
+          linesTruncated = false;
+          const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
+
+          // Build system grep arguments (POSIX-compatible)
+          const grepArgs: string[] = ['-rn', '--color=never', '-H'];
+          if (ignoreCase) grepArgs.push('-i');
+          if (literal) grepArgs.push('-F');
+          if (glob) grepArgs.push('--include', glob);
+          grepArgs.push('--', pattern, '.');
+
+          let grepChild: ReturnType<typeof spawn>;
+          try {
+            grepChild = spawn('grep', grepArgs, {
+              cwd: normalized,
+              env: process.env,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+          } catch {
+            resolveResult(
+              self.failure(
+                'System grep is not available. Install ripgrep (rg) or use glob + read instead.',
+              ),
+            );
+            return;
+          }
+
+          grepChild.on('error', () => {
+            resolveResult(
+              self.failure(
+                'System grep is not available. Install ripgrep (rg) or use glob + read instead.',
+              ),
+            );
+          });
+
+          const grepRl = createInterface({ input: grepChild.stdout! });
+          grepRl.on('line', (line) => {
+            if (!line.trim() || matchCount >= effectiveLimit) return;
+            // Parse standard grep output: file:line:text
+            const sepIdx = line.indexOf(':');
+            if (sepIdx === -1) return;
+            const filePath = line.slice(0, sepIdx);
+            const rest = line.slice(sepIdx + 1);
+            const numSepIdx = rest.indexOf(':');
+            if (numSepIdx === -1) return;
+            const lineNumStr = rest.slice(0, numSepIdx);
+            const lineText = rest.slice(numSepIdx + 1);
+            const lineNumber = parseInt(lineNumStr, 10);
+            if (isNaN(lineNumber)) return;
+
+            matchCount++;
+            matches.push({
+              filePath: resolve(normalized, filePath),
+              lineNumber,
+              lineText: lineText.slice(0, GREP_MAX_LINE_LENGTH),
+            });
+
+            if (matchCount >= effectiveLimit) {
+              matchLimitReached = true;
+              if (!grepChild.killed) grepChild.kill();
+            }
+          });
+
+          grepChild.on('close', async (code) => {
+            grepRl.close();
+            // grep exit code 0 = matches found, 1 = no matches, >1 = error
+            if (code !== null && code > 1 && matchCount === 0) {
+              resolveResult(
+                self.failure(`System grep failed (exit ${code}). Use glob + read instead.`),
+              );
+              return;
+            }
+            if (matchCount === 0) {
+              resolveResult(self.success('No matches found.'));
+              return;
+            }
+            const output = await formatMatches(matches);
+            const fallbackNote = '(used system grep — rg not installed)';
+            resolveResult(self.success(`Found ${matchCount} matches ${fallbackNote}:\n\n${output}`));
+          });
+        }
+
         // Build ripgrep arguments
         const args: string[] = [
           '--json',
@@ -168,23 +340,15 @@ export function createGrepTool(workingDir: string) {
             stdio: ['ignore', 'pipe', 'pipe'],
           });
         } catch (_err) {
-          resolveResult(
-            this.failure(
-              'ripgrep (rg) is not installed. Install it from https://github.com/BurntSushi/ripgrep/releases\n' +
-                'Or use glob + read to explore files, or bash with findstr/PowerShell Select-String instead.',
-            ),
-          );
+          // rg not available, fall through to system grep below
+          runSystemGrepFallback();
           return;
         }
 
         child.on('error', (err) => {
           if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-            resolveResult(
-              this.failure(
-                'ripgrep (rg) is not installed. Install it from https://github.com/BurntSushi/ripgrep/releases\n' +
-                  'Alternatively, use glob to find files and read to inspect them.',
-              ),
-            );
+            // rg binary not found, fall back to system grep
+            runSystemGrepFallback();
           } else {
             resolveResult(this.failure(`Grep error: ${err.message}`));
           }
@@ -192,9 +356,6 @@ export function createGrepTool(workingDir: string) {
 
         const rl = createInterface({ input: child.stdout! });
         let stderr = '';
-        let matchCount = 0;
-        let matchLimitReached = false;
-        let linesTruncated = false;
         const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
 
         rl.on('line', (line) => {
@@ -228,12 +389,9 @@ export function createGrepTool(workingDir: string) {
         child.on('close', async (code) => {
           rl.close();
 
-          if (code !== 0 && code !== 1 && matchCount === 0) {
-            resolveResult(
-              this.failure(
-                `ripgrep not available. Please install ripgrep or use bash to run grep. Error: ${stderr || 'unknown'}`,
-              ),
-            );
+          if ((code !== 0 && code !== 1) || (code !== 0 && matchCount === 0)) {
+            // rg failed, fall back to system grep
+            runSystemGrepFallback();
             return;
           }
 
@@ -243,76 +401,7 @@ export function createGrepTool(workingDir: string) {
           }
 
           // Format matches with optional context lines
-          const outputLines: string[] = [];
-          for (const match of matches) {
-            if (contextVal === 0 && match.lineText !== undefined) {
-              const relativePath = formatPath(match.filePath);
-              const sanitized = match.lineText
-                .replace(/\r\n/g, '\n')
-                .replace(/\r/g, '')
-                .replace(/\n$/, '');
-              const { text: truncatedText, wasTruncated } = truncateLine(sanitized);
-              if (wasTruncated) linesTruncated = true;
-              outputLines.push(`${relativePath}:${match.lineNumber}: ${truncatedText}`);
-            } else {
-              // Context mode: read file to get surrounding lines
-              const relativePath = formatPath(match.filePath);
-              const fileLines = await getFileLines(match.filePath);
-              if (!fileLines.length) {
-                outputLines.push(`${relativePath}:${match.lineNumber}: (unable to read file)`);
-                continue;
-              }
-              const block: string[] = [];
-              const ctxStart =
-                contextVal > 0 ? Math.max(1, match.lineNumber - contextVal) : match.lineNumber;
-              const ctxEnd =
-                contextVal > 0
-                  ? Math.min(fileLines.length, match.lineNumber + contextVal)
-                  : match.lineNumber;
-              for (let cur = ctxStart; cur <= ctxEnd; cur++) {
-                const lineText = fileLines[cur - 1] ?? '';
-                const sanitized = lineText.replace(/\r/g, '');
-                const isMatchLine = cur === match.lineNumber;
-                const { text: truncatedText, wasTruncated } = truncateLine(sanitized);
-                if (wasTruncated) linesTruncated = true;
-                if (isMatchLine) {
-                  block.push(`${relativePath}:${cur}: ${truncatedText}`);
-                } else {
-                  block.push(`${relativePath}-${cur}- ${truncatedText}`);
-                }
-              }
-              outputLines.push(...block);
-            }
-          }
-
-          let output = outputLines.join('\n');
-
-          // Build truncation notices
-          const notices: string[] = [];
-          if (matchLimitReached) {
-            notices.push(
-              `${effectiveLimit} matches limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
-            );
-          }
-
-          // Apply byte truncation
-          const truncation = truncateHead(output, { maxBytes: DEFAULT_MAX_BYTES });
-          if (truncation.truncated) {
-            notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
-          }
-          if (linesTruncated) {
-            notices.push(
-              `Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use read tool to see full lines`,
-            );
-          }
-          if (notices.length > 0) {
-            output = `${truncation.content}
-
-[${notices.join('. ')}]`;
-          } else {
-            output = truncation.content;
-          }
-
+          const output = await formatMatches(matches);
           resolveResult(this.success(`Found ${matchCount} matches:\n\n${output}`));
         });
       });

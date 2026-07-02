@@ -206,6 +206,10 @@ export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
   /** Agent permission mode */
   permissionMode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes';
+  /** Shell preference for command execution on Windows. */
+  windowsShell: 'auto' | 'git_bash' | 'powershell';
+  /** How plan approval requests are handled when the agent enters Plan Mode. */
+  planApprovalMode?: 'interactive' | 'auto_approve' | 'disabled';
   fontSize: number; // base font size in px, default 14
   mcpServers: McpServerConfig[];
   skills: string[]; // paths to skill directories
@@ -290,6 +294,10 @@ export interface PlanState {
   planFilePath: string;
   /** Whether the plan was approved by the user. */
   approved?: boolean;
+  /** Number of turns spent in plan mode so far. */
+  planTurnCount: number;
+  /** Maximum turns allowed in plan mode before forced exit. */
+  maxTurns: number;
 }
 
 /** Events emitted during plan mode transitions. */

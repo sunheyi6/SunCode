@@ -32,3 +32,8 @@ __pycache__/
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Benchmark / test artifacts
+jobs/
+pier_suncode_agent.py
+scripts/bench-agent.ts

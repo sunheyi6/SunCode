@@ -11,6 +11,8 @@ export const DEFAULT_SETTINGS = {
   compactThreshold: 0.7,
   theme: 'system' as const,
   permissionMode: 'full_access' as const,
+  windowsShell: 'auto' as const,
+  planApprovalMode: 'interactive' as const,
   fontSize: 14,
   mcpServers: [],
   skills: [],
@@ -185,6 +187,13 @@ export const DEFAULT_PLAN_DIR = '.suncode/plans';
 
 /** Maximum turns in plan mode before requiring user to exit or approve. */
 export const DEFAULT_PLAN_MAX_TURNS = 25;
+
+// ===== Tool Execution Defaults =====
+
+/** Default per-tool execution timeout in milliseconds (120s).
+ *  Prevents hanging commands (e.g., `go build ./...` downloading deps)
+ *  from blocking the agent loop indefinitely. */
+export const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
 
 // ===== Error Recovery Defaults =====
 

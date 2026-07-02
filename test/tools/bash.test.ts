@@ -132,6 +132,33 @@ describe('bash tool foreground progress', () => {
       }
     }
   });
+
+  it('honors an explicit Windows PowerShell preference', async () => {
+    if (process.platform !== 'win32') return;
+
+    const mockSpawn = vi.mocked(spawn);
+    const fakeChild = new EventEmitter() as ChildProcess;
+    fakeChild.stdout = new EventEmitter() as NodeJS.ReadableStream;
+    fakeChild.stderr = new EventEmitter() as NodeJS.ReadableStream;
+    fakeChild.stdin = { end: vi.fn() } as unknown as NodeJS.WritableStream;
+    fakeChild.pid = 12348;
+
+    mockSpawn.mockReturnValue(fakeChild);
+
+    const executePromise = createBashTool('/tmp', undefined, {
+      windowsShell: 'powershell',
+    }).execute({ command: 'echo hello' });
+
+    await vi.waitFor(() => {
+      expect(mockSpawn).toHaveBeenCalled();
+    });
+    fakeChild.emit('close', 0, null);
+    await executePromise;
+
+    const [shell, args] = mockSpawn.mock.calls[0] ?? [];
+    expect(String(shell).toLowerCase()).toContain('powershell.exe');
+    expect(args).toEqual(['-NoProfile', '-NonInteractive', '-Command', 'echo hello']);
+  });
 });
 
 describe('bash tool background completion', () => {

@@ -1,6 +1,6 @@
+import type { AppSettings } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import type { AppSettings } from '@shared/types';
 import { bridge } from '../api/bridge';
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -13,6 +13,7 @@ export const useSettingsStore = defineStore('settings', () => {
     compactThreshold: 0.7,
     theme: 'system',
     permissionMode: 'full_access',
+    windowsShell: 'auto',
     fontSize: 14,
     mcpServers: [],
     skills: [],
@@ -22,7 +23,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const isLoaded = ref(false);
 
-  async function load(): Promise<void> {
+  async function load(): Promise<AppSettings> {
     try {
       const s = await bridge.getSettings();
       settings.value = { ...settings.value, ...s };
@@ -33,6 +34,7 @@ export const useSettingsStore = defineStore('settings', () => {
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
+    return settings.value;
   }
 
   async function update(partial: Partial<AppSettings>): Promise<void> {

@@ -32,7 +32,6 @@ import {
 import { checkoutGitBranch, getGitInfo, listGitBranches } from './git-info';
 import { getLogPath } from './logger';
 import { getAppDataDir } from './paths';
-import { recoverInterruptedSessions } from './recovery';
 import { appendEvent, getEvents, getTokenUsageAggregate, listRuns, startRun } from './run-store';
 import {
   deleteSession,
@@ -329,9 +328,6 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // Ensure session storage directory exists
   initSessionStore();
-
-  // Recover any sessions that were interrupted by a previous crash/close
-  void recoverInterruptedSessions();
 
   // Agent
   ipcMain.on('agent:prompt', (_event, text: string) => {

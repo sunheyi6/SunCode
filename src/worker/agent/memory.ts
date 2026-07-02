@@ -393,7 +393,7 @@ function loadAllMemoryEntries(memDir: string): MemoryEntry[] {
 
 async function generateSummary(entry: MemoryEntry, provider: string, modelId: string): Promise<string> {
   try {
-    const { getModel } = await import('@earendil-works/pi-ai');
+    const { getModel, complete } = await import('@earendil-works/pi-ai');
     const model = await getModel(provider as any, modelId);
     if (!model) {
       console.warn('Model not available for summary generation');
@@ -401,7 +401,7 @@ async function generateSummary(entry: MemoryEntry, provider: string, modelId: st
     }
 
     const prompt = `请为以下会话生成一个简洁的摘要（最多500字符），突出关键成果和经验教训：
-
+    
 用户请求：${entry.userRequest}
 
 工具使用：${Object.entries(entry.toolsUsed).map(([k, v]) => `${k}: ${v}次`).join(', ')}
@@ -420,19 +420,23 @@ async function generateSummary(entry: MemoryEntry, provider: string, modelId: st
       userRequest: entry.userRequest,
       toolsUsed: entry.toolsUsed,
     });
-    const messages = [{ role: 'user', content: [{ type: 'text', text: structuredPrompt }] }];
-    const result = await (model as any).generate({
-      messages,
+
+    const context = {
+      systemPrompt: prompt,
+      messages: [{ role: 'user' as const, content: structuredPrompt, timestamp: Date.now() }],
+    };
+
+    const result = await complete(model, context, {
       maxTokens: 300,
       temperature: 0.3,
+      signal: AbortSignal.timeout(30_000),
     });
 
-    if (result && result.response && result.response.content) {
-      const content = result.response.content;
-      if (typeof content === 'string') return content.trim();
-      if (Array.isArray(content)) {
-        return content.map((c: any) => (typeof c === 'string' ? c : c.text || '')).join('').trim();
-      }
+    if (result && result.content) {
+      const textBlocks = result.content.filter(
+        (c): c is { type: 'text'; text: string } => c.type === 'text',
+      );
+      return textBlocks.map((c) => c.text).join('').trim().slice(0, MAX_SUMMARY_LENGTH);
     }
 
     return '';

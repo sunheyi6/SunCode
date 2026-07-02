@@ -2,6 +2,8 @@ import type { ToolCallContent, ToolResult, RunEvent, AppSettings } from '@shared
 import type { DiagLogger } from '../utils/diag-logger';
 import type { Tool } from '../tools/types';
 import { quickMatchLesson } from './lessons';
+import { isToolAllowedInPlanMode } from './plan-mode';
+import { DEFAULT_TOOL_TIMEOUT_MS } from '@shared/constants';
 
 function parseToolDescriptionArgs(argumentsJson: string): Record<string, unknown> | undefined {
   try {
@@ -43,7 +45,30 @@ function buildToolDescription(name: string, args: Record<string, unknown> | unde
   return keyArgs ? `${name}(${keyArgs})` : name;
 }
 
-function toolResultMeta(result: ToolResult, rawOutputLen: number): {
+/**
+ * Execute a tool with a timeout. Returns the tool result or a timeout error.
+ */
+async function executeWithTimeout(
+  tool: Tool,
+  params: Record<string, unknown>,
+  timeoutMs: number = DEFAULT_TOOL_TIMEOUT_MS,
+): Promise<ToolResult> {
+  const executePromise = tool.execute(params);
+
+  const timeoutPromise = new Promise<ToolResult>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`Tool execution timed out after ${timeoutMs / 1000}s`)),
+      timeoutMs,
+    ),
+  );
+
+  return Promise.race([executePromise, timeoutPromise]);
+}
+
+function toolResultMeta(
+  result: ToolResult,
+  rawOutputLen: number,
+): {
   truncated: boolean | undefined;
   message: string;
 } {
@@ -201,11 +226,30 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
       }
     }
 
-    if (
-      settings.permissionMode === 'confirm_changes' &&
-      !tool.isReadonly &&
-      requestConfirmation
-    ) {
+    if (!isToolAllowedInPlanMode(tc.name, params)) {
+      const e: ToolResult = {
+        toolCallId: tc.id,
+        name: tc.name,
+        success: false,
+        error: `Tool "${tc.name}" is not allowed while Plan Mode is awaiting approval.`,
+        output: '',
+      };
+      toolResults.push(e);
+      onToolEnd(e);
+      onRunEvent({
+        type: 'tool_completed',
+        runId,
+        toolCallId: tc.id,
+        toolName: tc.name,
+        success: false,
+        timestamp: '',
+        error: e.error,
+        output: '',
+      });
+      continue;
+    }
+
+    if (settings.permissionMode === 'confirm_changes' && !tool.isReadonly && requestConfirmation) {
       const confirmed = await requestConfirmation(tc);
       if (!confirmed) {
         const skipped: ToolResult = {
@@ -251,7 +295,7 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
             paramsStr.length > 100 ? `${paramsStr.slice(0, 100)}...` : paramsStr;
           console.log(`[AgentLoop] Tool ${tc.name} executing (params: ${paramsPreview})`);
           tool.onProgress = (chunk: string) => onToolProgress(tc.id, chunk);
-          const result = await tool.execute(params);
+          const result = await executeWithTimeout(tool, params);
           tool.onProgress = null;
           result.toolCallId = tc.id;
           onToolEnd(result);
@@ -332,11 +376,9 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
       `[AgentLoop] Tools done: ${toolResults.filter((t) => t.success).length}/${toolResults.length} OK` +
         ` (total ${Date.now() - toolExecStartTime}ms)`,
     );
-    diag.exit(
-      'TOOLS',
-      `${toolResults.filter((t) => t.success).length}/${toolResults.length} OK`,
-      { durationMs: Date.now() - toolExecStartTime },
-    );
+    diag.exit('TOOLS', `${toolResults.filter((t) => t.success).length}/${toolResults.length} OK`, {
+      durationMs: Date.now() - toolExecStartTime,
+    });
 
     for (const tr of toolResults) {
       if (!tr.success && tr.error) {

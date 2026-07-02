@@ -1,11 +1,12 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, nativeTheme, shell } from 'electron';
-import { migrateLegacyDataDir } from './paths';
-import { registerIpcHandlers } from './ipc-handlers';
-import { WindowManager } from './window-manager';
 import { initAutoUpdater } from './auto-updater';
-import { logger, getLogPath } from './logger';
+import { registerIpcHandlers } from './ipc-handlers';
+import { getLogPath, logger } from './logger';
+import { migrateLegacyDataDir } from './paths';
+import { recoverInterruptedSessions } from './recovery';
+import { WindowManager } from './window-manager';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -135,7 +136,9 @@ function createMainWindow(): BrowserWindow {
   if (process.env.VITE_DEV_SERVER_URL) {
     logger.info('[Window] Loading dev URL: %s', process.env.VITE_DEV_SERVER_URL);
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
-    win.webContents.openDevTools({ mode: 'detach' });
+    if (process.env.SUNCODE_OPEN_DEVTOOLS === '1') {
+      win.webContents.openDevTools({ mode: 'detach' });
+    }
   } else {
     const htmlPath = join(__dirname, '../../dist/index.html');
     logger.info('[Window] Loading file: %s', htmlPath);
@@ -150,7 +153,26 @@ function createMainWindow(): BrowserWindow {
     return { action: 'deny' };
   });
 
+  schedulePostStartupRecovery(win);
+
   return win;
+}
+
+function schedulePostStartupRecovery(win: BrowserWindow): void {
+  let scheduled = false;
+
+  const schedule = (): void => {
+    if (scheduled) return;
+    scheduled = true;
+    setTimeout(() => {
+      void recoverInterruptedSessions().catch((err: unknown) => {
+        logger.warn('[Recovery] Startup recovery failed', err);
+      });
+    }, 1_500);
+  };
+
+  win.once('ready-to-show', schedule);
+  win.webContents.once('did-finish-load', schedule);
 }
 
 async function initApp(): Promise<void> {

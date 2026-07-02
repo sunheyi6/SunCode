@@ -1,5 +1,6 @@
+import type { AppSettings } from '@shared/types';
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { computed, ref } from 'vue';
 import { bridge } from '../api/bridge';
 import { useSettingsStore } from './settings';
 
@@ -109,16 +110,21 @@ export const useModelsStore = defineStore('models', () => {
     keyStatus.value = { ...keyStatus.value, [provider]: Boolean(key) };
   }
 
-  async function initAll(): Promise<void> {
+  async function initAll(initialSettings?: AppSettings): Promise<void> {
     syncKeyStatusFromSettings();
     if (isLoaded.value) return;
     isLoaded.value = true;
-    try {
-      const s = await bridge.getSettings();
-      if (s.activeProvider) activeProvider.value = s.activeProvider;
-      if (s.activeModel) activeModel.value = s.activeModel;
-    } catch {
-      /* use defaults */
+    if (initialSettings) {
+      activeProvider.value = initialSettings.activeProvider;
+      activeModel.value = initialSettings.activeModel;
+    } else {
+      try {
+        const s = await bridge.getSettings();
+        if (s.activeProvider) activeProvider.value = s.activeProvider;
+        if (s.activeModel) activeModel.value = s.activeModel;
+      } catch {
+        /* use defaults */
+      }
     }
     loadRecommended().catch(() => {});
     loadProviders().catch(() => {});

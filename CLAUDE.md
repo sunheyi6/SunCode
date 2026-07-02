@@ -26,6 +26,7 @@
 - 提交时不添加共同作者，不在提交信息、PR描述或说明文本中暴露 agent 身份
 - 保持 AGENTS.md 和 CLAUDE.md 内容一致，同步更新
 - 复合指令（如"对比 X 和 Y 保证一致"）应包含执行，文件不一致时主动同步无需等待确认
+- DeepSwe/Pier 基准测试统一使用 `bun run test:deep-swe -- <task-id-or-path>`，不要手写 `pier run` 长命令；默认从 `../deep-swe/tasks/<task-id>` 解析任务，也可用 `DEEP_SWE_ROOT` 或 `--deep-swe-root` 指定根目录
 
 ## 诊断日志
 

@@ -118,6 +118,11 @@ function updatePermissionMode(event: Event): void {
   settingsStore.update({ permissionMode: mode });
 }
 
+function updateWindowsShell(event: Event): void {
+  const windowsShell = (event.target as HTMLSelectElement).value as AppSettings['windowsShell'];
+  settingsStore.update({ windowsShell });
+}
+
 function updateFontSize(event: Event): void {
   const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
   if (Number.isFinite(value) && value >= 12 && value <= 20) {
@@ -310,6 +315,22 @@ function themeLabel(theme: AppSettings['theme']): string {
                   <option v-for="mode in permissionModes" :key="mode.value" :value="mode.value">
                     {{ mode.label }}
                   </option>
+                </select>
+              </label>
+
+              <label class="setting-row">
+                <span class="setting-copy">
+                  <strong>Windows Shell</strong>
+                  <small>控制 Agent 在 Windows 上执行命令时使用的 shell。</small>
+                </span>
+                <select
+                  class="setting-select"
+                  :value="settingsStore.settings.windowsShell"
+                  @change="updateWindowsShell"
+                >
+                  <option value="auto">自动（优先 Git Bash）</option>
+                  <option value="git_bash">Git Bash</option>
+                  <option value="powershell">Windows PowerShell</option>
                 </select>
               </label>
 
