@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import { MAX_TURNS } from '@shared/constants';
 import { sanitizeStructuredMessageLeak } from '@shared/finalization';
@@ -15,16 +17,10 @@ import type {
 
 import type { Tool } from '../tools/types';
 import { DiagLogger } from '../utils/diag-logger';
+
+// ===== Helpers =====
+import { getAgentDataSubdir } from './agent-data-dir';
 import { buildStructuredTextMessage } from './model-structured-content';
-import {
-  buildPlanModeInstructions,
-  forceExitPlanMode,
-  getPlanPermissionMode,
-  getPlanState,
-  incrementPlanTurn,
-  isPlanMaxTurnsExceeded,
-  isPlanModeActive,
-} from './plan-mode';
 import { handleStream } from './stream-handler';
 import { StreamingToolExecutor } from './streaming-executor';
 import { buildSystemPrompt } from './system-prompt';
@@ -55,8 +51,6 @@ export interface AgentLoopInput {
   skillsContent: string;
   /** Content from .agents.md / AGENTS.md (Codex-style workspace instructions). */
   agentsMdContent?: string;
-  /** Plan mode instructions to inject into the system prompt (only when plan mode is active). */
-  planModeInstructions?: string;
   /** Auto-generated memories from prior sessions. */
   memoryContent?: string;
   /** Retrieved failure lessons relevant to this request. */
@@ -128,7 +122,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     agentsMdContent,
     memoryContent,
     relevantLessonsContent,
-    planModeInstructions,
     abortSignal,
     runId,
     sessionId,
@@ -203,30 +196,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     input.onTurnStart?.(turnCount, settings.maxTurns || MAX_TURNS, { ...tokenUsage });
 
     try {
-      // Plan mode turn limit enforcement — must check before building system prompt
-      if (isPlanModeActive()) {
-        const exceeded = incrementPlanTurn();
-        if (exceeded || isPlanMaxTurnsExceeded()) {
-          console.log('[AgentLoop] Plan mode max turns exceeded, force-exiting plan mode');
-          diag.milestone('PLAN_MODE', 'force_exit_turn_limit');
-          forceExitPlanMode();
-          // Inject a user message so the model knows it can now implement
-          contextMessages.push({
-            role: 'user',
-            content:
-              'Plan mode turn limit exceeded. Proceed directly with implementation based on what you have explored so far. Do NOT re-enter plan mode.',
-          });
-        }
-      }
-
-      const effectivePermissionMode = currentPermissionMode(settings.permissionMode);
-      const effectiveTools = filterToolsForPermission(tools, effectivePermissionMode);
+      const effectivePermissionMode = settings.permissionMode;
+      const effectiveTools = tools;
       const toolDefs = effectiveTools.map((t) => t.getDefinition());
-      const livePlanState = getPlanState();
-      const livePlanModeInstructions =
-        livePlanState && isPlanModeActive()
-          ? buildPlanModeInstructions(livePlanState, turnCount)
-          : planModeInstructions;
       const systemPrompt = buildSystemPrompt({
         workingDir,
         tools: toolDefs,
@@ -235,7 +207,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         agentsMdContent,
         memoryContent,
         relevantLessonsContent,
-        planModeInstructions: livePlanModeInstructions,
       });
       if (systemPrompt !== lastSystemPrompt) {
         if (contextMessages[0]?.role === 'system') {
@@ -346,6 +317,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       tokenUsage.input += streamResult.tokenUsage.input;
       tokenUsage.output += streamResult.tokenUsage.output;
       tokenUsage.total += streamResult.tokenUsage.total;
+
+      // Persist task plan to disk in real-time if 📋 marker is present
+      maybeSaveTurnPlan(rawAssistantText, workingDir, sessionId);
 
       // ===== Defensive parse: extract tool calls from suncode.message JSON in text =====
       // Some providers (DeepSeek) may output tool calls as JSON inside the text content
@@ -767,23 +741,6 @@ function convertToolDef(tool: ToolDefinition): Record<string, unknown> {
   };
 }
 
-function currentPermissionMode(
-  configuredMode: AppSettings['permissionMode'],
-): AppSettings['permissionMode'] {
-  if (!isPlanModeActive()) return configuredMode;
-  return getPlanPermissionMode() ?? configuredMode;
-}
-
-function filterToolsForPermission(
-  allTools: Tool[],
-  permissionMode: AppSettings['permissionMode'],
-): Tool[] {
-  if (permissionMode !== 'plan') return allTools;
-
-  const planAllowedTools = new Set(['EnterPlanMode', 'ExitPlanMode', 'write', 'edit']);
-  return allTools.filter((tool) => tool.isReadonly || planAllowedTools.has(tool.name));
-}
-
 function safeParseJson(str: string): unknown {
   try {
     return JSON.parse(str);
@@ -892,4 +849,36 @@ function tryParseToolCallsFromText(
   const cleanedText = text.replace(jsonMatch[0], '').trim();
 
   return { toolCalls, cleanedText };
+}
+
+/**
+ * Persist the task plan to .suncode/plans/task-current.md in real-time.
+ * Called after every turn's stream completes if the assistant text contains
+ * a 📋 执行计划：or 📋 进度更新：marker.
+ */
+function maybeSaveTurnPlan(assistantText: string, workingDir: string, sessionId: string): void {
+  try {
+    if (!assistantText || !assistantText.includes('📋')) return;
+
+    // Find the LAST plan marker
+    const execIdx = assistantText.lastIndexOf('📋 执行计划：');
+    const progIdx = assistantText.lastIndexOf('📋 进度更新：');
+    const markerIdx = Math.max(execIdx, progIdx);
+    if (markerIdx < 0) return;
+
+    // Extract plan block
+    const afterMarker = assistantText.slice(markerIdx);
+    const blockEnd = afterMarker.indexOf('\n\n');
+    const planBlock = blockEnd >= 0 ? afterMarker.slice(0, blockEnd) : afterMarker;
+
+    const plansDir = getAgentDataSubdir(workingDir, '.suncode/plans', sessionId);
+    if (!existsSync(plansDir)) {
+      mkdirSync(plansDir, { recursive: true });
+    }
+
+    // Always overwrite the same "current" file so the right panel watches a single file
+    writeFileSync(join(plansDir, 'task-current.md'), `# Task Plan\n\n${planBlock}\n`, 'utf-8');
+  } catch {
+    // Best-effort
+  }
 }

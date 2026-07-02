@@ -16,7 +16,6 @@
 import { DEFAULT_TOOL_TIMEOUT_MS } from '@shared/constants';
 import type { RunEvent, RunId, ToolCallContent, ToolResult } from '@shared/types';
 import type { Tool } from '../tools/types';
-import { isToolAllowedInPlanMode } from './plan-mode';
 
 // ===== Tool Execution Callbacks =====
 
@@ -144,16 +143,6 @@ export class StreamingToolExecutor {
         success: false,
         output: '',
         error: '工具参数解析失败',
-      };
-    }
-
-    if (!isToolAllowedInPlanMode(toolCall.name, params)) {
-      return {
-        toolCallId: toolCall.id,
-        name: toolCall.name,
-        success: false,
-        output: '',
-        error: `Tool "${toolCall.name}" is not allowed while Plan Mode is awaiting approval.`,
       };
     }
 

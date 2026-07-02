@@ -27,16 +27,19 @@ function onDocumentClick(e: MouseEvent): void {
 onMounted(() => document.addEventListener('click', onDocumentClick));
 onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function toggleModel(): void {
   closeAll();
   modelOpen.value = !modelOpen.value;
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function toggleThinking(): void {
   closeAll();
   thinkingOpen.value = !thinkingOpen.value;
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function togglePerm(): void {
   closeAll();
   permOpen.value = !permOpen.value;
@@ -45,6 +48,7 @@ function togglePerm(): void {
 // ── model list ──
 const availableModels = computed(() => modelsStore.recommendedModels);
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const currentModelLabel = computed(() => {
   const m = availableModels.value.find(
     (m) => m.model === modelsStore.activeModel && m.provider === modelsStore.activeProvider,
@@ -52,6 +56,7 @@ const currentModelLabel = computed(() => {
   return m?.label ?? `${modelsStore.activeProvider}/${modelsStore.activeModel}`;
 });
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function selectModel(option: { provider: string; model: string }): void {
   modelsStore.selectModel(option.provider, option.model);
   modelOpen.value = false;
@@ -66,12 +71,14 @@ const thinkingLevels = [
   { value: 'xhigh' as const, label: '最大' },
 ];
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const currentThinking = computed(
   () =>
     thinkingLevels.find((l) => l.value === settingsStore.settings.thinkingLevel) ??
     thinkingLevels[2],
 );
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
   settingsStore.update({ thinkingLevel: level });
   thinkingOpen.value = false;
@@ -85,12 +92,14 @@ const permissionModes = [
   { value: 'confirm_changes' as const, label: '变更前确认', icon: '✅', desc: '修改前需确认' },
 ];
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const currentPerm = computed(
   () =>
     permissionModes.find((p) => p.value === settingsStore.settings.permissionMode) ??
     permissionModes[1],
 );
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
   settingsStore.update({ permissionMode: mode });
   permOpen.value = false;

@@ -11,7 +11,6 @@ export interface StructuredSystemPromptInput {
   memoryContent?: string;
   relevantLessonsContent?: string;
   agentsMdContent?: string;
-  planModeInstructions?: string;
   skillsContent?: string;
   currentDate: string;
   workingDirectory: string;
@@ -47,7 +46,6 @@ export function buildStructuredSystemPrompt(input: StructuredSystemPromptInput):
       memory: input.memoryContent,
       relevantLessons: input.relevantLessonsContent,
       projectInstructions: input.agentsMdContent,
-      planModeInstructions: input.planModeInstructions,
       skills: input.skillsContent,
     },
     environment: {

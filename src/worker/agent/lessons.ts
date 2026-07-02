@@ -34,6 +34,7 @@ import type {
   LessonTriggerType,
   Message,
 } from '@shared/types';
+import { getAgentDataSubdir } from './agent-data-dir';
 import { buildStructuredTaskPrompt } from './model-structured-content';
 
 // ---- Paths ----
@@ -42,19 +43,19 @@ const LESSONS_DIR = '.suncode/lessons';
 const LESSONS_INDEX = 'LESSONS.md';
 const MAX_RELEVANT_LESSONS_CHARS = 1500;
 
-function lessonsDir(workingDir: string): string {
-  return join(workingDir, LESSONS_DIR);
+function lessonsDir(workingDir: string, sessionId?: string): string {
+  return getAgentDataSubdir(workingDir, LESSONS_DIR, sessionId);
 }
 
-function indexPath(workingDir: string): string {
-  return join(lessonsDir(workingDir), LESSONS_INDEX);
+function indexPath(workingDir: string, sessionId?: string): string {
+  return join(lessonsDir(workingDir, sessionId), LESSONS_INDEX);
 }
 
 // ---- Read Index ----
 
 /** Parse LESSONS.md into a LessonIndex structure. */
-export function loadLessonIndex(workingDir: string): LessonIndex {
-  const path = indexPath(workingDir);
+export function loadLessonIndex(workingDir: string, sessionId?: string): LessonIndex {
+  const path = indexPath(workingDir, sessionId);
   if (!existsSync(path)) {
     return { entries: [], updatedAt: '' };
   }
@@ -96,8 +97,12 @@ export function loadLessonIndex(workingDir: string): LessonIndex {
 }
 
 /** Load a single lesson file and return the full LessonEntry. */
-export function loadLessonFile(workingDir: string, slug: string): LessonEntry | null {
-  const filePath = join(lessonsDir(workingDir), `${slug}.md`);
+export function loadLessonFile(
+  workingDir: string,
+  slug: string,
+  sessionId?: string,
+): LessonEntry | null {
+  const filePath = join(lessonsDir(workingDir, sessionId), `${slug}.md`);
   if (!existsSync(filePath)) return null;
 
   try {
@@ -178,8 +183,9 @@ export function saveLesson(
   workingDir: string,
   entry: LessonEntry,
   maxLessons: number = DEFAULT_MAX_LESSONS,
+  sessionId?: string,
 ): void {
-  const dir = lessonsDir(workingDir);
+  const dir = lessonsDir(workingDir, sessionId);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -190,10 +196,10 @@ export function saveLesson(
   writeFileSync(filePath, fileContent, 'utf-8');
 
   // Prune old files
-  pruneOldLessons(workingDir, maxLessons);
+  pruneOldLessons(workingDir, maxLessons, sessionId);
 
   // Rebuild the merged index
-  rebuildLessonIndex(workingDir);
+  rebuildLessonIndex(workingDir, sessionId);
 }
 
 /** Format a LessonEntry as a lesson .md file. */
@@ -230,8 +236,8 @@ function formatLessonMarkdown(entry: LessonEntry): string {
 }
 
 /** Delete oldest lessons when exceeding max. */
-function pruneOldLessons(workingDir: string, maxLessons: number): void {
-  const dir = lessonsDir(workingDir);
+function pruneOldLessons(workingDir: string, maxLessons: number, sessionId?: string): void {
+  const dir = lessonsDir(workingDir, sessionId);
   if (!existsSync(dir)) return;
 
   const files = listLessonFiles(dir);
@@ -247,12 +253,12 @@ function pruneOldLessons(workingDir: string, maxLessons: number): void {
 }
 
 /** Rebuild LESSONS.md from all lesson files. */
-function rebuildLessonIndex(workingDir: string): void {
-  const dir = lessonsDir(workingDir);
+function rebuildLessonIndex(workingDir: string, sessionId?: string): void {
+  const dir = lessonsDir(workingDir, sessionId);
   const files = listLessonFiles(dir);
   if (files.length === 0) {
     writeFileSync(
-      indexPath(workingDir),
+      indexPath(workingDir, sessionId),
       '<!-- SunCode lessons index — auto-generated -->\n',
       'utf-8',
     );
@@ -302,7 +308,7 @@ function rebuildLessonIndex(workingDir: string): void {
     lines.push('');
   }
 
-  writeFileSync(indexPath(workingDir), lines.join('\n'), 'utf-8');
+  writeFileSync(indexPath(workingDir, sessionId), lines.join('\n'), 'utf-8');
 }
 
 /** List lesson files (excl. LESSONS.md) sorted newest-first by filename. */
@@ -329,8 +335,9 @@ export function searchLessons(
   query: string,
   filterType?: LessonTriggerType,
   maxResults = 3,
+  sessionId?: string,
 ): LessonSearchResult[] {
-  const index = loadLessonIndex(workingDir);
+  const index = loadLessonIndex(workingDir, sessionId);
   if (!query) return [];
 
   const queryLower = query.toLowerCase();
@@ -394,9 +401,10 @@ export function quickMatchLesson(
   workingDir: string,
   toolName: string,
   errorText: string,
+  sessionId?: string,
 ): LessonSearchResult | null {
   const query = `${toolName} ${errorText.slice(0, 100)}`;
-  const results = searchLessons(workingDir, query, undefined, 1);
+  const results = searchLessons(workingDir, query, undefined, 1, sessionId);
   return results.length > 0 ? results[0]! : null;
 }
 
@@ -405,8 +413,13 @@ export function quickMatchLesson(
  * This is intentionally short: it gives the model the top matching lessons
  * without bloating the system prompt with the whole lesson library.
  */
-export function loadRelevantLessons(workingDir: string, query: string, maxResults = 3): string {
-  const results = searchLessons(workingDir, query, undefined, maxResults);
+export function loadRelevantLessons(
+  workingDir: string,
+  query: string,
+  maxResults = 3,
+  sessionId?: string,
+): string {
+  const results = searchLessons(workingDir, query, undefined, maxResults, sessionId);
   if (results.length === 0) return '';
 
   const lines: string[] = [
@@ -415,7 +428,7 @@ export function loadRelevantLessons(workingDir: string, query: string, maxResult
   ];
 
   for (const result of results) {
-    const full = loadLessonFile(workingDir, result.entry.slug);
+    const full = loadLessonFile(workingDir, result.entry.slug, sessionId);
     const entry = full || result.entry;
     lines.push(`- ${entry.title}`);
     if (entry.problem) lines.push(`  问题: ${entry.problem}`);
@@ -444,8 +457,13 @@ function jaccardSimilarity(a: string, b: string): number {
 }
 
 /** Check if a lesson is a duplicate of any existing lesson. */
-export function isDuplicateLesson(workingDir: string, title: string, problem: string): boolean {
-  const index = loadLessonIndex(workingDir);
+export function isDuplicateLesson(
+  workingDir: string,
+  title: string,
+  problem: string,
+  sessionId?: string,
+): boolean {
+  const index = loadLessonIndex(workingDir, sessionId);
   const combined = `${title} ${problem}`;
 
   for (const entry of index.entries) {
@@ -768,6 +786,7 @@ export async function extractAndSaveLessons(
   workingDir: string,
   provider: string,
   maxLessons: number = DEFAULT_MAX_LESSONS,
+  sessionId?: string,
 ): Promise<void> {
   for (const ctx of contexts) {
     try {
@@ -775,7 +794,7 @@ export async function extractAndSaveLessons(
       if (!raw?.extracted || !raw.title || !raw.problem) continue;
 
       // Dedup check
-      if (isDuplicateLesson(workingDir, raw.title, raw.problem)) continue;
+      if (isDuplicateLesson(workingDir, raw.title, raw.problem, sessionId)) continue;
 
       const slug = slugFromTitle(raw.title);
       const entry: LessonEntry = {
@@ -792,7 +811,7 @@ export async function extractAndSaveLessons(
         solution: raw.solution?.slice(0, 200) || '',
       };
 
-      saveLesson(workingDir, entry, maxLessons);
+      saveLesson(workingDir, entry, maxLessons, sessionId);
     } catch {
       // Best-effort — never let lesson extraction break the agent
     }

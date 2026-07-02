@@ -494,7 +494,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
-  ipcMain.handle('session:load', async (_event, id: string) => {
+  ipcMain.handle('session:load', async (_event, id: string, maxMessages?: number) => {
     try {
       currentSessionId = id;
       // DO NOT clear promptSessionId here — a running agent may still need it
@@ -503,7 +503,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       let meta = sessions.get(id);
 
       const memCount = messages?.length ?? -1;
-      const disk = await loadSession(id);
+      const disk = await loadSession(id, maxMessages);
       const diskCount = disk?.messages.length ?? -1;
 
       if (disk) {

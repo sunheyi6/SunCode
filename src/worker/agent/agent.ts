@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DEFAULT_CONTEXT_BUDGET_POLICY } from '@shared/constants';
@@ -18,25 +18,17 @@ import type {
 } from '@shared/types';
 import { createMcpManager } from '../mcp/manager';
 import { createModelRegistry } from '../models/registry';
-import {
-  createEnterPlanModeTool,
-  createExitPlanModeTool,
-  type PlanToolCallbacks,
-} from '../tools/plan-tools';
+
 import { createToolRegistry } from '../tools/registry';
 import { createSubagentTool } from '../tools/subagent';
 import type { Tool } from '../tools/types';
+import { getAgentDataSubdir } from './agent-data-dir';
 import { runAgentLoop } from './agent-loop';
 import { applyContextBudget } from './context-budget';
 import { extractGoalDefinition, runGoalLoop } from './goal-loop';
 import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
 import { loadMemories, type MemoryEntry, saveMemory } from './memory';
-import {
-  buildPlanModeInstructions,
-  getPlanPermissionMode,
-  getPlanState,
-  isPlanModeActive,
-} from './plan-mode';
+
 import { createSkillsLoader } from './skills';
 import { createDefaultStopHookRegistry } from './stop-hooks';
 import { SubagentDispatcher } from './subagent';
@@ -96,6 +88,7 @@ export class Agent {
     onSubagentEvent: (type: string, data: unknown) => void,
     onGoalEvent: (event: GoalEvent) => void,
     requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>,
+    sessionId?: string,
   ) {
     this.workingDir = workingDir;
     this.settings = settings;
@@ -113,7 +106,7 @@ export class Agent {
     this.onSubagentEvent = onSubagentEvent;
     this.onGoalEvent = onGoalEvent;
     this.requestConfirmation = requestConfirmation;
-    this.sessionId = randomUUID();
+    this.sessionId = sessionId ?? randomUUID();
 
     void this.initialize();
   }
@@ -165,15 +158,8 @@ export class Agent {
 
   /** Return tools filtered by the current permission mode. */
   private getEffectiveTools(): Tool[] {
-    // Plan mode overrides user-selected permission mode
-    const effectiveMode = isPlanModeActive()
-      ? getPlanPermissionMode()
-      : this.settings.permissionMode;
-
-    if (effectiveMode === 'plan') {
-      // In plan mode: only read-only tools + plan management tools
-      const planAllowedTools = new Set(['EnterPlanMode', 'ExitPlanMode', 'write', 'edit']);
-      return this.tools.filter((t) => t.isReadonly || planAllowedTools.has(t.name));
+    if (this.settings.permissionMode === 'plan') {
+      return this.tools.filter((t) => t.isReadonly || t.name === 'write' || t.name === 'edit');
     }
     return this.tools;
   }
@@ -231,27 +217,12 @@ export class Agent {
       },
       this.settings,
       { protectedPids: [process.ppid] },
+      this.sessionId,
     );
 
     if (this.dispatcher) {
       registry.register(createSubagentTool(this.dispatcher));
     }
-
-    const planCallbacks: PlanToolCallbacks = {
-      getWorkingDir: () => this.workingDir,
-      getPermissionMode: () => this.settings.permissionMode,
-      getPlanApprovalMode: () => this.settings.planApprovalMode ?? 'interactive',
-      onPlanApprovalRequest: async (planContent, planFilePath) => {
-        if (this.settings.planApprovalMode === 'auto_approve') return true;
-        if (this.settings.planApprovalMode === 'disabled') return false;
-        if (this.onPlanApprovalRequest) {
-          return this.onPlanApprovalRequest(planContent, planFilePath);
-        }
-        return false;
-      },
-    };
-    registry.register(createEnterPlanModeTool(planCallbacks));
-    registry.register(createExitPlanModeTool(planCallbacks));
 
     return registry.getAll();
   }
@@ -474,8 +445,13 @@ export class Agent {
 
     // Load auto-generated memories from prior sessions (with semantic search)
     const userQuery = latestUserText(this.messages);
-    const memoryContent = await loadMemories(this.workingDir, userQuery);
-    const relevantLessonsContent = loadRelevantLessons(this.workingDir, userQuery);
+    const memoryContent = await loadMemories(this.workingDir, userQuery, this.sessionId);
+    const relevantLessonsContent = loadRelevantLessons(
+      this.workingDir,
+      userQuery,
+      3,
+      this.sessionId,
+    );
 
     // Share retrieved context with sub-agents
     this.dispatcher?.updateMemoryContent(memoryContent);
@@ -488,15 +464,9 @@ export class Agent {
     );
 
     // Build plan mode instructions if active
-    const planModeInstructions = isPlanModeActive()
-      ? buildPlanModeInstructions(getPlanState()!, this.turnCount)
-      : undefined;
-
     const effectiveTools = summaryMode ? [] : this.getEffectiveTools();
     // Summary mode: single turn, no tools (text-only wrap-up)
-    const effectiveSettings = summaryMode
-      ? { ...this.settings, maxTurns: 1, planModeEnabled: false }
-      : this.settings;
+    const effectiveSettings = summaryMode ? { ...this.settings, maxTurns: 1 } : this.settings;
 
     const result = await runAgentLoop({
       model,
@@ -508,7 +478,6 @@ export class Agent {
       agentsMdContent,
       memoryContent,
       relevantLessonsContent,
-      planModeInstructions,
       abortSignal: this.abortController!.signal,
       runId,
       sessionId: this.sessionId,
@@ -596,6 +565,9 @@ export class Agent {
     // Persist a memory entry so future sessions recall what we did
     await this.saveSessionMemory();
 
+    // Persist task plan to .suncode/plans/ if present
+    this.saveTaskPlan(result.finalMessage);
+
     // Extract failure lessons (fire-and-forget)
     const hasFailures = this.messages.some(
       (m) => m.role === 'tool' && typeof m.content === 'string' && m.content.startsWith('错误:'),
@@ -608,6 +580,7 @@ export class Agent {
           this.workingDir,
           this.settings.activeProvider,
           this.settings.maxLessons,
+          this.sessionId,
         ).catch(() => {
           // Never let lesson extraction break the agent
         });
@@ -634,8 +607,13 @@ export class Agent {
     const skillsLoader = createSkillsLoader(this.workingDir, this.settings.skills);
     const skillsContent = await skillsLoader.loadAll();
     const agentsMdContent = await loadAgentsMd(this.workingDir);
-    const memoryContent = await loadMemories(this.workingDir, goalDef.description);
-    const relevantLessonsContent = loadRelevantLessons(this.workingDir, goalDef.description);
+    const memoryContent = await loadMemories(this.workingDir, goalDef.description, this.sessionId);
+    const relevantLessonsContent = loadRelevantLessons(
+      this.workingDir,
+      goalDef.description,
+      3,
+      this.sessionId,
+    );
 
     // Share retrieved context with sub-agents
     this.dispatcher?.updateMemoryContent(memoryContent);
@@ -786,12 +764,16 @@ export class Agent {
         this.workingDir,
         this.settings.activeProvider,
         this.settings.maxLessons,
+        this.sessionId,
       ).catch(() => {
         // Never let lesson extraction break the agent
       });
     }
 
     await this.saveSessionMemory();
+
+    // Persist task plan if present (goal loop)
+    this.saveTaskPlan(goalResult.finalMessage);
   }
 
   /** Save a summary of the current session to .suncode/memories/. */
@@ -837,9 +819,62 @@ export class Agent {
         entry,
         this.settings.activeProvider,
         this.settings.activeModel,
+        this.sessionId,
       );
     } catch {
       // Best-effort — never let memory failures break the agent
+    }
+  }
+
+  /**
+   * Persist the task plan from the assistant's final message to .suncode/plans/.
+   * Scans for 📋 执行计划：or 📋 进度更新：markers and saves the plan block.
+   */
+  private saveTaskPlan(finalMessage: Message): void {
+    try {
+      const text =
+        typeof finalMessage.content === 'string'
+          ? finalMessage.content
+          : finalMessage.content
+              .filter((b) => b.type === 'text')
+              .map((b) => ('text' in b ? b.text : ''))
+              .join('\n');
+
+      if (!text.includes('📋')) return;
+
+      // Find the LAST plan marker
+      const execIdx = text.lastIndexOf('📋 执行计划：');
+      const progIdx = text.lastIndexOf('📋 进度更新：');
+      const markerIdx = Math.max(execIdx, progIdx);
+      if (markerIdx < 0) return;
+
+      // Extract plan block: from marker to next double-newline or end
+      const afterMarker = text.slice(markerIdx);
+      const blockEnd = afterMarker.indexOf('\n\n');
+      const planBlock = blockEnd >= 0 ? afterMarker.slice(0, blockEnd) : afterMarker;
+
+      // Determine plan type for the filename slug
+      const isProgress = progIdx > execIdx;
+      const label = isProgress ? 'progress' : 'plan';
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+      const filename = `task-${label}-${dateStr}-${timeStr}.md`;
+
+      const plansDir = getAgentDataSubdir(this.workingDir, '.suncode/plans', this.sessionId);
+      if (!existsSync(plansDir)) {
+        mkdirSync(plansDir, { recursive: true });
+      }
+
+      const filePath = join(plansDir, filename);
+      writeFileSync(
+        filePath,
+        `# Task ${isProgress ? 'Progress' : 'Plan'}\n\n${planBlock}\n`,
+        'utf-8',
+      );
+      console.log(`[Agent] Task plan saved: ${filePath}`);
+    } catch {
+      // Best-effort — never let plan saving break the agent
     }
   }
 

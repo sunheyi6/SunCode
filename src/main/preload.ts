@@ -161,8 +161,8 @@ const suncodeAPI = {
   },
 
   /** Load session messages */
-  async loadSession(id: string): Promise<Message[]> {
-    return ipcRenderer.invoke('session:load', id);
+  async loadSession(id: string, maxMessages?: number): Promise<Message[]> {
+    return ipcRenderer.invoke('session:load', id, maxMessages);
   },
 
   /** Save a message to the current session */

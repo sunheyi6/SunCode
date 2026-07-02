@@ -105,8 +105,8 @@ export const bridge = {
     return api().createSession(name, workingDirectory);
   },
 
-  async loadSession(id: string): Promise<Message[]> {
-    return api().loadSession(id);
+  async loadSession(id: string, maxMessages?: number): Promise<Message[]> {
+    return api().loadSession(id, maxMessages);
   },
 
   async saveMessage(message: Message, targetSessionId?: string): Promise<void> {

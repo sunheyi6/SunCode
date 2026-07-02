@@ -113,10 +113,11 @@ const planElapsed = computed(() => {
   return `${m}m${s}s`;
 });
 
-// Track plan start time
+// Track plan start time + auto-expand when plan appears
 watch(hasPlan, (val) => {
   if (val && !planStartTime.value) {
     planStartTime.value = Date.now();
+    collapsed.value = false; // Auto-expand to show the plan
   } else if (!val) {
     planStartTime.value = 0;
   }

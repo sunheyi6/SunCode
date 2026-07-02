@@ -6,10 +6,14 @@ import { useToast } from '../../composables/useToast';
 import { useAgentStore } from '../../stores/agent';
 import { useChatStore } from '../../stores/chat';
 import { useSettingsStore } from '../../stores/settings';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ChatHeader from './ChatHeader.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ChatInput from './ChatInput.vue';
 import { getFantasyWelcomeMessage } from './chat-panel';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import MessageList from './MessageList.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import PendingPromptQueue from './PendingPromptQueue.vue';
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
@@ -20,9 +24,12 @@ const agentStore = useAgentStore();
 const { killAll: killAllBgProcesses } = useBackgroundProcesses();
 const { showToast } = useToast();
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const hasMessages = computed(() => chatStore.messages.length > 0);
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const welcomeMessage = computed(() => getFantasyWelcomeMessage());
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const chatZoom = computed(() => settingsStore.settings.fontSize / 14);
 
 // Auto-dismiss model switch notice after 5 seconds
@@ -40,10 +47,12 @@ watch(
   },
 );
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function handleSend(text: string): void {
   send(text);
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function handleStop(): void {
   stop();
   const killed = killAllBgProcesses();
@@ -52,6 +61,7 @@ function handleStop(): void {
   }
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function handleRemove(id: string): void {
   agentStore.removePrompt(id);
 }

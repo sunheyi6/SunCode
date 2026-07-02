@@ -10,11 +10,13 @@ const props = defineProps<{
   visible: boolean;
 }>();
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const emit = defineEmits<{
   confirm: [];
   deny: [];
 }>();
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const toolLabel = computed(() => {
   const labels: Record<string, string> = {
     bash: '终端命令',
@@ -25,6 +27,7 @@ const toolLabel = computed(() => {
   return labels[props.toolName] || props.toolName;
 });
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const toolIcon = computed(() => {
   const icons: Record<string, string> = {
     bash: '💻',

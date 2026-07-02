@@ -6,7 +6,7 @@ import { BaseTool, obj, p } from './types';
  * search_lessons tool — searches the failure lessons library.
  * Read-only, available in all permission modes.
  */
-export function createSearchLessonsTool(workingDir: string) {
+export function createSearchLessonsTool(workingDir: string, sessionId?: string) {
   return new (class SearchLessonsTool extends BaseTool {
     readonly name = 'search_lessons';
     readonly isReadonly = true;
@@ -35,7 +35,7 @@ export function createSearchLessonsTool(workingDir: string) {
         return this.failure('query is required');
       }
 
-      const results = searchLessons(workingDir, query, errorType, Math.min(limit, 10));
+      const results = searchLessons(workingDir, query, errorType, Math.min(limit, 10), sessionId);
 
       if (results.length === 0) {
         return this.success(`未找到与 "${query}" 相关的教训记录。`);
@@ -52,7 +52,7 @@ export function createSearchLessonsTool(workingDir: string) {
 
       for (let i = 0; i < results.length; i++) {
         const sr = results[i]!;
-        const full = loadLessonFile(workingDir, sr.entry.slug);
+        const full = loadLessonFile(workingDir, sr.entry.slug, sessionId);
         const entry = full || sr.entry;
 
         lines.push(`### ${entry.title}`);

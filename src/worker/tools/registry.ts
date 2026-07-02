@@ -83,6 +83,7 @@ export function createToolRegistry(
   callbacks?: BashToolCallbacks,
   settings?: AppSettings,
   bashOptions?: BashToolOptions,
+  sessionId?: string,
 ): ToolRegistry {
   const registry = new ToolRegistry();
   const bashToolOptions: BashToolOptions = {
@@ -100,7 +101,7 @@ export function createToolRegistry(
   registry.register(createFindTool(workingDir));
   registry.register(createWebFetchTool(workingDir));
   registry.register(createWebSearchTool(settings));
-  registry.register(createSearchLessonsTool(workingDir));
+  registry.register(createSearchLessonsTool(workingDir, sessionId));
 
   return registry;
 }

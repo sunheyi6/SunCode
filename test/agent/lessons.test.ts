@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -44,5 +44,44 @@ describe('failure lessons', () => {
     expect(content).toContain('固定端口启动失败');
     expect(content).toContain('正确做法: 遇到端口占用时先处理占用进程，再使用 bun run dev。');
     expect(content.length).toBeLessThanOrEqual(1500);
+  });
+
+  it('stores session lessons under app data instead of the workspace', () => {
+    const workingDir = createTempWorkspace();
+    const appDataDir = createTempWorkspace();
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      const entry: LessonEntry = {
+        slug: 'dev-server-port',
+        type: 'tool_failure',
+        tool: 'bash',
+        keywords: ['dev', 'port', '5173'],
+        files: ['vite.config.ts'],
+        date: '2026-07-02',
+        runId: 'run-1',
+        title: '鍥哄畾绔彛鍚姩澶辫触',
+        problem: 'dev server must use port 5173',
+        rootCause: 'launcher depends on the fixed port',
+        solution: 'use bun run dev',
+      };
+
+      saveLesson(workingDir, entry, undefined, 'session-1');
+
+      expect(existsSync(join(appDataDir, 'sessions', 'session-1', 'lessons', '2026-07-02-dev-server-port.md'))).toBe(
+        true,
+      );
+      expect(existsSync(join(workingDir, '.suncode'))).toBe(false);
+      expect(loadRelevantLessons(workingDir, '5173', undefined, 'session-1')).toContain(
+        '鍥哄畾绔彛鍚姩澶辫触',
+      );
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
   });
 });

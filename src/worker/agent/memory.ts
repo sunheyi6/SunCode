@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { getAgentDataSubdir } from './agent-data-dir';
 import { buildStructuredTaskPrompt } from './model-structured-content';
 
 const MEMORIES_DIR = '.suncode/memories';
@@ -34,8 +35,12 @@ export interface MemorySearchResult {
 
 const embeddingCache: Map<string, number[]> = new Map();
 
-export async function loadMemories(workingDir: string, query?: string): Promise<string> {
-  const memDir = join(workingDir, MEMORIES_DIR);
+export async function loadMemories(
+  workingDir: string,
+  query?: string,
+  sessionId?: string,
+): Promise<string> {
+  const memDir = memoryDir(workingDir, sessionId);
   if (!existsSync(memDir)) return '';
 
   const entries = loadAllMemoryEntries(memDir);
@@ -58,8 +63,9 @@ export async function saveMemory(
   entry: MemoryEntry,
   provider?: string,
   modelId?: string,
+  sessionId?: string,
 ): Promise<void> {
-  const memDir = join(workingDir, MEMORIES_DIR);
+  const memDir = memoryDir(workingDir, sessionId);
   if (!existsSync(memDir)) {
     mkdirSync(memDir, { recursive: true });
   }
@@ -135,8 +141,9 @@ export function updateMemory(
   date: string,
   slug: string,
   updates: Partial<MemoryEntry>,
+  sessionId?: string,
 ): void {
-  const memDir = join(workingDir, MEMORIES_DIR);
+  const memDir = memoryDir(workingDir, sessionId);
   const sessionPath = join(memDir, `${date}-${slug}.md`);
 
   if (!existsSync(sessionPath)) {
@@ -158,8 +165,13 @@ export function updateMemory(
   writeFileSync(join(memDir, MEMORY_INDEX_JSON), jsonIndexContent, 'utf-8');
 }
 
-export function deleteMemory(workingDir: string, date: string, slug: string): void {
-  const memDir = join(workingDir, MEMORIES_DIR);
+export function deleteMemory(
+  workingDir: string,
+  date: string,
+  slug: string,
+  sessionId?: string,
+): void {
+  const memDir = memoryDir(workingDir, sessionId);
   const sessionPath = join(memDir, `${date}-${slug}.md`);
 
   if (!existsSync(sessionPath)) {
@@ -175,14 +187,19 @@ export function deleteMemory(workingDir: string, date: string, slug: string): vo
   writeFileSync(join(memDir, MEMORY_INDEX_JSON), jsonIndexContent, 'utf-8');
 }
 
-export function getAllMemories(workingDir: string): MemoryEntry[] {
-  const memDir = join(workingDir, MEMORIES_DIR);
+export function getAllMemories(workingDir: string, sessionId?: string): MemoryEntry[] {
+  const memDir = memoryDir(workingDir, sessionId);
   if (!existsSync(memDir)) return [];
   return loadAllMemoryEntries(memDir);
 }
 
-export function mergeMemories(workingDir: string, entries: MemoryEntry[], newSlug: string): void {
-  const memDir = join(workingDir, MEMORIES_DIR);
+export function mergeMemories(
+  workingDir: string,
+  entries: MemoryEntry[],
+  newSlug: string,
+  sessionId?: string,
+): void {
+  const memDir = memoryDir(workingDir, sessionId);
   if (!existsSync(memDir)) {
     mkdirSync(memDir, { recursive: true });
   }
@@ -223,6 +240,10 @@ export function mergeMemories(workingDir: string, entries: MemoryEntry[], newSlu
 
   const jsonIndexContent = JSON.stringify(loadAllMemoryEntries(memDir), null, 2);
   writeFileSync(join(memDir, MEMORY_INDEX_JSON), jsonIndexContent, 'utf-8');
+}
+
+function memoryDir(workingDir: string, sessionId?: string): string {
+  return getAgentDataSubdir(workingDir, MEMORIES_DIR, sessionId);
 }
 
 function formatSessionMemory(entry: MemoryEntry): string {

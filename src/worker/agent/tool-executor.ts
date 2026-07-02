@@ -3,7 +3,6 @@ import type { AppSettings, RunEvent, ToolCallContent, ToolResult } from '@shared
 import type { Tool } from '../tools/types';
 import type { DiagLogger } from '../utils/diag-logger';
 import { quickMatchLesson } from './lessons';
-import { isToolAllowedInPlanMode } from './plan-mode';
 
 function parseToolDescriptionArgs(argumentsJson: string): Record<string, unknown> | undefined {
   try {
@@ -224,29 +223,6 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
         });
         continue;
       }
-    }
-
-    if (!isToolAllowedInPlanMode(tc.name, params)) {
-      const e: ToolResult = {
-        toolCallId: tc.id,
-        name: tc.name,
-        success: false,
-        error: `Tool "${tc.name}" is not allowed while Plan Mode is awaiting approval.`,
-        output: '',
-      };
-      toolResults.push(e);
-      onToolEnd(e);
-      onRunEvent({
-        type: 'tool_completed',
-        runId,
-        toolCallId: tc.id,
-        toolName: tc.name,
-        success: false,
-        timestamp: '',
-        error: e.error,
-        output: '',
-      });
-      continue;
     }
 
     if (settings.permissionMode === 'confirm_changes' && !tool.isReadonly && requestConfirmation) {

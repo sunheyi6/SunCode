@@ -22,6 +22,8 @@ export interface PlanToolCallbacks {
   onPlanApprovalRequest: (planContent: string, planFilePath: string) => Promise<boolean>;
   /** Get the current working directory. */
   getWorkingDir: () => string;
+  /** Get the owning session id for session-scoped agent data. */
+  getSessionId?: () => string;
   /** Get the current permission mode. */
   getPermissionMode: () => string;
   /** Get the plan approval behavior for this surface. */
@@ -58,7 +60,12 @@ export function createEnterPlanModeTool(callbacks: PlanToolCallbacks): Tool {
 
         const workingDir = callbacks.getWorkingDir();
         const currentMode = callbacks.getPermissionMode();
-        const state = enterPlanMode(workingDir, currentMode as PlanState['savedPermissionMode']);
+        const state = enterPlanMode(
+          workingDir,
+          currentMode as PlanState['savedPermissionMode'],
+          undefined,
+          callbacks.getSessionId?.(),
+        );
 
         return this.success(
           `Plan mode activated.\n\n` +

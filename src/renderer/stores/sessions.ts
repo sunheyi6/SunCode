@@ -1,4 +1,4 @@
-import type { SessionMeta } from '@shared/types';
+import type { Message, SessionMeta } from '@shared/types';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { bridge } from '../api/bridge';
@@ -8,6 +8,8 @@ export const useSessionsStore = defineStore('sessions', () => {
   const sessions = ref<SessionMeta[]>([]);
   const activeSessionId = ref<string | null>(null);
   const isLoaded = ref(false);
+  /** Cache: pre-warmed session messages (keyed by session id). */
+  const sessionMessagesCache = new Map<string, Message[]>();
 
   const sortedSessions = computed(() =>
     [...sessions.value].sort(
@@ -31,11 +33,26 @@ export const useSessionsStore = defineStore('sessions', () => {
     useChatStore().loadMessages(session.id, []);
   }
 
-  async function selectSession(id: string): Promise<void> {
+  async function selectSession(id: string, maxMessages?: number): Promise<void> {
     if (id === activeSessionId.value) return;
     console.log(`[Sessions] selectSession id=${id.slice(-8)}`);
-    const messages = await bridge.loadSession(id);
-    console.log(`[Sessions] selectSession loaded ${messages?.length ?? 0} messages`);
+    // Prewarmed cache: use 10-msg snapshot for instant display, then reload full.
+    const cached = sessionMessagesCache.get(id);
+    if (cached && maxMessages === undefined) {
+      sessionMessagesCache.delete(id);
+      activeSessionId.value = id;
+      useChatStore().loadMessages(id, cached);
+      // Reload full history in background
+      bridge.loadSession(id).then((fullMessages) => {
+        if (activeSessionId.value === id) {
+          console.log(`[Sessions] selectSession reloaded full: ${fullMessages.length} messages`);
+          useChatStore().loadMessages(id, fullMessages);
+        }
+      });
+      return;
+    }
+    const messages = await bridge.loadSession(id, maxMessages);
+    console.log(`[Sessions] selectSession loaded ${messages.length} messages`);
     activeSessionId.value = id;
     useChatStore().loadMessages(id, messages);
   }
@@ -46,9 +63,25 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (sessions.value.length === 0) {
       await createSession();
     } else {
-      await selectSession(sortedSessions.value[0].id);
+      // On startup, only load last 10 messages of the most recent session for quick display.
+      await selectSession(sortedSessions.value[0].id, 10);
+      // Pre-warm all remaining sessions in background (no await).
+      prewarmRemaining(10);
     }
     isLoaded.value = true;
+  }
+
+  /** Load 10-message snapshots for all remaining sessions in background. */
+  function prewarmRemaining(maxMessages: number): void {
+    const remaining = sortedSessions.value.slice(1);
+    for (const session of remaining) {
+      bridge.loadSession(session.id, maxMessages).then((messages) => {
+        sessionMessagesCache.set(session.id, messages);
+        console.log(`[Sessions] Prewarmed session id=${session.id.slice(-8)} msgs=${messages.length}`);
+      }).catch(() => {
+        // Skip unreadable sessions
+      });
+    }
   }
 
   async function deleteSession(id: string): Promise<void> {

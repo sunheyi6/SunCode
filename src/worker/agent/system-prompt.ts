@@ -16,8 +16,6 @@ export interface SystemPromptInput {
   memoryContent?: string;
   /** Optional: Retrieved failure lessons relevant to the current request */
   relevantLessonsContent?: string;
-  /** Optional: Plan mode instructions (only when plan mode is active) */
-  planModeInstructions?: string;
 }
 
 /**
@@ -34,7 +32,6 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     agentsMdContent,
     memoryContent,
     relevantLessonsContent,
-    planModeInstructions,
   } = input;
 
   const now = new Date();
@@ -51,7 +48,6 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     tools: sortedTools.map((tool) => ({ ...tool, snippet: getToolSnippet(tool) })),
     memoryContent,
     agentsMdContent,
-    planModeInstructions,
     skillsContent,
     relevantLessonsContent,
     currentDate: date,
@@ -73,8 +69,6 @@ function sortToolsForPrompt(tools: ToolDefinition[]): ToolDefinition[] {
     'web_search',
     'search_lessons',
     'subagent',
-    'EnterPlanMode',
-    'ExitPlanMode',
   ]);
 
   return [...tools].sort((a, b) => {

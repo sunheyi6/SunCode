@@ -266,6 +266,7 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
             cbs.onSubagentEvent,
             cbs.onGoalEvent,
             cbs.requestConfirmation,
+            sid,
           );
           agents.set(sid, newAgent);
           console.log('[Worker] Agent created session=', sid.slice(-8));

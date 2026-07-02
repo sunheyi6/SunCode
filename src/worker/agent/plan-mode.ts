@@ -13,6 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DEFAULT_PLAN_DIR, DEFAULT_PLAN_MAX_TURNS } from '@shared/constants';
 import type { AppSettings, PlanState } from '@shared/types';
+import { getAgentDataSubdir } from './agent-data-dir';
 
 // ===== Plan Mode State =====
 
@@ -46,12 +47,13 @@ export function enterPlanMode(
   workingDir: string,
   currentPermissionMode: AppSettings['permissionMode'],
   maxTurns: number = DEFAULT_PLAN_MAX_TURNS,
+  sessionId?: string,
 ): PlanState {
   if (planState) {
     throw new Error('Already in plan mode');
   }
 
-  const planDir = path.join(workingDir, DEFAULT_PLAN_DIR);
+  const planDir = getAgentDataSubdir(workingDir, DEFAULT_PLAN_DIR, sessionId);
   fs.mkdirSync(planDir, { recursive: true });
 
   const slug = generatePlanSlug();

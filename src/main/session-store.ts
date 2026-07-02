@@ -166,7 +166,7 @@ async function mapWithConcurrency<T, R>(
     while (nextIndex < items.length) {
       const index = nextIndex;
       nextIndex++;
-      results[index] = await mapper(items[index]!);
+      results[index] = await mapper(items[index] as T);
     }
   }
 
@@ -175,13 +175,17 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-/** Load a full session including messages. */
-export async function loadSession(id: string): Promise<SessionFile | null> {
+/** Load a full session including messages. If maxMessages is set, only the last N messages are returned. */
+export async function loadSession(id: string, maxMessages?: number): Promise<SessionFile | null> {
   const path = sessionPath(id);
   try {
     if (!existsSync(path)) return null;
     const raw = await readFile(path, 'utf-8');
-    return JSON.parse(raw) as SessionFile;
+    const data = JSON.parse(raw) as SessionFile;
+    if (maxMessages !== undefined && data.messages.length > maxMessages) {
+      data.messages = data.messages.slice(-maxMessages);
+    }
+    return data;
   } catch {
     console.warn(`[SessionStore] Failed to load session: ${id}`);
     return null;
