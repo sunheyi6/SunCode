@@ -24,7 +24,6 @@ import type {
   GoalEvent,
   GoalLoopResult,
   GoalState,
-  GoalStatus,
   Message,
   TokenUsage,
 } from '@shared/types';
@@ -247,7 +246,9 @@ export async function runGoalLoop(input: GoalLoopInput): Promise<GoalLoopOutput>
           // Model declared done but verification failed — log warning but still end
           goalState.status = 'verification_passed';
           goalState.reason = `model declared task_complete; verification command had exitCode=${verification.exitCode} (advisory only)`;
-          console.warn(`[GoalLoop] Model declared done but verification failed: exitCode=${verification.exitCode}`);
+          console.warn(
+            `[GoalLoop] Model declared done but verification failed: exitCode=${verification.exitCode}`,
+          );
           onGoalEvent({ type: 'goal_verification_passed', tokenUsage: totalTokens });
         }
         break;
@@ -275,7 +276,8 @@ export async function runGoalLoop(input: GoalLoopInput): Promise<GoalLoopOutput>
         prevOutput.slice(-500) === verification.output.slice(-500);
       if (isSameError && goalState.turnsCompleted > 1) {
         goalState.status = 'blocked';
-        goalState.reason = 'verification produces same error repeatedly — likely a systematic issue';
+        goalState.reason =
+          'verification produces same error repeatedly — likely a systematic issue';
         console.error(`[GoalLoop] Systematic verification failure detected`);
         onGoalEvent({ type: 'goal_blocked', reason: goalState.reason });
         break;
@@ -377,9 +379,9 @@ export async function runGoalLoop(input: GoalLoopInput): Promise<GoalLoopOutput>
 
 function buildAttemptMessages(
   history: Message[],
-  goal: GoalDefinition,
+  _goal: GoalDefinition,
   turnNumber: number,
-  lastResult: AgentLoopResult | null,
+  _lastResult: AgentLoopResult | null,
 ): Message[] {
   if (turnNumber === 0) {
     // First attempt: use the original goal prompt

@@ -8,12 +8,12 @@
  * callers. Only after ALL recovery attempts fail is the error propagated.
  */
 
-import type { ContinueSite, RecoveryContext } from '@shared/types';
 import {
-  DEFAULT_MAX_OUTPUT_RECOVERY_ATTEMPTS,
   DEFAULT_CONTEXT_OVERFLOW_RECOVERY_ATTEMPTS,
+  DEFAULT_MAX_OUTPUT_RECOVERY_ATTEMPTS,
   RECOVERY_MAX_OUTPUT_TOKENS,
 } from '@shared/constants';
+import type { ContinueSite, RecoveryContext } from '@shared/types';
 
 // ===== Error Classification =====
 
@@ -99,10 +99,7 @@ export interface RecoveryInput {
 /**
  * Prepare recovery parameters based on the continue site.
  */
-export function prepareRecovery(
-  site: ContinueSite,
-  attempt: number,
-): RecoveryInput {
+export function prepareRecovery(site: ContinueSite, attempt: number): RecoveryInput {
   switch (site) {
     case 'max_output_recovery':
       return {
@@ -112,9 +109,10 @@ export function prepareRecovery(
     case 'max_output_continuation':
       return {
         maxOutputTokens: RECOVERY_MAX_OUTPUT_TOKENS,
-        continuationPrompt: attempt === 1
-          ? '请继续你的工作。'
-          : `继续你的工作（第 ${attempt} 次尝试）。请直接输出最终结果，不要再调用更多工具。`,
+        continuationPrompt:
+          attempt === 1
+            ? '请继续你的工作。'
+            : `继续你的工作（第 ${attempt} 次尝试）。请直接输出最终结果，不要再调用更多工具。`,
       };
 
     case 'context_overflow_recovery':

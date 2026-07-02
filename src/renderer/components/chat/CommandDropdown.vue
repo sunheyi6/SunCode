@@ -4,8 +4,9 @@
  * Rendered via Teleport to body for z-index isolation.
  * Shows fuzzy-matched slash commands with keyboard navigation.
  */
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
-import { matchCommands, type CommandMatch, type SlashCommand } from '@shared/commands';
+
+import { type CommandMatch, matchCommands, type SlashCommand } from '@shared/commands';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 const props = defineProps<{
   inputText: string;
@@ -21,7 +22,7 @@ const emit = defineEmits<{
 
 // ===== State =====
 const selectedIndex = ref(0);
-const listRef = ref<HTMLElement | null>(null);
+const _listRef = ref<HTMLElement | null>(null);
 
 // ===== Computed =====
 
@@ -42,7 +43,7 @@ const query = computed(() => {
 const matches = computed<CommandMatch[]>(() => matchCommands(query.value));
 const hasMatches = computed(() => matches.value.length > 0);
 
-const dropdownStyle = computed(() => {
+const _dropdownStyle = computed(() => {
   if (!props.anchorRect) return { display: 'none' };
   return {
     position: 'fixed' as const,
@@ -70,7 +71,7 @@ function confirmSelection(): void {
   if (match) emit('select', match.command);
 }
 
-function onItemClick(cmd: SlashCommand): void {
+function _onItemClick(cmd: SlashCommand): void {
   emit('select', cmd);
 }
 
@@ -79,20 +80,24 @@ function handleKeydown(e: KeyboardEvent): void {
 
   switch (e.key) {
     case 'ArrowUp':
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefault();
+      e.stopPropagation();
       selectPrev();
       break;
     case 'ArrowDown':
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefault();
+      e.stopPropagation();
       selectNext();
       break;
     case 'Enter':
     case 'Tab':
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefault();
+      e.stopPropagation();
       confirmSelection();
       break;
     case 'Escape':
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefault();
+      e.stopPropagation();
       emit('close');
       break;
   }
@@ -101,11 +106,13 @@ function handleKeydown(e: KeyboardEvent): void {
 onMounted(() => document.addEventListener('keydown', handleKeydown, true));
 onUnmounted(() => document.removeEventListener('keydown', handleKeydown, true));
 
-watch(matches, () => { selectedIndex.value = 0; });
+watch(matches, () => {
+  selectedIndex.value = 0;
+});
 
 // ===== Highlight =====
 
-function highlightName(cmd: SlashCommand, indices: number[]): string {
+function _highlightName(cmd: SlashCommand, indices: number[]): string {
   if (indices.length === 0) return `/${cmd.name}`;
   let html = '/';
   const s = new Set(indices);

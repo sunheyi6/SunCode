@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { resolve, isAbsolute, normalize, relative } from 'node:path';
-import { BaseTool, p, obj } from './types';
+import { isAbsolute, normalize, relative, resolve } from 'node:path';
 import { isSensitiveFile } from './sensitive';
+import { BaseTool, obj, p } from './types';
 
 export function createReadTool(workingDir: string) {
   return new (class ReadTool extends BaseTool {

@@ -97,7 +97,9 @@ function appendTextBlock(target: ChatMessage, textDelta: string, forceNewBlock =
 function replaceTextBlocksFrom(target: ChatMessage, startIndex: number, text: string): void {
   if (!target.blocks) target.blocks = [];
 
-  target.blocks = target.blocks.filter((block, index) => index < startIndex || block.type !== 'text');
+  target.blocks = target.blocks.filter(
+    (block, index) => index < startIndex || block.type !== 'text',
+  );
   if (text) appendTextBlock(target, text, true);
 }
 

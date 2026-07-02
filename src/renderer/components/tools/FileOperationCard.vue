@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import type { ToolCallContent } from '@shared/types';
+import { computed } from 'vue';
 import { fileOperationView } from '../../utils/tool-presentation';
-import DiffViewer from '../code/DiffViewer.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -10,28 +9,31 @@ const props = defineProps<{
 
 const view = computed(() => fileOperationView(props.call));
 
-const statusClass = computed(() => {
+const _statusClass = computed(() => {
   if (view.value.label === '编辑中') return 'status-editing';
   if (view.value.label === '编辑失败') return 'status-failed';
   return 'status-edited';
 });
 
-const showDiff = computed(() => {
+const _showDiff = computed(() => {
   const d = props.call.result?.details;
   // oldContent/newContent may be '' for new files — check !== undefined
-  return d?.type === 'file_edit' && d.status === 'edited'
-    && (d as Record<string, unknown>).oldContent !== undefined
-    && (d as Record<string, unknown>).newContent !== undefined;
+  return (
+    d?.type === 'file_edit' &&
+    d.status === 'edited' &&
+    (d as Record<string, unknown>).oldContent !== undefined &&
+    (d as Record<string, unknown>).newContent !== undefined
+  );
 });
 
-const oldCode = computed(
+const _oldCode = computed(
   () => ((props.call.result?.details as Record<string, unknown>)?.oldContent as string) ?? '',
 );
-const newCode = computed(
+const _newCode = computed(
   () => ((props.call.result?.details as Record<string, unknown>)?.newContent as string) ?? '',
 );
 
-const isEditing = computed(() => view.value.label === '编辑中');
+const _isEditing = computed(() => view.value.label === '编辑中');
 </script>
 
 <template>

@@ -13,16 +13,10 @@
  * - Results are collected and returned alongside the stream output
  */
 
-import type {
-  RunEvent,
-  RunId,
-  ToolCallContent,
-  ToolResult,
-  PreExecutedToolCall,
-} from '@shared/types';
+import { DEFAULT_TOOL_TIMEOUT_MS } from '@shared/constants';
+import type { RunEvent, RunId, ToolCallContent, ToolResult } from '@shared/types';
 import type { Tool } from '../tools/types';
 import { isToolAllowedInPlanMode } from './plan-mode';
-import { DEFAULT_TOOL_TIMEOUT_MS } from '@shared/constants';
 
 // ===== Tool Execution Callbacks =====
 
@@ -41,11 +35,8 @@ export class StreamingToolExecutor {
   private running: Map<string, Promise<ToolResult>> = new Map();
   private results: Map<string, ToolResult> = new Map();
   private callbacks: StreamingExecutorCallbacks;
-  private workingDir: string;
   /** Tool calls that require confirmation before execution. */
   private deferredCalls: ToolCallContent[] = [];
-  /** Whether confirm_changes permission mode is active. */
-  private confirmMode: boolean;
 
   constructor(
     tools: Tool[],
@@ -54,8 +45,6 @@ export class StreamingToolExecutor {
     callbacks: StreamingExecutorCallbacks = {},
   ) {
     this.tools = new Map(tools.map((t) => [t.name, t]));
-    this.workingDir = workingDir;
-    this.confirmMode = confirmMode;
     this.callbacks = callbacks;
   }
 
@@ -172,7 +161,8 @@ export class StreamingToolExecutor {
       tool.execute(params),
       new Promise<ToolResult>((_, reject) =>
         setTimeout(
-          () => reject(new Error(`Tool execution timed out after ${DEFAULT_TOOL_TIMEOUT_MS / 1000}s`)),
+          () =>
+            reject(new Error(`Tool execution timed out after ${DEFAULT_TOOL_TIMEOUT_MS / 1000}s`)),
           DEFAULT_TOOL_TIMEOUT_MS,
         ),
       ),
@@ -218,7 +208,7 @@ export class StreamingToolExecutor {
 
     // Collect results in order of tool calls
     const results: ToolResult[] = [];
-    for (const [id, result] of this.results) {
+    for (const [_id, result] of this.results) {
       results.push(result);
     }
 

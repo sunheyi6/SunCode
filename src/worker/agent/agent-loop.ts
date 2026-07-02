@@ -15,22 +15,22 @@ import type {
 
 import type { Tool } from '../tools/types';
 import { DiagLogger } from '../utils/diag-logger';
-import { buildSystemPrompt } from './system-prompt';
-import { computeNeedsFollowUp } from './turn-decision';
-import { handleStream } from './stream-handler';
-import { executeTools } from './tool-executor';
-import { StreamingToolExecutor } from './streaming-executor';
 import { buildStructuredTextMessage } from './model-structured-content';
-import { formatToolResultForModel } from './tool-result-content';
 import {
   buildPlanModeInstructions,
+  forceExitPlanMode,
   getPlanPermissionMode,
   getPlanState,
-  isPlanModeActive,
   incrementPlanTurn,
   isPlanMaxTurnsExceeded,
-  forceExitPlanMode,
+  isPlanModeActive,
 } from './plan-mode';
+import { handleStream } from './stream-handler';
+import { StreamingToolExecutor } from './streaming-executor';
+import { buildSystemPrompt } from './system-prompt';
+import { executeTools } from './tool-executor';
+import { formatToolResultForModel } from './tool-result-content';
+import { computeNeedsFollowUp } from './turn-decision';
 
 const TRACE_MESSAGE_CONTENT_LIMIT = 20_000;
 
@@ -213,7 +213,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           // Inject a user message so the model knows it can now implement
           contextMessages.push({
             role: 'user',
-            content: 'Plan mode turn limit exceeded. Proceed directly with implementation based on what you have explored so far. Do NOT re-enter plan mode.',
+            content:
+              'Plan mode turn limit exceeded. Proceed directly with implementation based on what you have explored so far. Do NOT re-enter plan mode.',
           });
         }
       }
@@ -337,7 +338,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         onToolCallComplete: (tc) => streamingExecutor.onToolCallComplete(tc),
       });
 
-      const { assistantText: rawAssistantText, thinkingText, toolCalls: rawToolCalls } = streamResult;
+      const {
+        assistantText: rawAssistantText,
+        thinkingText,
+        toolCalls: rawToolCalls,
+      } = streamResult;
       tokenUsage.input += streamResult.tokenUsage.input;
       tokenUsage.output += streamResult.tokenUsage.output;
       tokenUsage.total += streamResult.tokenUsage.total;

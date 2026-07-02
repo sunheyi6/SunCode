@@ -38,12 +38,14 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function getSessionStatus(sid: string): AgentStatus {
-    return sessionStatus.get(sid) ?? {
-      state: 'idle',
-      turnCount: 0,
-      tokenUsage: { input: 0, output: 0, total: 0 },
-      modelName: '',
-    };
+    return (
+      sessionStatus.get(sid) ?? {
+        state: 'idle',
+        turnCount: 0,
+        tokenUsage: { input: 0, output: 0, total: 0 },
+        modelName: '',
+      }
+    );
   }
 
   function setGoalActive(active: boolean): void {

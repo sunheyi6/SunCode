@@ -37,23 +37,26 @@ export function parseTaskPlan(content: string, isStreaming: boolean): TaskPlan |
   const strictRegex = /^\s*[-*+]\s+\[([ xX])\]\s+Step\s+(\d+):\s*(.+)$/gm;
   const looseRegex = /^\s*[-*+]\s+\[([ xX])\]\s*(.+)$/gm;
 
-  let steps: TaskStep[] = [];
+  const steps: TaskStep[] = [];
 
   // Try strict format first (Step N:)
   let match: RegExpExecArray | null;
-  while ((match = strictRegex.exec(planBlock)) !== null) {
-    const status: StepStatus = match[1]!.trim().toLowerCase() === 'x' ? 'done' : 'pending';
-    const stepNum = parseInt(match[2]!, 10);
-    const { description, result } = splitResult(match[3]!.trim());
+  match = strictRegex.exec(planBlock);
+  while (match !== null) {
+    const status: StepStatus = match[1]?.trim().toLowerCase() === 'x' ? 'done' : 'pending';
+    const stepNum = parseInt(match[2] ?? '', 10);
+    const { description, result } = splitResult(match[3]?.trim());
     steps.push({ id: `step_${stepNum}`, index: stepNum, description, status, result });
+    match = strictRegex.exec(planBlock);
   }
 
   // If strict didn't match, try loose format (any checkbox line)
   if (steps.length === 0) {
     let autoIndex = 0;
-    while ((match = looseRegex.exec(planBlock)) !== null) {
-      const status: StepStatus = match[1]!.trim().toLowerCase() === 'x' ? 'done' : 'pending';
-      const raw = match[2]!.trim();
+    match = looseRegex.exec(planBlock);
+    while (match !== null) {
+      const status: StepStatus = match[1]?.trim().toLowerCase() === 'x' ? 'done' : 'pending';
+      const raw = match[2]?.trim() ?? '';
       autoIndex++;
 
       // Try to extract a step number from various formats
@@ -61,14 +64,14 @@ export function parseTaskPlan(content: string, isStreaming: boolean): TaskPlan |
       let index: number;
       let descStart: number;
       if (numMatch) {
-        index = parseInt(numMatch[1]!, 10);
-        descStart = numMatch[0]!.length;
+        index = parseInt(numMatch[1] ?? '', 10);
+        descStart = numMatch[0]?.length ?? 0;
       } else {
         // Check for Chinese numbering
         const cnMatch = raw.match(/^第([一二三四五六七八九十]+)步[：:]\s*/);
         if (cnMatch) {
-          index = cnToNumber(cnMatch[1]!);
-          descStart = cnMatch[0]!.length;
+          index = cnToNumber(cnMatch[1] ?? '');
+          descStart = cnMatch[0]?.length ?? 0;
         } else {
           index = autoIndex;
           descStart = 0;
@@ -106,10 +109,7 @@ export function stripPlanFromContent(content: string): string {
   // Remove from 📋 marker through all consecutive checklist lines
   // (lenient: any line starting with - [ ] or - [x] after the marker)
   return content
-    .replace(
-      /📋\s*(?:执行计划|进度更新)：[\s\S]*?(?=\n\n(?![-*+]\s*\[[ xX]\]\s)|$)/g,
-      '',
-    )
+    .replace(/📋\s*(?:执行计划|进度更新)：[\s\S]*?(?=\n\n(?![-*+]\s*\[[ xX]\]\s)|$)/g, '')
     .replace(/\n{3,}/g, '\n\n') // collapse excessive blank lines
     .trim();
 }
@@ -117,8 +117,16 @@ export function stripPlanFromContent(content: string): string {
 /** Convert Chinese numerals (一二三...) to integer. */
 function cnToNumber(cn: string): number {
   const map: Record<string, number> = {
-    一: 1, 二: 2, 三: 3, 四: 4, 五: 5,
-    六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
   };
   // Handle "十" and "十一" etc
   if (cn === '十') return 10;

@@ -1123,16 +1123,16 @@ async function generateTitleWithAI(targetSession: string, userMessage: Message):
     );
 
     let raw = '';
-    let inputTokens = 0;
-    let outputTokens = 0;
+    let _inputTokens = 0;
+    let _outputTokens = 0;
     let totalTokens = 0;
     for await (const event of stream) {
       if (event.type === 'text_delta' && event.delta) {
         raw += event.delta;
       }
       if (event.type === 'done' && event.message?.usage) {
-        inputTokens = event.message.usage.input || 0;
-        outputTokens = event.message.usage.output || 0;
+        _inputTokens = event.message.usage.input || 0;
+        _outputTokens = event.message.usage.output || 0;
         totalTokens = event.message.usage.totalTokens || 0;
       }
     }

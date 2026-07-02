@@ -37,7 +37,8 @@ export function sanitizeStructuredMessageLeak(text: string): string {
 
   const prefix = text.slice(0, leakStart);
   const candidate = text.slice(leakStart).trim();
-  const parsedText = parseStructuredMessageText(candidate) ?? extractStructuredMessageText(candidate);
+  const parsedText =
+    parseStructuredMessageText(candidate) ?? extractStructuredMessageText(candidate);
   if (parsedText === undefined) return text;
 
   return `${prefix}${parsedText}`.trim();
@@ -65,9 +66,7 @@ function parseStructuredMessageText(candidate: string): string | undefined {
 }
 
 function extractStructuredMessageText(candidate: string): string | undefined {
-  const match = candidate.match(
-    /"content"\s*:\s*\{[\s\S]*?"text"\s*:\s*"((?:\\.|[^"\\])*)"/,
-  );
+  const match = candidate.match(/"content"\s*:\s*\{[\s\S]*?"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
   if (!match) return undefined;
 
   try {

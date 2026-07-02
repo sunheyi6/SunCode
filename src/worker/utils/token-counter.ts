@@ -1,5 +1,5 @@
 import { CHARS_PER_TOKEN } from '@shared/constants';
-import type { Message, ContentBlock } from '@shared/types';
+import type { ContentBlock, Message } from '@shared/types';
 
 /**
  * Token counting utilities.
@@ -47,7 +47,7 @@ export function countBlockTokens(block: ContentBlock): TokenCount {
  */
 export function countMessageTokens(msg: Message): TokenCount {
   // Role overhead: ~4 tokens
-  let total = { tokens: 4, characters: 0 };
+  const total = { tokens: 4, characters: 0 };
 
   if (typeof msg.content === 'string') {
     const ct = countStringTokens(msg.content);

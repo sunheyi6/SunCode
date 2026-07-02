@@ -7,8 +7,8 @@
  * Both produce identical behavior — the single form is auto-wrapped into calls[0].
  */
 import type { SubagentCall, ToolDefinition, ToolResult } from '@shared/types';
-import type { Tool } from './types';
 import type { SubagentDispatcher } from '../agent/subagent';
+import type { Tool } from './types';
 
 export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
   const agentList = dispatcher.listAgents();
@@ -183,7 +183,7 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
       return toolResult;
     },
 
-  onProgress: null,
+    onProgress: null,
     getDefinition(): ToolDefinition {
       return { name: this.name, description: this.description, parameters: this.parameters };
     },

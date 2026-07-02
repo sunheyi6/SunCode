@@ -22,7 +22,7 @@ const showFullSystemPrompt = ref(false);
 const OUTPUT_PREVIEW_LINES = 5;
 const expandedOutputs = ref(new Set<string>());
 
-function toggleOutput(toolCallId: string): void {
+function _toggleOutput(toolCallId: string): void {
   const s = expandedOutputs.value;
   if (s.has(toolCallId)) {
     s.delete(toolCallId);
@@ -33,7 +33,7 @@ function toggleOutput(toolCallId: string): void {
   expandedOutputs.value = new Set(s);
 }
 
-function outputPreview(text: string, toolCallId: string): { text: string; hidden: number } {
+function _outputPreview(text: string, toolCallId: string): { text: string; hidden: number } {
   const lines = text.split('\n');
   if (expandedOutputs.value.has(toolCallId) || lines.length <= OUTPUT_PREVIEW_LINES) {
     return { text, hidden: 0 };
@@ -172,7 +172,7 @@ function toolStatusLabel(tc: ToolCallContent): string {
   return '待执行';
 }
 
-function detectOutputLang(tc: ToolCallContent): string | undefined {
+function _detectOutputLang(tc: ToolCallContent): string | undefined {
   if (tc.name === 'bash') return 'bash';
   if (tc.name === 'web-search' || tc.name === 'web-fetch') return 'json';
   try {
@@ -181,14 +181,31 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
       const fp = (args.file_path as string) || '';
       const ext = fp.split('.').pop()?.toLowerCase();
       const map: Record<string, string> = {
-        ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-        vue: 'html', html: 'html', css: 'css', py: 'python', rs: 'rust',
-        go: 'go', java: 'java', json: 'json', yaml: 'yaml', yml: 'yaml',
-        xml: 'xml', md: 'markdown', sh: 'bash', sql: 'sql', toml: 'toml',
+        ts: 'typescript',
+        tsx: 'typescript',
+        js: 'javascript',
+        jsx: 'javascript',
+        vue: 'html',
+        html: 'html',
+        css: 'css',
+        py: 'python',
+        rs: 'rust',
+        go: 'go',
+        java: 'java',
+        json: 'json',
+        yaml: 'yaml',
+        yml: 'yaml',
+        xml: 'xml',
+        md: 'markdown',
+        sh: 'bash',
+        sql: 'sql',
+        toml: 'toml',
       };
       if (ext && map[ext]) return map[ext];
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return undefined;
 }
 </script>

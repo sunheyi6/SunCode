@@ -1,15 +1,15 @@
-import { describe, expect, test } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { describe, expect, test } from 'vitest';
 import {
   buildWindowsProjectProcessEvidenceCommand,
   createBashTool,
   isForegroundElectronLaunch,
   killProcessTree,
   resolveProjectEvidenceRoot,
-  shouldWaitForServiceEvidenceAfterLauncherExit,
   rewriteKillCommand,
+  shouldWaitForServiceEvidenceAfterLauncherExit,
 } from './bash';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -170,7 +170,10 @@ describe('bash tool details', () => {
   });
 
   test('process evidence lookup excludes the launcher pid', () => {
-    const script = buildWindowsProjectProcessEvidenceCommand('D:/project/maka-agent/apps/desktop', 1234);
+    const script = buildWindowsProjectProcessEvidenceCommand(
+      'D:/project/maka-agent/apps/desktop',
+      1234,
+    );
 
     expect(script).toContain('$_.ProcessId -ne 1234');
     expect(script).toContain('maka-agent/apps/desktop');

@@ -1,9 +1,9 @@
-import type { ToolCallContent, ToolResult, RunEvent, AppSettings } from '@shared/types';
-import type { DiagLogger } from '../utils/diag-logger';
+import { DEFAULT_TOOL_TIMEOUT_MS } from '@shared/constants';
+import type { AppSettings, RunEvent, ToolCallContent, ToolResult } from '@shared/types';
 import type { Tool } from '../tools/types';
+import type { DiagLogger } from '../utils/diag-logger';
 import { quickMatchLesson } from './lessons';
 import { isToolAllowedInPlanMode } from './plan-mode';
-import { DEFAULT_TOOL_TIMEOUT_MS } from '@shared/constants';
 
 function parseToolDescriptionArgs(argumentsJson: string): Record<string, unknown> | undefined {
   try {

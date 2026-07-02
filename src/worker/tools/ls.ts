@@ -1,6 +1,6 @@
 import { readdir, stat } from 'node:fs/promises';
-import { join, relative, resolve, isAbsolute } from 'node:path';
-import { BaseTool, p, obj } from './types';
+import { isAbsolute, join, resolve } from 'node:path';
+import { BaseTool, obj, p } from './types';
 
 export function createLsTool(workingDir: string) {
   return new (class LsTool extends BaseTool {
@@ -96,9 +96,9 @@ async function listDir(rootDir: string, recursive: boolean, limit: number): Prom
         if (entry.isDirectory()) {
           try {
             const info = await stat(fullPath);
-            results.push({ path: relPath + '/', isDirectory: true, size: 0, mtime: info.mtimeMs });
+            results.push({ path: `${relPath}/`, isDirectory: true, size: 0, mtime: info.mtimeMs });
           } catch {
-            results.push({ path: relPath + '/', isDirectory: true, size: 0, mtime: 0 });
+            results.push({ path: `${relPath}/`, isDirectory: true, size: 0, mtime: 0 });
           }
 
           if (recursive && !ignoreDirs.has(entry.name)) {
@@ -123,7 +123,7 @@ async function listDir(rootDir: string, recursive: boolean, limit: number): Prom
     }
   }
 
-  const baseName = rootDir.split(/[/\\]/).pop() || '';
+  const _baseName = rootDir.split(/[/\\]/).pop() || '';
   await walk(rootDir, '');
   return results;
 }

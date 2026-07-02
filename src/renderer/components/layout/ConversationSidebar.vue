@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import type { SessionMeta } from '@shared/types';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { useSessionsStore } from '../../stores/sessions';
-import { useChatStore } from '../../stores/chat';
-import { useUpdateStore } from '../../stores/update';
-import { useSettingsStore } from '../../stores/settings';
 import { bridge } from '../../api/bridge';
+import { useChatStore } from '../../stores/chat';
+import { useSessionsStore } from '../../stores/sessions';
+import { useSettingsStore } from '../../stores/settings';
+import { useUpdateStore } from '../../stores/update';
 import { getVisibleSessionGroups } from './session-list';
 
-const emit = defineEmits<{
+const _emit = defineEmits<{
   openSettings: [section: string];
 }>();
 
 const sessionsStore = useSessionsStore();
-const chatStore = useChatStore();
-const updateStore = useUpdateStore();
-const settingsStore = useSettingsStore();
+const _chatStore = useChatStore();
+const _updateStore = useUpdateStore();
+const _settingsStore = useSettingsStore();
 const searchQuery = ref('');
 const searchOpen = ref(false);
 const searchInputRef = ref<HTMLInputElement>();
@@ -33,7 +33,7 @@ const selectedIds = ref<Set<string>>(new Set());
 const collapsedGroups = ref<Set<string>>(new Set());
 const expandedSessionGroups = ref<Set<string>>(new Set());
 
-function toggleGroup(path: string) {
+function _toggleGroup(path: string) {
   const next = new Set(collapsedGroups.value);
   if (next.has(path)) {
     next.delete(path);
@@ -43,7 +43,7 @@ function toggleGroup(path: string) {
   collapsedGroups.value = next;
 }
 
-function showAllSessions(path: string): void {
+function _showAllSessions(path: string): void {
   const next = new Set(expandedSessionGroups.value);
   next.add(path);
   expandedSessionGroups.value = next;
@@ -63,28 +63,30 @@ onMounted(() => {
   });
 });
 
-async function handleCreateSession(): Promise<void> {
+async function _handleCreateSession(): Promise<void> {
   const dir = sessionsStore.sessions.find(
     (s) => s.id === sessionsStore.activeSessionId,
   )?.workingDirectory;
   await sessionsStore.createSession(dir);
 }
 
-async function handleCreateSessionWithNewFolder(): Promise<void> {
+async function _handleCreateSessionWithNewFolder(): Promise<void> {
   const dir = await bridge.selectDirectory();
   if (dir) {
     await sessionsStore.createSession(dir);
   }
 }
 
-function projectName(path: string): string {
+function _projectName(path: string): string {
   const segments = path.split(/[\\/]/).filter(Boolean);
   return segments[segments.length - 1] || path || '未命名项目';
 }
 
 const filteredSessions = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
-  const nonEmptySessions = sessionsStore.sortedSessions.filter((session) => session.messageCount > 0);
+  const nonEmptySessions = sessionsStore.sortedSessions.filter(
+    (session) => session.messageCount > 0,
+  );
   if (!query) return nonEmptySessions;
   return nonEmptySessions.filter(
     (session) =>
@@ -113,9 +115,10 @@ const visibleGroupedSessions = computed(() =>
   getVisibleSessionGroups(groupedSessions.value, expandedSessionGroups.value),
 );
 
-const activeGroupPath = computed(() =>
-  sessionsStore.sessions.find((session) => session.id === sessionsStore.activeSessionId)
-    ?.workingDirectory ?? '',
+const _activeGroupPath = computed(
+  () =>
+    sessionsStore.sessions.find((session) => session.id === sessionsStore.activeSessionId)
+      ?.workingDirectory ?? '',
 );
 
 const allDisplayedIds = computed(() => {
@@ -134,7 +137,7 @@ const allSelected = computed(() => {
   return ids.every((id) => selectedIds.value.has(id));
 });
 
-function toggleSelectAll(): void {
+function _toggleSelectAll(): void {
   if (allSelected.value) {
     // Deselect all displayed
     for (const id of allDisplayedIds.value) {
@@ -150,7 +153,7 @@ function toggleSelectAll(): void {
   selectedIds.value = new Set(selectedIds.value);
 }
 
-function toggleSelect(id: string): void {
+function _toggleSelect(id: string): void {
   const next = new Set(selectedIds.value);
   if (next.has(id)) {
     next.delete(id);
@@ -160,7 +163,7 @@ function toggleSelect(id: string): void {
   selectedIds.value = next;
 }
 
-function enterSelectMode(): void {
+function _enterSelectMode(): void {
   selectMode.value = true;
   selectedIds.value = new Set();
 }
@@ -170,28 +173,28 @@ function exitSelectMode(): void {
   selectedIds.value = new Set();
 }
 
-async function deleteSingle(id: string): Promise<void> {
+async function _deleteSingle(id: string): Promise<void> {
   await sessionsStore.deleteSession(id);
 }
 
-async function deleteSelected(): Promise<void> {
+async function _deleteSelected(): Promise<void> {
   if (selectedIds.value.size === 0) return;
   await sessionsStore.deleteSessions([...selectedIds.value]);
   exitSelectMode();
 }
 
-async function createSessionInGroup(path: string): Promise<void> {
+async function _createSessionInGroup(path: string): Promise<void> {
   await sessionsStore.createSession(path);
 }
 
-function groupTone(path: string): string {
+function _groupTone(path: string): string {
   const tones = ['yellow', 'mint', 'blue', 'violet', 'rose'];
   let hash = 0;
   for (const ch of path) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return tones[hash % tones.length] ?? 'yellow';
 }
 
-function formatTime(value: string): string {
+function _formatTime(value: string): string {
   const date = new Date(value);
   const today = new Date();
   if (date.toDateString() === today.toDateString()) {

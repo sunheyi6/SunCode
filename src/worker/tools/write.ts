@@ -1,10 +1,10 @@
-import type { ToolResult } from '@shared/types';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, normalize, resolve } from 'node:path';
+import type { ToolResult } from '@shared/types';
 import { withFileMutationQueue } from './file-mutation-queue';
 import { countLineChanges } from './line-diff';
-import { BaseTool, obj, p } from './types';
 import { isSensitiveFile } from './sensitive';
+import { BaseTool, obj, p } from './types';
 
 export function createWriteTool(workingDir: string) {
   return new (class WriteTool extends BaseTool {

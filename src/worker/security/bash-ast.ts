@@ -107,7 +107,11 @@ const SECURITY_CHECKS: SecurityCheck[] = [
   { name: 'net_nc_listener', regex: /\bnc\s+-[lk]/, description: 'Netcat 监听模式' },
 
   // Unicode homoglyph attacks
-  { name: 'unicode_homoglyph', regex: /[\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A]/, description: 'Unicode 同形字符' },
+  {
+    name: 'unicode_homoglyph',
+    regex: /[\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A]/,
+    description: 'Unicode 同形字符',
+  },
 
   // IFS manipulation
   { name: 'env_ifs_inject', regex: /\bIFS\s*=/, description: 'IFS 环境变量注入' },
@@ -215,7 +219,7 @@ function analyzeWithRegex(command: string): BashAnalysisResult {
   const triggeredChecks: string[] = [];
 
   for (const check of SECURITY_CHECKS) {
-    if (check.regex && check.regex.test(command)) {
+    if (check.regex?.test(command)) {
       triggeredChecks.push(`${check.name}: ${check.description}`);
     }
   }
@@ -263,5 +267,5 @@ export function isClearlyDangerous(command: string): boolean {
  * Get security checks that apply to a command (synchronous).
  */
 export function getApplicableChecks(command: string): SecurityCheck[] {
-  return SECURITY_CHECKS.filter((c) => c.regex && c.regex.test(command));
+  return SECURITY_CHECKS.filter((c) => c.regex?.test(command));
 }

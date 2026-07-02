@@ -1,49 +1,45 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { DEFAULT_CONTEXT_BUDGET_POLICY } from '@shared/constants';
 import type {
   AgentStatus,
   AppSettings,
   BackgroundProcess,
+  ContextBudgetPolicy,
   GoalEvent,
   Message,
   RunEvent,
   StreamEvent,
   SubagentDefinition,
-  SubagentExecution,
-  SubagentResult,
   ToolCallContent,
   ToolResult,
 } from '@shared/types';
-import { loadMemories, saveMemory, type MemoryEntry } from './memory';
-import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
 import { createMcpManager } from '../mcp/manager';
 import { createModelRegistry } from '../models/registry';
-import { createToolRegistry } from '../tools/registry';
-import type { Tool } from '../tools/types';
-import { createSubagentTool } from '../tools/subagent';
-import { runAgentLoop } from './agent-loop';
-import { createSkillsLoader } from './skills';
-import { SubagentDispatcher } from './subagent';
-import { applyContextBudget } from './context-budget';
-import type { ContextBudgetPolicy } from '@shared/types';
-import { DEFAULT_CONTEXT_BUDGET_POLICY } from '@shared/constants';
-import { runGoalLoop, extractGoalDefinition } from './goal-loop';
-import { createDefaultStopHookRegistry } from './stop-hooks';
-import {
-  isPlanModeActive,
-  getPlanPermissionMode,
-  isToolAllowedInPlanMode,
-  getPlanState,
-  buildPlanModeInstructions,
-} from './plan-mode';
 import {
   createEnterPlanModeTool,
   createExitPlanModeTool,
   type PlanToolCallbacks,
 } from '../tools/plan-tools';
+import { createToolRegistry } from '../tools/registry';
+import { createSubagentTool } from '../tools/subagent';
+import type { Tool } from '../tools/types';
+import { runAgentLoop } from './agent-loop';
+import { applyContextBudget } from './context-budget';
+import { extractGoalDefinition, runGoalLoop } from './goal-loop';
+import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
+import { loadMemories, type MemoryEntry, saveMemory } from './memory';
+import {
+  buildPlanModeInstructions,
+  getPlanPermissionMode,
+  getPlanState,
+  isPlanModeActive,
+} from './plan-mode';
+import { createSkillsLoader } from './skills';
+import { createDefaultStopHookRegistry } from './stop-hooks';
+import { SubagentDispatcher } from './subagent';
 
 export class Agent {
   private workingDir: string;
@@ -943,7 +939,7 @@ function parseAgentMarkdown(content: string): SubagentDefinition | null {
   if (!frontmatterMatch) return null;
 
   const yamlBlock = frontmatterMatch[1]!;
-  const markdownBody = frontmatterMatch[2]!.trim();
+  const markdownBody = frontmatterMatch[2]?.trim();
 
   // Simple YAML parser for the subset we need
   const parsed = parseSimpleYaml(yamlBlock);

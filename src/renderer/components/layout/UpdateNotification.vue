@@ -4,11 +4,9 @@ import { useUpdateStore } from '../../stores/update';
 
 const store = useUpdateStore();
 
-const progressPercent = computed(() =>
-  Math.round(store.status.downloadProgress ?? 0),
-);
+const _progressPercent = computed(() => Math.round(store.status.downloadProgress ?? 0));
 
-const speedLabel = computed(() => {
+const _speedLabel = computed(() => {
   const bps = store.status.downloadBytesPerSecond;
   if (!bps || bps <= 0) return '';
   if (bps > 1024 * 1024) return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;

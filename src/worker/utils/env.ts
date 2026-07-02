@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import type { AppSettings } from '@shared/types';
+import { join } from 'node:path';
 import { DEFAULT_SETTINGS } from '@shared/constants';
+import type { AppSettings } from '@shared/types';
 
 /**
  * Environment and configuration utilities.

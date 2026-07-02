@@ -27,17 +27,17 @@ function onDocumentClick(e: MouseEvent): void {
 onMounted(() => document.addEventListener('click', onDocumentClick));
 onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 
-function toggleModel(): void {
+function _toggleModel(): void {
   closeAll();
   modelOpen.value = !modelOpen.value;
 }
 
-function toggleThinking(): void {
+function _toggleThinking(): void {
   closeAll();
   thinkingOpen.value = !thinkingOpen.value;
 }
 
-function togglePerm(): void {
+function _togglePerm(): void {
   closeAll();
   permOpen.value = !permOpen.value;
 }
@@ -45,14 +45,14 @@ function togglePerm(): void {
 // ── model list ──
 const availableModels = computed(() => modelsStore.recommendedModels);
 
-const currentModelLabel = computed(() => {
+const _currentModelLabel = computed(() => {
   const m = availableModels.value.find(
     (m) => m.model === modelsStore.activeModel && m.provider === modelsStore.activeProvider,
   );
   return m?.label ?? `${modelsStore.activeProvider}/${modelsStore.activeModel}`;
 });
 
-function selectModel(option: { provider: string; model: string }): void {
+function _selectModel(option: { provider: string; model: string }): void {
   modelsStore.selectModel(option.provider, option.model);
   modelOpen.value = false;
 }
@@ -66,13 +66,13 @@ const thinkingLevels = [
   { value: 'xhigh' as const, label: '最大' },
 ];
 
-const currentThinking = computed(
+const _currentThinking = computed(
   () =>
     thinkingLevels.find((l) => l.value === settingsStore.settings.thinkingLevel) ??
     thinkingLevels[2],
 );
 
-function selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
+function _selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
   settingsStore.update({ thinkingLevel: level });
   thinkingOpen.value = false;
 }
@@ -85,13 +85,13 @@ const permissionModes = [
   { value: 'confirm_changes' as const, label: '变更前确认', icon: '✅', desc: '修改前需确认' },
 ];
 
-const currentPerm = computed(
+const _currentPerm = computed(
   () =>
     permissionModes.find((p) => p.value === settingsStore.settings.permissionMode) ??
     permissionModes[1],
 );
 
-function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
+function _selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
   settingsStore.update({ permissionMode: mode });
   permOpen.value = false;
 }

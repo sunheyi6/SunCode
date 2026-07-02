@@ -23,11 +23,11 @@ import type {
   ToolDefinition,
   ToolResult,
 } from '@shared/types';
-import type { Tool } from '../tools/types';
-import { runAgentLoop, type AgentLoopResult } from './agent-loop';
-import { buildSystemPrompt } from './system-prompt';
-import { createToolRegistry } from '../tools/registry';
 import { createModelRegistry } from '../models/registry';
+import { createToolRegistry } from '../tools/registry';
+import type { Tool } from '../tools/types';
+import { type AgentLoopResult, runAgentLoop } from './agent-loop';
+import { buildSystemPrompt } from './system-prompt';
 
 // ===== Types =====
 
@@ -391,8 +391,8 @@ export class SubagentDispatcher {
     const allTools = createToolRegistry(this.opts.workingDir).getAll();
     return names
       .map((n) => allTools.find((t) => t.name === n))
-      .filter(Boolean)
-      .map((t) => t!.getDefinition());
+      .filter((t): t is Tool => t !== undefined)
+      .map((t) => t.getDefinition());
   }
 
   /** Build filtered tool array from whitelist. */

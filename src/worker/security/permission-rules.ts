@@ -35,16 +35,17 @@ function matchPattern(toolName: string, pattern: string, mode: RuleMatchMode): b
       // "bash:*" matches "bash" and "bash.anything"
       if (pattern.endsWith(':*')) {
         const prefix = pattern.slice(0, -2);
-        return toolName === prefix || toolName.startsWith(prefix + '.');
+        return toolName === prefix || toolName.startsWith(`${prefix}.`);
       }
       return toolName.startsWith(pattern);
-    case 'wildcard':
+    case 'wildcard': {
       // Convert simple wildcard pattern to regex
       const regexStr = pattern
         .replace(/[.+^${}()|[\]\\]/g, '\\$&')
         .replace(/\*/g, '.*')
         .replace(/\?/g, '.');
       return new RegExp(`^${regexStr}$`).test(toolName);
+    }
     default:
       return false;
   }
@@ -121,7 +122,10 @@ export class DefaultPermissionRuleSet implements PermissionRuleSet {
 /**
  * Load permission rules from a JSON file.
  */
-export async function loadPermissionRules(filePath: string, source: RuleSource): Promise<PermissionRule[]> {
+export async function loadPermissionRules(
+  filePath: string,
+  source: RuleSource,
+): Promise<PermissionRule[]> {
   try {
     const fs = await import('node:fs/promises');
     const content = await fs.readFile(filePath, 'utf-8');

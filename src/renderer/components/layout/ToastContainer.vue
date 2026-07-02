@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast';
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const { toasts, dismissToast } = useToast();
 
-function iconFor(type: 'info' | 'success' | 'warning' | 'error'): string {
+function _iconFor(type: 'info' | 'success' | 'warning' | 'error'): string {
   switch (type) {
-    case 'success': return '✓';
-    case 'warning': return '⚠';
-    case 'error': return '✕';
-    default: return 'ℹ';
+    case 'success':
+      return '✓';
+    case 'warning':
+      return '⚠';
+    case 'error':
+      return '✕';
+    default:
+      return 'ℹ';
   }
 }
 </script>

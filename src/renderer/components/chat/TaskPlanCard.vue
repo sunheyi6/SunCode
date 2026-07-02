@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import type { TaskPlan } from '@shared/types';
+import { computed } from 'vue';
 
 const props = defineProps<{
   taskPlan: TaskPlan;
@@ -9,9 +9,9 @@ const props = defineProps<{
 
 const totalCount = computed(() => props.taskPlan.steps.length);
 const doneCount = computed(() => props.taskPlan.steps.filter((s) => s.status === 'done').length);
-const allDone = computed(() => doneCount.value === totalCount.value);
+const _allDone = computed(() => doneCount.value === totalCount.value);
 
-function stepIcon(status: string): string {
+function _stepIcon(status: string): string {
   if (status === 'done') return '✓';
   if (status === 'in_progress') return '◉';
   return '○';

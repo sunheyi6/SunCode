@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useChatStore } from '../../stores/chat';
-import AssistantMessage from './AssistantMessage.vue';
-import UserMessage from './UserMessage.vue';
 
 const chatStore = useChatStore();
 const messageListRef = ref<HTMLElement | null>(null);

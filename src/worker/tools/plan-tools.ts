@@ -5,15 +5,15 @@
  * produce a plan file, and request user approval before making changes.
  */
 
-import type { ToolResult, PlanState } from '@shared/types';
-import { BaseTool, p, obj, type Tool } from './types';
+import type { PlanState, ToolResult } from '@shared/types';
 import {
+  approvePlan,
   enterPlanMode,
   exitPlanMode,
-  approvePlan,
-  isPlanModeActive,
   getPlanState,
+  isPlanModeActive,
 } from '../agent/plan-mode';
+import { BaseTool, obj, p, type Tool } from './types';
 
 // ===== Callbacks =====
 

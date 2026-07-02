@@ -9,10 +9,10 @@
  * This is the only mechanism where the model actively requests LESS capability.
  */
 
-import type { AppSettings, PlanState, PlanPhase, ToolDefinition } from '@shared/types';
-import { DEFAULT_PLAN_DIR, DEFAULT_PLAN_MAX_TURNS } from '@shared/constants';
-import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { DEFAULT_PLAN_DIR, DEFAULT_PLAN_MAX_TURNS } from '@shared/constants';
+import type { AppSettings, PlanState } from '@shared/types';
 
 // ===== Plan Mode State =====
 
@@ -118,7 +118,7 @@ export function isToolAllowedInPlanMode(
   toolName: string,
   params: Record<string, unknown>,
 ): boolean {
-  if (!planState || planState.phase !== 'exploring') return true;
+  if (planState?.phase !== 'exploring') return true;
 
   if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') return true;
 
@@ -148,7 +148,7 @@ export function isToolAllowedInPlanMode(
  *   Every 25 turns: full refresh
  */
 export function getPlanModeReminder(turnCount: number): string | null {
-  if (!planState || planState.phase !== 'exploring') return null;
+  if (planState?.phase !== 'exploring') return null;
 
   const { planTurnCount, maxTurns } = planState;
   const ratio = planTurnCount / maxTurns;
@@ -222,7 +222,7 @@ You are currently in **plan mode**. You voluntarily reduced your permissions to 
 `;
 
   if (reminder) {
-    return base + '\n' + reminder;
+    return `${base}\n${reminder}`;
   }
   return base;
 }

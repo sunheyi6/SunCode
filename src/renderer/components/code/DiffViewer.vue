@@ -19,13 +19,13 @@ const expanded = ref(false);
 
 const diffLines = computed<DiffLine[]>(() => computeDiff(props.oldCode, props.newCode));
 
-const visibleLines = computed(() =>
+const _visibleLines = computed(() =>
   expanded.value ? diffLines.value : diffLines.value.slice(0, PREVIEW_LINES),
 );
 
-const hiddenCount = computed(() => diffLines.value.length - PREVIEW_LINES);
+const _hiddenCount = computed(() => diffLines.value.length - PREVIEW_LINES);
 
-const stats = computed(() => {
+const _stats = computed(() => {
   const added = diffLines.value.filter((d) => d.type === 'added').length;
   const removed = diffLines.value.filter((d) => d.type === 'removed').length;
   return { added, removed };

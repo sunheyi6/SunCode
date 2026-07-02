@@ -9,10 +9,10 @@
  * Layer: Context Collapse — read-time projection of related message groups
  */
 
-import type { Message, ContentBlock } from '@shared/types';
+import type { Message } from '@shared/types';
 import {
-  groupMessagesByTurn,
   buildMessageTurnMap,
+  groupMessagesByTurn,
   recentTurnIdsFromGroups,
 } from './context-budget';
 
@@ -40,7 +40,7 @@ export function snipUnreferencedResults(
   const cpt = options.charsPerToken ?? 4;
 
   // Group messages by turn
-  const groups = groupMessagesByTurn(messages, cpt);
+  const _groups = groupMessagesByTurn(messages, cpt);
   const turnMap = buildMessageTurnMap(messages);
 
   // Identify protected recent turn IDs
@@ -127,15 +127,15 @@ export function collapseContext(
 
   // Estimate total tokens
   const totalTokens = groups.reduce((sum, g) => sum + g.estimatedTokens, 0);
-  const targetTokens = Math.floor(totalTokens * threshold);
+  const _targetTokens = Math.floor(totalTokens * threshold);
 
   // Identify collapsible groups (tool-heavy turns with multiple tool results)
   const collapsibleGroups: CollapseGroup[] = [];
-  let remainingOldTurns: typeof oldTurns = [];
+  const remainingOldTurns: typeof oldTurns = [];
 
   for (const turn of oldTurns) {
     const toolMsgs = turn.messages.filter((m) => m.role === 'tool');
-    const assistantMsgs = turn.messages.filter((m) => m.role === 'assistant');
+    const _assistantMsgs = turn.messages.filter((m) => m.role === 'assistant');
 
     // Collapsible if: multiple tool results and total tokens > maxGroupTokens/4
     if (toolMsgs.length >= 2 && turn.estimatedTokens > maxGroupTokens / 4) {
@@ -180,7 +180,10 @@ export function collapseContext(
     collapsedMessages.push(...t.messages);
   }
 
-  const tokensSaved = collapsibleGroups.reduce((sum, g) => sum + (g.originalTokens - g.summaryTokens), 0);
+  const tokensSaved = collapsibleGroups.reduce(
+    (sum, g) => sum + (g.originalTokens - g.summaryTokens),
+    0,
+  );
 
   return {
     collapsedMessages,
@@ -224,12 +227,14 @@ function buildTurnSummaryFromMessages(messages: Message[]): string {
 function extractText(msg: Message): string {
   if (typeof msg.content === 'string') return msg.content;
   if (Array.isArray(msg.content)) {
-    return msg.content
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .filter((b: any) => b.type === 'text')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((b: any) => b.text)
-      .join(' ');
+    return (
+      msg.content
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((b: any) => b.type === 'text')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((b: any) => b.text)
+        .join(' ')
+    );
   }
   return '';
 }

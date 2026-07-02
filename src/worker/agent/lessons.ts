@@ -28,10 +28,10 @@ import { join } from 'node:path';
 import { DEFAULT_MAX_LESSONS } from '@shared/constants';
 import type {
   LessonEntry,
+  LessonExtractionContext,
   LessonIndex,
   LessonSearchResult,
   LessonTriggerType,
-  LessonExtractionContext,
   Message,
 } from '@shared/types';
 import { buildStructuredTaskPrompt } from './model-structured-content';
@@ -78,11 +78,11 @@ export function loadLessonIndex(workingDir: string): LessonIndex {
       if (!m) continue;
       entries.push({
         title: m[1]!,
-        slug: m[2]!.replace('.md', ''),
+        slug: m[2]?.replace('.md', ''),
         tool: m[3]!,
-        keywords: m[4]!.split(',').map((k) => k.trim()),
+        keywords: m[4]?.split(',').map((k) => k.trim()),
         type,
-        date: m[2]!.replace('.md', '').slice(0, 10), // YYYY-MM-DD from filename prefix
+        date: m[2]?.replace('.md', '').slice(0, 10), // YYYY-MM-DD from filename prefix
         runId: '',
         problem: '',
         rootCause: '',
@@ -116,7 +116,7 @@ function parseLessonMarkdown(content: string, slug: string): LessonEntry {
 
   if (fmMatch) {
     const yamlBlock = fmMatch[1]!;
-    body = fmMatch[2]!.trim();
+    body = fmMatch[2]?.trim();
     for (const line of yamlBlock.split('\n')) {
       const m = line.match(/^(\w[\w-]*):\s*(.*?)\s*$/);
       if (m) frontmatter[m[1]!] = m[2]!;
@@ -265,7 +265,7 @@ function rebuildLessonIndex(workingDir: string): void {
   for (const file of files) {
     try {
       const content = readFileSync(join(dir, file!), 'utf-8');
-      const slug = file!.replace('.md', '');
+      const slug = file?.replace('.md', '');
       const entry = parseLessonMarkdown(content, slug);
       const group = byType.get(entry.type) || [];
       group.push(entry);

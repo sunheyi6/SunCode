@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { open, readFile, writeFile, readdir, unlink, rename } from 'node:fs/promises';
+import { open, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Message, SessionMeta } from '@shared/types';
 import { getAppDataDir } from './paths';

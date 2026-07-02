@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import {
+  type DropdownState,
+  getDropdownOpenState,
+  useDropdown,
+} from '../../composables/useDropdown';
 import { useSettingsStore } from '../../stores/settings';
-import { getDropdownOpenState, useDropdown, type DropdownState } from '../../composables/useDropdown';
 
 const props = withDefaults(
   defineProps<{
@@ -25,13 +29,13 @@ const thinkingLevels = [
   { value: 'xhigh' as const, label: '最高' },
 ];
 
-const currentThinking = computed(
+const _currentThinking = computed(
   () =>
     thinkingLevels.find((level) => level.value === settingsStore.settings.thinkingLevel) ??
     thinkingLevels[2],
 );
 
-function selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
+function _selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
   settingsStore.update({ thinkingLevel: level });
   dropdown.value.close();
 }

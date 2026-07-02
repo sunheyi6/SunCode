@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import type { ToolCallContent } from '@shared/types';
+import { computed } from 'vue';
 import { parseToolArguments } from '../../utils/tool-presentation';
 
 const props = defineProps<{
@@ -11,23 +11,19 @@ const props = defineProps<{
 const inspectCalls = computed(() =>
   props.calls.filter((c) => c.name === 'read' || c.name === 'glob' || c.name === 'grep'),
 );
-const editCalls = computed(() =>
+const _editCalls = computed(() =>
   props.calls.filter((c) => c.name === 'edit' || c.name === 'write'),
 );
-const bashCalls = computed(() =>
-  props.calls.filter((c) => c.name === 'bash'),
-);
-const subagentCalls = computed(() =>
-  props.calls.filter((c) => c.name === 'subagent'),
-);
-const otherCalls = computed(() =>
+const _bashCalls = computed(() => props.calls.filter((c) => c.name === 'bash'));
+const _subagentCalls = computed(() => props.calls.filter((c) => c.name === 'subagent'));
+const _otherCalls = computed(() =>
   props.calls.filter(
     (c) => !['read', 'glob', 'grep', 'edit', 'write', 'bash', 'subagent'].includes(c.name),
   ),
 );
 
 // -- Inspect merge --
-const inspectLabel = computed(() => {
+const _inspectLabel = computed(() => {
   const names = new Set(inspectCalls.value.map((c) => c.name));
   if (names.size === 1) {
     const n = inspectCalls.value[0]?.name;
@@ -38,7 +34,7 @@ const inspectLabel = computed(() => {
   return '查看';
 });
 
-const inspectTarget = computed(() => {
+const _inspectTarget = computed(() => {
   const files = inspectCalls.value.map((c) => {
     const args = parseToolArguments(c.arguments);
     return (args.file_path as string) || (args.pattern as string) || '';
@@ -47,7 +43,7 @@ const inspectTarget = computed(() => {
   return latest.map((f) => f.split('/').pop() || f.split('\\').pop() || f).join(', ');
 });
 
-const inspectStatus = computed(() => {
+const _inspectStatus = computed(() => {
   const running = inspectCalls.value.some((c) => c.status === 'running');
   if (running) return '读取中...';
   const failed = inspectCalls.value.filter(
@@ -58,7 +54,7 @@ const inspectStatus = computed(() => {
 });
 
 // -- Per-call helpers --
-function callTarget(call: ToolCallContent): string {
+function _callTarget(call: ToolCallContent): string {
   const args = parseToolArguments(call.arguments);
   const fp = (args.file_path as string) || '';
   if (fp) {
@@ -69,7 +65,7 @@ function callTarget(call: ToolCallContent): string {
   return cmd.length > 50 ? `${cmd.slice(0, 47)}...` : cmd;
 }
 
-function callLabel(name: string): string {
+function _callLabel(name: string): string {
   if (name === 'edit') return '编辑';
   if (name === 'write') return '写入';
   if (name === 'bash') return '运行';
@@ -77,13 +73,13 @@ function callLabel(name: string): string {
   return name;
 }
 
-function callStatusClass(call: ToolCallContent): string {
+function _callStatusClass(call: ToolCallContent): string {
   if (call.status === 'running') return 'status-running';
   if (call.status === 'error' || call.result?.success === false) return 'status-failed';
   return 'status-done';
 }
 
-function resultPreview(call: ToolCallContent): string | null {
+function _resultPreview(call: ToolCallContent): string | null {
   if (!call.result || call.status === 'running') return null;
   // Bash: show stdout tail
   if (call.name === 'bash' && call.result.details?.type === 'command') {
@@ -91,15 +87,18 @@ function resultPreview(call: ToolCallContent): string | null {
     if (d.stdout) {
       const lines = d.stdout.trim().split('\n');
       const tail = lines.slice(-3).join('\n');
-      return tail.length > 200 ? tail.slice(0, 200) + '...' : tail;
+      return tail.length > 200 ? `${tail.slice(0, 200)}...` : tail;
     }
     if (d.stderr) return `stderr: ${d.stderr.slice(0, 100)}`;
     return `exit=${d.exitCode ?? '?'}`;
   }
   // Read/grep: show output tail
-  if ((call.name === 'read' || call.name === 'grep' || call.name === 'glob') && call.result.output) {
+  if (
+    (call.name === 'read' || call.name === 'grep' || call.name === 'glob') &&
+    call.result.output
+  ) {
     const out = call.result.output;
-    return out.length > 200 ? out.slice(0, 200) + '...' : out;
+    return out.length > 200 ? `${out.slice(0, 200)}...` : out;
   }
   // Error fallback
   if (call.result.error) return call.result.error.slice(0, 120);

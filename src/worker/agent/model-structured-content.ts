@@ -73,10 +73,7 @@ export function buildStructuredTextMessage(input: StructuredTextMessageInput): s
   });
 }
 
-export function buildStructuredTaskPrompt(
-  kind: string,
-  payload: Record<string, unknown>,
-): string {
+export function buildStructuredTaskPrompt(kind: string, payload: Record<string, unknown>): string {
   return stringifyStructuredContent({
     type: 'suncode.task_prompt',
     version: STRUCTURED_CONTENT_VERSION,

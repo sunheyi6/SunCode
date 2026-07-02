@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import CodeBlock from './CodeBlock.vue';
 
 const props = defineProps<{
   filename: string;
@@ -8,7 +7,7 @@ const props = defineProps<{
   language?: string;
 }>();
 
-const language = computed(() => {
+const _language = computed(() => {
   if (props.language) return props.language;
 
   const ext = props.filename.split('.').pop()?.toLowerCase();

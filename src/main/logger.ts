@@ -14,9 +14,9 @@
  *   logger.error('[App] Failed to load', err);
  */
 
+import { join } from 'node:path';
 import log from 'electron-log/main';
 import { getAppDataDir } from './paths';
-import { join } from 'node:path';
 
 // ── Resolve log path to <userData>/.suncode/app.log ───────────────────
 const LOG_DIR = getAppDataDir();

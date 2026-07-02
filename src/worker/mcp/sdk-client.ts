@@ -1,5 +1,5 @@
-import type { Tool } from '../tools/types';
 import type { McpServerConfig } from '@shared/types';
+import type { Tool } from '../tools/types';
 import type { McpClient } from './client';
 
 /**
@@ -43,7 +43,7 @@ export async function createSDKMcpClient(config: McpServerConfig): Promise<McpCl
         const result = await client.listTools();
         const mcpTools = result.tools as McpToolDef[];
 
-        // @ts-ignore
+        // @ts-expect-error
         const tools: Tool[] = mcpTools.map((mcpTool) => ({
           name: `mcp__${config.name}__${mcpTool.name}`,
           isReadonly: false,

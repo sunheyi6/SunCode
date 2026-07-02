@@ -215,20 +215,24 @@ logger.info('[App] Starting SunCode', {
   isPackaged: app.isPackaged,
 });
 
-app.whenReady().then(() => {
-  logger.info('[App] ready, initializing...');
-  return initApp();
-}).then(() => {
-  logger.info('[App] Init complete');
-  // Startup marker — used by parent processes to detect when SunCode is fully ready.
-  // Format: [SunCode] STARTUP_COMPLETE project=<name> ts=<ISO timestamp>
-  // The bash tool's startup_marker parameter scans stdout/stderr for this line.
-  const marker = `[SunCode] STARTUP_COMPLETE project=SunCode ts=${new Date().toISOString()}`;
-  logger.info(marker);
-  console.log(marker);
-}).catch((err) => {
-  logger.error('[App] Init failed', err);
-});
+app
+  .whenReady()
+  .then(() => {
+    logger.info('[App] ready, initializing...');
+    return initApp();
+  })
+  .then(() => {
+    logger.info('[App] Init complete');
+    // Startup marker — used by parent processes to detect when SunCode is fully ready.
+    // Format: [SunCode] STARTUP_COMPLETE project=<name> ts=<ISO timestamp>
+    // The bash tool's startup_marker parameter scans stdout/stderr for this line.
+    const marker = `[SunCode] STARTUP_COMPLETE project=SunCode ts=${new Date().toISOString()}`;
+    logger.info(marker);
+    console.log(marker);
+  })
+  .catch((err) => {
+    logger.error('[App] Init failed', err);
+  });
 
 app.on('window-all-closed', () => {
   logger.info('[App] All windows closed');

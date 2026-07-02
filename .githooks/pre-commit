@@ -1,0 +1,22 @@
+#!/bin/sh
+# Pre-commit: block commits that introduce biome errors or typecheck failures.
+# Warnings are allowed (style preferences); only errors block the commit.
+
+echo "[pre-commit] Running biome check (errors only)..."
+bunx biome check src/ --max-diagnostics=5000
+biome_exit=$?
+if [ $biome_exit -ne 0 ]; then
+  echo "[pre-commit] FAIL: biome found errors. Fix them or run 'bunx biome check src/ --write' to auto-fix."
+  exit 1
+fi
+
+echo "[pre-commit] Running typecheck..."
+bun run typecheck
+ts_exit=$?
+if [ $ts_exit -ne 0 ]; then
+  echo "[pre-commit] FAIL: typecheck failed. Fix the type errors before committing."
+  exit 1
+fi
+
+echo "[pre-commit] OK"
+exit 0

@@ -12,11 +12,11 @@
  */
 
 import type {
-  HookEventType,
   HookContext,
-  HookResult,
+  HookEventType,
   HookInterface,
   HookRegistry,
+  HookResult,
   StopHook,
   StopHookContext,
   StopHookRegistry,

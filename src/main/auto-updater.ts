@@ -67,7 +67,7 @@ export function initAutoUpdater(wm: WindowManager): void {
           ? info.releaseNotes
           : Array.isArray(info.releaseNotes)
             ? info.releaseNotes
-                .map((n) => (typeof n === 'string' ? n : (n as { note?: string }).note ?? ''))
+                .map((n) => (typeof n === 'string' ? n : ((n as { note?: string }).note ?? '')))
                 .join('\n')
             : undefined,
     });

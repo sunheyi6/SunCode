@@ -38,13 +38,17 @@ function findGitBashPath(): string | undefined {
     process.env['ProgramFiles(x86)']
       ? `${process.env['ProgramFiles(x86)']}\\Git\\bin\\bash.exe`
       : undefined,
-    process.env.LocalAppData ? `${process.env.LocalAppData}\\Programs\\Git\\bin\\bash.exe` : undefined,
+    process.env.LocalAppData
+      ? `${process.env.LocalAppData}\\Programs\\Git\\bin\\bash.exe`
+      : undefined,
     ...pathEntries()
       .filter((entry) => /\\Git\\(cmd|bin|usr\\bin)$/i.test(entry))
       .map((entry) => `${entry}\\bash.exe`),
   ];
 
-  return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+  return candidates.find((candidate): candidate is string =>
+    Boolean(candidate && existsSync(candidate)),
+  );
 }
 
 export function resolveWindowsShell(preference: WindowsShellPreference = 'auto'): ResolvedShell {
@@ -161,7 +165,10 @@ function truncateTail(
   return { text: prefix + outputLines.join('\n'), truncated };
 }
 
-export function rewriteKillCommand(command: string, protectedPids: number[]): { rewritten: string; modified: boolean; blocked: boolean; message?: string } {
+export function rewriteKillCommand(
+  command: string,
+  protectedPids: number[],
+): { rewritten: string; modified: boolean; blocked: boolean; message?: string } {
   if (!protectedPids || protectedPids.length === 0) {
     return { rewritten: command, modified: false, blocked: false };
   }
@@ -174,7 +181,12 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
     if (match) {
       const processName = match[2];
       const rewritten = `$__sc_protect=@(${protectedPidsStr}); Get-Process -Name '${processName}' | Where-Object { $__sc_protect -notcontains $_.Id } | Stop-Process${match[3]}`;
-      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+      return {
+        rewritten,
+        modified: true,
+        blocked: false,
+        message: 'modified to protect host process',
+      };
     }
   }
 
@@ -187,7 +199,12 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
         winStopProcessByName,
         `$__sc_protect=@(${protectedPidsStr}); Get-Process -Name '${processName}' | Where-Object { $__sc_protect -notcontains $_.Id } | Stop-Process`,
       );
-      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+      return {
+        rewritten,
+        modified: true,
+        blocked: false,
+        message: 'modified to protect host process',
+      };
     }
   }
 
@@ -197,7 +214,12 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
     if (match) {
       const targetPid = parseInt(match[1], 10);
       if (protectedPids.includes(targetPid)) {
-        return { rewritten: command, modified: false, blocked: true, message: `cannot kill protected PID ${targetPid}` };
+        return {
+          rewritten: command,
+          modified: false,
+          blocked: true,
+          message: `cannot kill protected PID ${targetPid}`,
+        };
       }
     }
   }
@@ -208,7 +230,12 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
     if (match) {
       const processName = match[1].replace(/\.exe$/i, '');
       const rewritten = `$__sc_protect=@(${protectedPidsStr}); Get-Process -Name '${processName}' | Where-Object { $__sc_protect -notcontains $_.Id } | ForEach-Object { taskkill /F /T /PID $_.Id }`;
-      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+      return {
+        rewritten,
+        modified: true,
+        blocked: false,
+        message: 'modified to protect host process',
+      };
     }
   }
 
@@ -218,7 +245,12 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
     if (match) {
       const targetPid = parseInt(match[1], 10);
       if (protectedPids.includes(targetPid)) {
-        return { rewritten: command, modified: false, blocked: true, message: `cannot kill protected PID ${targetPid}` };
+        return {
+          rewritten: command,
+          modified: false,
+          blocked: true,
+          message: `cannot kill protected PID ${targetPid}`,
+        };
       }
     }
   }
@@ -229,7 +261,12 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
     if (match) {
       const processName = match[1];
       const rewritten = `for pid in $(pgrep '${processName}'); do if [ ! " ${protectedPidsStr} " =~ " \\$pid " ]; then kill -9 \\$pid; fi; done`;
-      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+      return {
+        rewritten,
+        modified: true,
+        blocked: false,
+        message: 'modified to protect host process',
+      };
     }
   }
 
@@ -239,7 +276,12 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
     if (match) {
       const processName = match[1];
       const rewritten = `for pid in $(pgrep '${processName}'); do if [ ! " ${protectedPidsStr} " =~ " \\$pid " ]; then kill -9 \\$pid; fi; done`;
-      return { rewritten, modified: true, blocked: false, message: 'modified to protect host process' };
+      return {
+        rewritten,
+        modified: true,
+        blocked: false,
+        message: 'modified to protect host process',
+      };
     }
   }
 
@@ -249,7 +291,12 @@ export function rewriteKillCommand(command: string, protectedPids: number[]): { 
     if (match) {
       const targetPid = parseInt(match[2], 10);
       if (protectedPids.includes(targetPid)) {
-        return { rewritten: command, modified: false, blocked: true, message: `cannot kill protected PID ${targetPid}` };
+        return {
+          rewritten: command,
+          modified: false,
+          blocked: true,
+          message: `cannot kill protected PID ${targetPid}`,
+        };
       }
     }
   }
@@ -313,7 +360,10 @@ function workspacePatterns(pkg: Record<string, unknown>): string[] {
   return [];
 }
 
-async function resolveWorkspacePackageDir(rootDir: string, workspace: string): Promise<string | undefined> {
+async function resolveWorkspacePackageDir(
+  rootDir: string,
+  workspace: string,
+): Promise<string | undefined> {
   const rootPkg = await readPackageJson(rootDir);
   if (!rootPkg) return undefined;
 
@@ -373,8 +423,8 @@ export function buildWindowsProjectProcessEvidenceCommand(
     `$root = ${quotePowerShellSingle(normalizedRoot)}`,
     'Get-CimInstance Win32_Process |',
     `Where-Object { $_.ProcessId -ne $PID -and $_.ProcessId -ne ${launcherPid} -and (`,
-    '(([string]$_.CommandLine).Replace(\'\\\', \'/\').IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or',
-    '(([string]$_.ExecutablePath).Replace(\'\\\', \'/\').IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0)',
+    "(([string]$_.CommandLine).Replace('\\', '/').IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or",
+    "(([string]$_.ExecutablePath).Replace('\\', '/').IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0)",
     ') } |',
     'Select-Object -First 1 ProcessId,Name,CommandLine,ExecutablePath |',
     'ConvertTo-Json -Compress',
@@ -457,10 +507,7 @@ export function shouldWaitForServiceEvidenceAfterLauncherExit(args: {
   evidenceFound: boolean;
 }): boolean {
   return (
-    args.exitCode === 0 &&
-    args.hasReadinessTimeout &&
-    !args.hasStartupMarker &&
-    !args.evidenceFound
+    args.exitCode === 0 && args.hasReadinessTimeout && !args.hasStartupMarker && !args.evidenceFound
   );
 }
 
@@ -483,13 +530,18 @@ function buildChildProcessEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-export function createBashTool(workingDir: string, callbacks?: BashToolCallbacks, options?: BashToolOptions) {
+export function createBashTool(
+  workingDir: string,
+  callbacks?: BashToolCallbacks,
+  options?: BashToolOptions,
+) {
   const protectedPids = options?.protectedPids || [];
   const windowsShell = options?.windowsShell ?? 'auto';
 
   return new (class BashTool extends BaseTool {
     readonly name = 'bash';
-    readonly description = `Executes a shell command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds.
+    readonly description =
+      `Executes a shell command and returns its stdout and stderr. The working directory is the project root. Commands have a default timeout of 60 seconds.
 
 IMPORTANT: Each invocation runs in a fresh shell. On Windows, the configured shell is used. With Git Bash or Linux/macOS bash, use && when later commands should only run after earlier commands succeed. With Windows PowerShell, use ; to run commands sequentially, for example \`cd D:/project/app; npm run dev\`.
 
@@ -549,10 +601,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
           ? params.startup_marker.trim()
           : '';
       const hasReadinessTimeout = typeof params.readiness_timeout === 'number';
-      const readinessTimeout = Math.min(
-        (params.readiness_timeout as number) || 120000,
-        300000,
-      );
+      const readinessTimeout = Math.min((params.readiness_timeout as number) || 120000, 300000);
       const serviceObservationMs = startupMarker
         ? readinessTimeout
         : Math.min(readinessTimeout, SERVICE_OBSERVATION_MS);
@@ -591,7 +640,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
 
       if (isCrossProjectSunCodeStartupMarker(command, startupMarker, cwd)) {
         return commandFailure(
-          'SunCode startup marker cannot validate another project. Use the target project\'s own startup output, a reachable port, visible window evidence, or process CommandLine/AppPath evidence.',
+          "SunCode startup marker cannot validate another project. Use the target project's own startup output, a reachable port, visible window evidence, or process CommandLine/AppPath evidence.",
         );
       }
 
@@ -600,7 +649,9 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
         return commandFailure(`Command blocked for security reasons: ${killResult.message}`);
       }
       if (killResult.modified) {
-        console.log(`[Bash] Rewrote kill command to protect host process: "${command}" → "${killResult.rewritten}"`);
+        console.log(
+          `[Bash] Rewrote kill command to protect host process: "${command}" → "${killResult.rewritten}"`,
+        );
       }
       const effectiveCommand = killResult.rewritten;
 
@@ -684,18 +735,19 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
 
           const observeProcessEvidence = (): void => {
             if (!startedPid || startupMarker) return;
-            void findProjectProcessEvidence(resolveProjectEvidenceRoot(command, cwd), startedPid).then(
-              (evidence) => {
-                if (!evidence || !startedPid) return;
-                callbacks?.onBackgroundStart?.({
-                  pid: startedPid,
-                  monitorPid: evidence.pid,
-                  command,
-                  startTime: backgroundStartTime,
-                  status: 'running',
-                });
-              },
-            );
+            void findProjectProcessEvidence(
+              resolveProjectEvidenceRoot(command, cwd),
+              startedPid,
+            ).then((evidence) => {
+              if (!evidence || !startedPid) return;
+              callbacks?.onBackgroundStart?.({
+                pid: startedPid,
+                monitorPid: evidence.pid,
+                command,
+                startTime: backgroundStartTime,
+                status: 'running',
+              });
+            });
           };
 
           const resolveReady = () => {
@@ -846,7 +898,11 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                 }
 
                 observeProcessEvidence();
-                const observed = truncateTail(combinedOutput, MAX_OUTPUT_LINES, MAX_OUTPUT_BYTES).text;
+                const observed = truncateTail(
+                  combinedOutput,
+                  MAX_OUTPUT_LINES,
+                  MAX_OUTPUT_BYTES,
+                ).text;
 
                 resolveOnce(
                   this.success(
@@ -958,7 +1014,10 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                 stream.on('error', reject);
               });
             } catch (error) {
-              console.warn(`[Bash] Failed to write full output to temp file:`, (error as Error).message);
+              console.warn(
+                `[Bash] Failed to write full output to temp file:`,
+                (error as Error).message,
+              );
             }
           }
 

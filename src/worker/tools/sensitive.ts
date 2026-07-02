@@ -11,7 +11,13 @@
 import { basename } from 'node:path';
 
 /** Exact basename matches that always flag as sensitive. */
-const SENSITIVE_BASENAMES = new Set<string>(['.env', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials']);
+const SENSITIVE_BASENAMES = new Set<string>([
+  '.env',
+  'id_rsa',
+  'id_ed25519',
+  'id_ecdsa',
+  'credentials',
+]);
 
 /** Path-suffix pairs that flag as sensitive (e.g. ~/.aws/credentials). */
 const SENSITIVE_PATH_SUFFIXES: readonly string[][] = [

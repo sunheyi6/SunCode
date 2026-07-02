@@ -1,18 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useSessionsStore } from '../../stores/sessions';
-import { useChatStore } from '../../stores/chat';
-import { getChatInputClasses, getComposerTextareaHeight } from './chat-input';
-import { bridge } from '../../api/bridge';
-import { useDropdownGroup } from '../../composables/useDropdown';
-import WorkspaceSelector from './WorkspaceSelector.vue';
-import ModelSelector from './ModelSelector.vue';
-import PermissionSelector from './PermissionSelector.vue';
-import ThinkingSelector from './ThinkingSelector.vue';
-import CommandDropdown from './CommandDropdown.vue';
-import type { GitInfo } from '@shared/types';
 import type { SlashCommand } from '@shared/commands';
 import { parseCommandFromInput } from '@shared/commands';
+import type { GitInfo } from '@shared/types';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { bridge } from '../../api/bridge';
+import { useDropdownGroup } from '../../composables/useDropdown';
+import { useChatStore } from '../../stores/chat';
+import { useSessionsStore } from '../../stores/sessions';
+import { getChatInputClasses, getComposerTextareaHeight } from './chat-input';
 
 const props = withDefaults(
   defineProps<{
@@ -34,7 +29,7 @@ const chatStore = useChatStore();
 
 const inputText = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
-const inputRef = ref<HTMLElement | null>(null);
+const _inputRef = ref<HTMLElement | null>(null);
 
 // --- Slash Command Dropdown ---
 const showCommandDropdown = ref(false);
@@ -75,7 +70,7 @@ function updateComposerRect(): void {
   }
 }
 
-function onCommandSelect(cmd: SlashCommand): void {
+function _onCommandSelect(cmd: SlashCommand): void {
   const text = inputText.value;
   const lines = text.split('\n');
   const lastLine = lines[lines.length - 1] ?? '';
@@ -126,11 +121,11 @@ function closeCommandDropdown(): void {
 
 // Unified dropdown group: each dropdown keeps its own state but only one can be open.
 const dropdowns = useDropdownGroup();
-const workspaceDropdown = dropdowns.register('workspace');
-const branchDropdown = dropdowns.register('branch');
-const modelDropdown = dropdowns.register('model');
-const permissionDropdown = dropdowns.register('permission');
-const thinkingDropdown = dropdowns.register('thinking');
+const _workspaceDropdown = dropdowns.register('workspace');
+const _branchDropdown = dropdowns.register('branch');
+const _modelDropdown = dropdowns.register('model');
+const _permissionDropdown = dropdowns.register('permission');
+const _thinkingDropdown = dropdowns.register('thinking');
 
 const gitInfo = ref<GitInfo>({
   isRepo: false,
@@ -190,10 +185,10 @@ watch(inputText, () => {
   }
 });
 
-const hasInput = computed(() => inputText.value.trim().length > 0);
-const isGoalInput = computed(() => inputText.value.trim().startsWith('/goal'));
-const chatInputClasses = computed(() => getChatInputClasses(props.isEmptyConversation));
-const placeholderText = computed(() =>
+const _hasInput = computed(() => inputText.value.trim().length > 0);
+const _isGoalInput = computed(() => inputText.value.trim().startsWith('/goal'));
+const _chatInputClasses = computed(() => getChatInputClasses(props.isEmptyConversation));
+const _placeholderText = computed(() =>
   props.isEmptyConversation
     ? '向 SunCode 提问，输入 @ 提及文件或子智能体，/ 使用命令，$ 使用技能，# 关联对话'
     : '提出后续修改要求',
@@ -269,7 +264,9 @@ let draftBeforeHistory = '';
 function persistHistory(): void {
   try {
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(inputHistory));
-  } catch { /* quota exceeded — silently drop oldest entries */ }
+  } catch {
+    /* quota exceeded — silently drop oldest entries */
+  }
 }
 
 function pushHistory(text: string): void {
@@ -306,7 +303,7 @@ function navigateHistory(direction: 'up' | 'down'): void {
   inputText.value = inputHistory[inputHistory.length - 1 - historyIndex] ?? '';
 }
 
-function handleKeydown(event: KeyboardEvent): void {
+function _handleKeydown(event: KeyboardEvent): void {
   // When command dropdown is open, let it handle navigation keys
   if (showCommandDropdown.value) {
     // If user typed a complete command (e.g. "/help"), let Enter pass through to send
@@ -315,7 +312,12 @@ function handleKeydown(event: KeyboardEvent): void {
       // Close dropdown and let Enter send the message naturally
       showCommandDropdown.value = false;
       // Continue to normal Enter handling below
-    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Enter' || event.key === 'Tab') {
+    } else if (
+      event.key === 'ArrowUp' ||
+      event.key === 'ArrowDown' ||
+      event.key === 'Enter' ||
+      event.key === 'Tab'
+    ) {
       return; // CommandDropdown handles navigation/selection
     } else if (event.key === 'Escape') {
       event.preventDefault();

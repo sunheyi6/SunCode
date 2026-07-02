@@ -1,10 +1,10 @@
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import type {
-  ToolCallContent,
-  StreamEvent,
-  RunEvent,
   AppSettings,
   RequestMessageTrace,
+  RunEvent,
+  StreamEvent,
+  ToolCallContent,
 } from '@shared/types';
 import type { DiagLogger } from '../utils/diag-logger';
 

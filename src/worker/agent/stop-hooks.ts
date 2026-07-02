@@ -9,15 +9,15 @@
  * Also provides adapters for the unified Hook system (see ../hooks/hook-system.ts).
  */
 
-import type { StopHook, StopHookContext, StopHookResult, StopHookRegistry, HookRegistry } from '@shared/types';
+import type { StopHook, StopHookContext, StopHookRegistry, StopHookResult } from '@shared/types';
 import {
-  DefaultHookRegistry,
-  createHookRegistry,
   adaptStopHookAsHook,
+  createHookRegistry,
+  type DefaultHookRegistry,
   hookRegistryAsStopRegistry,
 } from '../hooks/hook-system';
 
-export { DefaultHookRegistry, createHookRegistry } from '../hooks/hook-system';
+export { createHookRegistry, DefaultHookRegistry } from '../hooks/hook-system';
 
 // ===== Built-in Stop Hooks =====
 
@@ -31,7 +31,7 @@ export class SafetyStopHook implements StopHook {
 
   async check(ctx: StopHookContext): Promise<StopHookResult> {
     const allText =
-      ctx.assistantText + ctx.toolCalls.map((tc) => tc.name + ' ' + tc.arguments).join(' ');
+      ctx.assistantText + ctx.toolCalls.map((tc) => `${tc.name} ${tc.arguments}`).join(' ');
 
     // Check for dangerous shell commands
     const dangerousPatterns = [
@@ -111,7 +111,10 @@ export function createDefaultStopHookRegistry(): StopHookRegistry {
  * capabilities (pre_tool_use, post_tool_use, permission_request, etc.)
  * while maintaining backward compatibility with the legacy stop hook.
  */
-export function createUnifiedHookRegistry(): { registry: DefaultHookRegistry; stopRegistry: StopHookRegistry } {
+export function createUnifiedHookRegistry(): {
+  registry: DefaultHookRegistry;
+  stopRegistry: StopHookRegistry;
+} {
   const registry = createHookRegistry();
   // Register the safety hook as a unified hook
   registry.register(adaptStopHookAsHook(new SafetyStopHook()));

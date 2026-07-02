@@ -43,6 +43,15 @@
 - 推送 `v*` 格式 tag 触发 GitHub Actions 三平台构建
 - 构建产物：Windows `.exe` (NSIS + Portable)、macOS `.dmg` (arm64)、Linux `.AppImage` + `.deb`
 
+## 代码质量守门
+
+- `bun run lint`（biome）只阻塞 **errors**，warnings 不影响退出码
+- `bun run typecheck`（tsc --noEmit）必须零错误
+- pre-commit hook（`.githooks/pre-commit`，由 `prepare` 脚本自动配置 `core.hooksPath`）在每次提交前强制运行 biome + typecheck，任一失败即阻止提交
+- CI（`.github/workflows/validate.yml`）在 push/PR 时运行 lint + typecheck，作为远程守门
+- biome 配置策略：真实 bug 类规则（`noUnsafeOptionalChaining`、`noAssignInExpressions`、`noImplicitAnyLet` 等）设为 error；风格偏好类（`noNonNullAssertion`、`noExplicitAny`）设为 warn，允许带注释的 `any`（pi-ai 库类型 cast 等场景）
+- Vue SFC 中模板引用的变量若被 biome 误报 unused，用 `// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.` 抑制
+
 ## 架构约定
 
 - Electron Main → Worker Thread → Agent → AgentLoop 单向依赖

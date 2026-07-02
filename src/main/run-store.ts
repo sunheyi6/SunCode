@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { appendFile, readFile, readdir, writeFile } from 'node:fs/promises';
+import { appendFile, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DayStats, ModelStats, RunEvent, RunId } from '@shared/types';
 import { WIRE_PROTOCOL_VERSION } from '@shared/types';

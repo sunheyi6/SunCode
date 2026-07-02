@@ -1,26 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch, ref } from 'vue';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useAgent } from '../../composables/useAgent';
-import { useChatStore } from '../../stores/chat';
-import { useSettingsStore } from '../../stores/settings';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
 import { useToast } from '../../composables/useToast';
-import ChatHeader from './ChatHeader.vue';
-import MessageList from './MessageList.vue';
-import ChatInput from './ChatInput.vue';
-import PendingPromptQueue from './PendingPromptQueue.vue';
+import { useChatStore } from '../../stores/chat';
+import { useSettingsStore } from '../../stores/settings';
 import { getFantasyWelcomeMessage } from './chat-panel';
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const { send, abort, interruptAndSend, isStreaming } = useAgent();
 const chatStore = useChatStore();
 const settingsStore = useSettingsStore();
 const { killAll: killAllBgProcesses } = useBackgroundProcesses();
 const { showToast } = useToast();
 
-const hasMessages = computed(() => chatStore.messages.length > 0);
-const welcomeMessage = computed(() => getFantasyWelcomeMessage());
+const _hasMessages = computed(() => chatStore.messages.length > 0);
+const _welcomeMessage = computed(() => getFantasyWelcomeMessage());
 
-const chatZoom = computed(() => settingsStore.settings.fontSize / 14);
+const _chatZoom = computed(() => settingsStore.settings.fontSize / 14);
 
 // Auto-dismiss model switch notice after 5 seconds
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -37,11 +34,11 @@ watch(
   },
 );
 
-function handleSend(text: string): void {
+function _handleSend(text: string): void {
   send(text);
 }
 
-function handleStop(): void {
+function _handleStop(): void {
   abort();
   const killed = killAllBgProcesses();
   if (killed > 0) {

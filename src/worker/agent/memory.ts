@@ -32,7 +32,7 @@ export interface MemorySearchResult {
   score: number;
 }
 
-let embeddingCache: Map<string, number[]> = new Map();
+const embeddingCache: Map<string, number[]> = new Map();
 
 export async function loadMemories(workingDir: string, query?: string): Promise<string> {
   const memDir = join(workingDir, MEMORIES_DIR);
@@ -94,7 +94,10 @@ export async function saveMemory(
   writeFileSync(join(memDir, MEMORY_INDEX_JSON), jsonIndexContent, 'utf-8');
 }
 
-export async function searchMemories(entries: MemoryEntry[], query: string): Promise<MemoryEntry[]> {
+export async function searchMemories(
+  entries: MemoryEntry[],
+  query: string,
+): Promise<MemoryEntry[]> {
   if (entries.length === 0 || !query.trim()) {
     return entries.slice(0, MAX_RETRIEVED_MEMORIES);
   }
@@ -178,11 +181,7 @@ export function getAllMemories(workingDir: string): MemoryEntry[] {
   return loadAllMemoryEntries(memDir);
 }
 
-export function mergeMemories(
-  workingDir: string,
-  entries: MemoryEntry[],
-  newSlug: string,
-): void {
+export function mergeMemories(workingDir: string, entries: MemoryEntry[], newSlug: string): void {
   const memDir = join(workingDir, MEMORIES_DIR);
   if (!existsSync(memDir)) {
     mkdirSync(memDir, { recursive: true });
@@ -192,13 +191,19 @@ export function mergeMemories(
     date: new Date().toISOString().split('T')[0]!,
     slug: newSlug,
     userRequest: entries.map((e) => e.userRequest).join('; '),
-    toolsUsed: entries.reduce((acc, e) => {
-      for (const [tool, count] of Object.entries(e.toolsUsed)) {
-        acc[tool] = (acc[tool] || 0) + count;
-      }
-      return acc;
-    }, {} as Record<string, number>),
-    summary: entries.map((e) => e.summary).filter(Boolean).join('\n\n'),
+    toolsUsed: entries.reduce(
+      (acc, e) => {
+        for (const [tool, count] of Object.entries(e.toolsUsed)) {
+          acc[tool] = (acc[tool] || 0) + count;
+        }
+        return acc;
+      },
+      {} as Record<string, number>,
+    ),
+    summary: entries
+      .map((e) => e.summary)
+      .filter(Boolean)
+      .join('\n\n'),
     tags: [...new Set(entries.flatMap((e) => e.tags || []))],
   };
 
@@ -259,7 +264,7 @@ function parseSessionMemory(content: string): MemoryEntry {
       for (let i = 1; i < end; i++) {
         const match = lines[i]?.match(/^(\w+):\s*(.+)$/);
         if (match) {
-          frontmatter[match[1]!] = match[2]!.trim();
+          frontmatter[match[1]!] = match[2]?.trim();
         }
       }
     }
@@ -272,10 +277,10 @@ function parseSessionMemory(content: string): MemoryEntry {
   const toolsUsed: Record<string, number> = {};
   const toolsMatch = body.match(/^\*\*工具使用\*\*:\s*\n([\s\S]*?)(?:\n\n|$)/);
   if (toolsMatch) {
-    for (const line of toolsMatch[1]!.split('\n')) {
+    for (const line of (toolsMatch[1] ?? '').split('\n')) {
       const toolMatch = line.match(/^\s*-\s*([\w-]+)\s*×(\d+)/);
       if (toolMatch) {
-        toolsUsed[toolMatch[1]!] = parseInt(toolMatch[2]!, 10);
+        toolsUsed[toolMatch[1] ?? ''] = parseInt(toolMatch[2] ?? '', 10);
       }
     }
   }
@@ -318,7 +323,7 @@ function buildMemoryIndex(memDir: string): string {
     }
   }
 
-  return parts.join('\n') + '\n';
+  return `${parts.join('\n')}\n`;
 }
 
 function formatMemoryIndex(entries: MemoryEntry[]): string {
@@ -332,9 +337,10 @@ function formatMemoryIndex(entries: MemoryEntry[]): string {
   ];
 
   for (const entry of entries) {
-    const toolList = Object.entries(entry.toolsUsed)
-      .map(([name, count]) => `${name}×${count}`)
-      .join(', ') || '无';
+    const toolList =
+      Object.entries(entry.toolsUsed)
+        .map(([name, count]) => `${name}×${count}`)
+        .join(', ') || '无';
 
     const tagList = entry.tags?.map((t) => `#${t}`).join(' ') || '';
 
@@ -391,7 +397,11 @@ function loadAllMemoryEntries(memDir: string): MemoryEntry[] {
   return entries;
 }
 
-async function generateSummary(entry: MemoryEntry, provider: string, modelId: string): Promise<string> {
+async function generateSummary(
+  entry: MemoryEntry,
+  provider: string,
+  modelId: string,
+): Promise<string> {
   try {
     const { getModel, complete } = await import('@earendil-works/pi-ai');
     const model = await getModel(provider as any, modelId);
@@ -404,7 +414,9 @@ async function generateSummary(entry: MemoryEntry, provider: string, modelId: st
     
 用户请求：${entry.userRequest}
 
-工具使用：${Object.entries(entry.toolsUsed).map(([k, v]) => `${k}: ${v}次`).join(', ')}
+工具使用：${Object.entries(entry.toolsUsed)
+      .map(([k, v]) => `${k}: ${v}次`)
+      .join(', ')}
 
 请用中文回复，格式为：
 - 完成的工作：...
@@ -432,11 +444,15 @@ async function generateSummary(entry: MemoryEntry, provider: string, modelId: st
       signal: AbortSignal.timeout(30_000),
     });
 
-    if (result && result.content) {
+    if (result?.content) {
       const textBlocks = result.content.filter(
         (c): c is { type: 'text'; text: string } => c.type === 'text',
       );
-      return textBlocks.map((c) => c.text).join('').trim().slice(0, MAX_SUMMARY_LENGTH);
+      return textBlocks
+        .map((c) => c.text)
+        .join('')
+        .trim()
+        .slice(0, MAX_SUMMARY_LENGTH);
     }
 
     return '';

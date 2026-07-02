@@ -1,10 +1,9 @@
-import type { ToolResult } from '@shared/types';
-import { readFile } from 'node:fs/promises';
-import { createInterface } from 'node:readline';
 import { spawn } from 'node:child_process';
-import { resolve, isAbsolute, normalize, relative, basename } from 'node:path';
-import { stat } from 'node:fs/promises';
-import { BaseTool, p, obj } from './types';
+import { readFile, stat } from 'node:fs/promises';
+import { basename, isAbsolute, normalize, relative, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
+import type { ToolResult } from '@shared/types';
+import { BaseTool, obj, p } from './types';
 
 /** Maximum output bytes before truncation. */
 const DEFAULT_MAX_BYTES = 50_000;
@@ -271,7 +270,7 @@ export function createGrepTool(workingDir: string) {
             const lineNumStr = rest.slice(0, numSepIdx);
             const lineText = rest.slice(numSepIdx + 1);
             const lineNumber = parseInt(lineNumStr, 10);
-            if (isNaN(lineNumber)) return;
+            if (Number.isNaN(lineNumber)) return;
 
             matchCount++;
             matches.push({
@@ -301,7 +300,9 @@ export function createGrepTool(workingDir: string) {
             }
             const output = await formatMatches(matches);
             const fallbackNote = '(used system grep — rg not installed)';
-            resolveResult(self.success(`Found ${matchCount} matches ${fallbackNote}:\n\n${output}`));
+            resolveResult(
+              self.success(`Found ${matchCount} matches ${fallbackNote}:\n\n${output}`),
+            );
           });
         }
 
@@ -355,7 +356,7 @@ export function createGrepTool(workingDir: string) {
         });
 
         const rl = createInterface({ input: child.stdout! });
-        let stderr = '';
+        let _stderr = '';
         const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
 
         rl.on('line', (line) => {
@@ -383,7 +384,7 @@ export function createGrepTool(workingDir: string) {
         });
 
         child.stderr?.on('data', (chunk: Buffer) => {
-          stderr += chunk.toString();
+          _stderr += chunk.toString();
         });
 
         child.on('close', async (code) => {

@@ -2,27 +2,25 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 import { buildInlineCallTrace } from './call-trace-view-model';
-import InlineCallTrace from './InlineCallTrace.vue';
-import StreamingText from './StreamingText.vue';
 
 const props = defineProps<{
   message: ChatMessage;
 }>();
 
-const hasContent = computed(() => props.message.content.length > 0);
+const _hasContent = computed(() => props.message.content.length > 0);
 const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0);
-const hasThinking = computed(
+const _hasThinking = computed(
   () => props.message.isStreaming || Boolean(props.message.thinking) || hasToolCalls.value,
 );
 
 const thinkingText = computed(() => props.message.thinking || '');
 const inlineTrace = computed(() => buildInlineCallTrace(props.message));
 const hasInlineTrace = computed(() => inlineTrace.value.entries.length > 0);
-const hasOrderedBlocks = computed(() => (props.message.blocks?.length ?? 0) > 0);
+const _hasOrderedBlocks = computed(() => (props.message.blocks?.length ?? 0) > 0);
 const processEntries = computed(() =>
   inlineTrace.value.entries.filter((entry) => entry.kind !== 'text'),
 );
-const hasProcessEntries = computed(() => processEntries.value.length > 0);
+const _hasProcessEntries = computed(() => processEntries.value.length > 0);
 const uiLanguage = computed(() => props.message.uiLanguage ?? 'zh');
 
 const copied = ref(false);
@@ -73,7 +71,7 @@ const formattedElapsed = computed(() => {
   return remain > 0 ? `${m}m${remain}s` : `${m}m`;
 });
 
-const timeLabel = computed(() => {
+const _timeLabel = computed(() => {
   const d = new Date(props.message.timestamp);
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
@@ -87,7 +85,7 @@ const fullTextForCopy = computed(() => {
   return parts.join('\n\n');
 });
 
-const thinkingSummary = computed(() => {
+const _thinkingSummary = computed(() => {
   const trace = inlineTrace.value;
   const time = formattedElapsed.value;
 
@@ -117,11 +115,11 @@ const thinkingSummary = computed(() => {
   return parts.join('  ');
 });
 
-const hasAnyThinkingContent = computed(() => {
+const _hasAnyThinkingContent = computed(() => {
   return hasInlineTrace.value || thinkingText.value.length > 0 || hasToolCalls.value;
 });
 
-async function copyContent() {
+async function _copyContent() {
   try {
     await navigator.clipboard.writeText(fullTextForCopy.value);
     copied.value = true;

@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { useSessionsStore } from '../../stores/sessions';
-import { getDropdownOpenState, useDropdown, type DropdownState } from '../../composables/useDropdown';
-import { bridge } from '../../api/bridge';
 import type { GitBranch, GitInfo } from '@shared/types';
+import { computed, ref, watch } from 'vue';
+import { bridge } from '../../api/bridge';
+import {
+  type DropdownState,
+  getDropdownOpenState,
+  useDropdown,
+} from '../../composables/useDropdown';
 import { useToast } from '../../composables/useToast';
+import { useSessionsStore } from '../../stores/sessions';
 
 const props = withDefaults(
   defineProps<{
@@ -35,7 +39,7 @@ const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
 
-const workspaceName = computed(() => {
+const _workspaceName = computed(() => {
   const dir = activeSession.value?.workingDirectory;
   if (!dir) return '未选择文件夹';
   const segments = dir.split(/[\\/]/).filter(Boolean);
@@ -44,7 +48,7 @@ const workspaceName = computed(() => {
 
 const workspacePath = computed(() => activeSession.value?.workingDirectory || '');
 
-const gitBranch = computed(() => (props.gitInfo.isRepo ? props.gitInfo.branch : null));
+const _gitBranch = computed(() => (props.gitInfo.isRepo ? props.gitInfo.branch : null));
 
 const branches = ref<GitBranch[]>([]);
 const isLoadingBranches = ref(false);
@@ -65,7 +69,7 @@ async function loadBranches(): Promise<void> {
   }
 }
 
-async function switchBranch(branchName: string): Promise<void> {
+async function _switchBranch(branchName: string): Promise<void> {
   const dir = workspacePath.value;
   if (!dir) return;
   branchDropdown.value.close();
@@ -82,7 +86,7 @@ async function switchBranch(branchName: string): Promise<void> {
   }
 }
 
-function toggleBranch(): void {
+function _toggleBranch(): void {
   if (isBranchOpen.value) {
     branchDropdown.value.close();
   } else {
@@ -103,7 +107,7 @@ watch(
   },
 );
 
-const recentFolders = computed(() => {
+const _recentFolders = computed(() => {
   const seen = new Map<string, { path: string; sessionId: string; updated: number }>();
   for (const s of sessionsStore.sessions) {
     const dir = s.workingDirectory;
@@ -119,7 +123,7 @@ const recentFolders = computed(() => {
     .slice(0, 20);
 });
 
-async function selectFolder() {
+async function _selectFolder() {
   dropdown.value.close();
   const dir = await bridge.selectDirectory();
   if (dir) {
@@ -127,11 +131,9 @@ async function selectFolder() {
   }
 }
 
-function switchToFolder(item: { path: string; sessionId: string }) {
+function _switchToFolder(item: { path: string; sessionId: string }) {
   dropdown.value.close();
-  const session = sessionsStore.sessions.find(
-    (s) => s.workingDirectory === item.path,
-  );
+  const session = sessionsStore.sessions.find((s) => s.workingDirectory === item.path);
   if (session && session.id !== sessionsStore.activeSessionId) {
     sessionsStore.selectSession(session.id);
   }

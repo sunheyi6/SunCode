@@ -1,18 +1,18 @@
-import type { ToolResult } from '@shared/types';
 import { readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, normalize, resolve } from 'node:path';
+import type { ToolResult } from '@shared/types';
 import {
   applyEditsToNormalizedContent,
   detectLineEnding,
+  type Edit,
   normalizeToLF,
   restoreLineEndings,
   stripBom,
-  type Edit,
 } from './edit-diff';
 import { withFileMutationQueue } from './file-mutation-queue';
 import { countLineChanges } from './line-diff';
-import { BaseTool, obj, p } from './types';
 import { isSensitiveFile } from './sensitive';
+import { BaseTool, obj, p } from './types';
 
 export function createEditTool(workingDir: string) {
   return new (class EditTool extends BaseTool {

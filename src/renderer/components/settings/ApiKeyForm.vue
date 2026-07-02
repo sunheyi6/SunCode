@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import { bridge } from '../../api/bridge';
 
 interface KeyEntry {
@@ -55,17 +55,17 @@ onMounted(async () => {
   }
 });
 
-function startEdit(entry: KeyEntry): void {
+function _startEdit(entry: KeyEntry): void {
   entry.editing = true;
   entry.key = '';
 }
 
-function cancelEdit(entry: KeyEntry): void {
+function _cancelEdit(entry: KeyEntry): void {
   entry.editing = false;
   entry.key = '';
 }
 
-async function saveKey(entry: KeyEntry): Promise<void> {
+async function _saveKey(entry: KeyEntry): Promise<void> {
   const key = entry.key.trim();
   if (!key) {
     entry.editing = false;
@@ -83,7 +83,7 @@ async function saveKey(entry: KeyEntry): Promise<void> {
   }
 }
 
-async function removeKey(entry: KeyEntry): Promise<void> {
+async function _removeKey(entry: KeyEntry): Promise<void> {
   try {
     await bridge.setApiKey(entry.provider, '');
     entry.hasKey = false;
@@ -95,11 +95,11 @@ async function removeKey(entry: KeyEntry): Promise<void> {
   }
 }
 
-function getDisplayName(providerId: string): string {
+function _getDisplayName(providerId: string): string {
   return commonProviders.find((p) => p.id === providerId)?.name || providerId;
 }
 
-async function addCustomKey(): Promise<void> {
+async function _addCustomKey(): Promise<void> {
   const provider = customProvider.value.trim();
   const key = customKey.value.trim();
   if (!provider || !key) return;

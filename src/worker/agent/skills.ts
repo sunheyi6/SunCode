@@ -1,6 +1,6 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, extname } from 'node:path';
 import { existsSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 
 /**
  * Skills system: loads .md skill files from project and user directories.

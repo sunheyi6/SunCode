@@ -302,7 +302,13 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
   const unrepresentedToolCalls = (message.toolCalls ?? []).filter(
     (toolCall) => !representedToolIds.has(toolCall.id),
   );
-  pushToolGroups(entries, unrepresentedToolCalls, `${message.id}:tools`, uiLanguage, message.isStreaming);
+  pushToolGroups(
+    entries,
+    unrepresentedToolCalls,
+    `${message.id}:tools`,
+    uiLanguage,
+    message.isStreaming,
+  );
 
   const lastIndex = entries.length - 1;
   const markedEntries = entries.map((entry, index) => ({

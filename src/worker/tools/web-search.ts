@@ -45,22 +45,23 @@ async function searchDuckDuckGo(query: string, maxResults: number): Promise<Sear
     const resultRegex =
       /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
 
-    let match;
-    while ((match = resultRegex.exec(html)) !== null && results.length < maxResults) {
-      const rawUrl = match[1]!
-        .replace(/&amp;/g, '&')
+    let match: RegExpExecArray | null;
+    match = resultRegex.exec(html);
+    while (match !== null && results.length < maxResults) {
+      const rawUrl = match[1]
+        ?.replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"');
 
-      const title = match[2]!
-        .replace(/<[^>]+>/g, '')
+      const title = match[2]
+        ?.replace(/<[^>]+>/g, '')
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .trim();
-      const snippet = match[3]!
-        .replace(/<[^>]+>/g, '')
+      const snippet = match[3]
+        ?.replace(/<[^>]+>/g, '')
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
@@ -73,6 +74,7 @@ async function searchDuckDuckGo(query: string, maxResults: number): Promise<Sear
       if (title && cleanUrl) {
         results.push({ title, url: cleanUrl, snippet });
       }
+      match = resultRegex.exec(html);
     }
 
     return results;
@@ -228,7 +230,7 @@ export function createWebSearchTool(settings?: AppSettings): Tool {
       }
     },
 
-  onProgress: null,
+    onProgress: null,
     getDefinition(): ToolDefinition {
       return { name: this.name, description: this.description, parameters: this.parameters };
     },

@@ -1,5 +1,5 @@
+import { appendEvent, findStaleRuns } from './run-store';
 import { loadAllSessions, loadSession, saveSession } from './session-store';
-import { findStaleRuns, appendEvent } from './run-store';
 
 /**
  * Scan all sessions for interrupted (non-terminal) runs and repair them.

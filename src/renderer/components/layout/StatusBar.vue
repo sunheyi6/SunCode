@@ -4,30 +4,41 @@ import { useAgentStore } from '../../stores/agent';
 import { useModelsStore } from '../../stores/models';
 
 const agentStore = useAgentStore();
-const modelsStore = useModelsStore();
+const _modelsStore = useModelsStore();
 
-const statusColor = computed(() => {
+const _statusColor = computed(() => {
   switch (agentStore.status.state) {
-    case 'thinking':  return 'var(--color-yellow)';
-    case 'executing': return 'var(--color-teal)';
-    case 'done':      return 'var(--color-green)';
-    case 'error':     return 'var(--color-red)';
-    default:          return 'var(--color-text-muted)';
+    case 'thinking':
+      return 'var(--color-yellow)';
+    case 'executing':
+      return 'var(--color-teal)';
+    case 'done':
+      return 'var(--color-green)';
+    case 'error':
+      return 'var(--color-red)';
+    default:
+      return 'var(--color-text-muted)';
   }
 });
 
-const statusText = computed(() => {
+const _statusText = computed(() => {
   switch (agentStore.status.state) {
-    case 'idle':      return '就绪';
-    case 'thinking':  return '思考中...';
-    case 'executing': return '执行工具...';
-    case 'done':      return '完成';
-    case 'error':     return '错误';
-    default:          return '';
+    case 'idle':
+      return '就绪';
+    case 'thinking':
+      return '思考中...';
+    case 'executing':
+      return '执行工具...';
+    case 'done':
+      return '完成';
+    case 'error':
+      return '错误';
+    default:
+      return '';
   }
 });
 
-const tokenInfo = computed(() => {
+const _tokenInfo = computed(() => {
   const t = agentStore.status.tokenUsage;
   if (t.total === 0) return '';
   return `${t.total} tokens`;
@@ -43,17 +54,24 @@ watch(
     if (state === 'thinking' || state === 'executing') {
       if (!elapsedTimer) {
         elapsedSeconds.value = 0;
-        elapsedTimer = setInterval(() => { elapsedSeconds.value++; }, 1000);
+        elapsedTimer = setInterval(() => {
+          elapsedSeconds.value++;
+        }, 1000);
       }
     } else {
-      if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+      if (elapsedTimer) {
+        clearInterval(elapsedTimer);
+        elapsedTimer = null;
+      }
     }
   },
 );
 
-onBeforeUnmount(() => { if (elapsedTimer) clearInterval(elapsedTimer); });
+onBeforeUnmount(() => {
+  if (elapsedTimer) clearInterval(elapsedTimer);
+});
 
-const elapsedLabel = computed(() => {
+const _elapsedLabel = computed(() => {
   if (elapsedSeconds.value === 0) return '';
   const s = elapsedSeconds.value;
   if (s < 60) return `${s}s`;

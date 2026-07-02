@@ -6,8 +6,9 @@
  *   - Claude Code WebFetch: SSRF protection, content type handling
  *   - CC-Web-MCP: IP blacklist, size limits
  */
-import { lookup } from 'node:dns/promises';
+
 import { execSync } from 'node:child_process';
+import { lookup } from 'node:dns/promises';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -19,7 +20,7 @@ import type { Tool } from './types';
 const DEFAULT_MAX_LENGTH = 50_000;
 const FETCH_TIMEOUT_MS = 15_000;
 const USER_AGENT = 'SunCode/1.0 (AI coding agent)';
-const MAX_REDIRECTS = 3;
+const _MAX_REDIRECTS = 3;
 
 // ── SSRF Protection ──
 
@@ -143,7 +144,7 @@ async function extractContent(
   // Truncate
   if (text.length > maxLength) {
     const truncated = text.slice(0, maxLength);
-    const lineCount = truncated.split('\n').length;
+    const _lineCount = truncated.split('\n').length;
     return {
       text: `${truncated}\n\n... (内容已截断，原 ${text.length} 字符，显示前 ${maxLength} 字符)`,
       contentType,
@@ -164,7 +165,7 @@ function isGithubUrl(
   if (!match) return null;
   return {
     owner: match[1]!,
-    repo: match[2]!.replace(/\.git$/, ''),
+    repo: match[2]?.replace(/\.git$/, ''),
     ref: match[3],
     subpath: match[4],
   };
@@ -235,7 +236,7 @@ async function cloneGithubRepo(
       .join('\n');
 
     return {
-      text: `# ${cloneMatch!.owner}/${cloneMatch!.repo}\n\n本地路径: ${cloneDir}\n\n\`\`\`\n${listing}\n\`\`\``,
+      text: `# ${cloneMatch?.owner}/${cloneMatch?.repo}\n\n本地路径: ${cloneDir}\n\n\`\`\`\n${listing}\n\`\`\``,
       isClone: true,
     };
   } catch (err) {
@@ -360,7 +361,7 @@ export function createWebFetchTool(workingDir: string): Tool {
           };
         }
 
-        const { text, contentType } = await extractContent(response, maxLength);
+        const { text } = await extractContent(response, maxLength);
 
         return {
           toolCallId: '',
@@ -383,7 +384,7 @@ export function createWebFetchTool(workingDir: string): Tool {
       }
     },
 
-  onProgress: null,
+    onProgress: null,
     getDefinition(): ToolDefinition {
       return { name: this.name, description: this.description, parameters: this.parameters };
     },

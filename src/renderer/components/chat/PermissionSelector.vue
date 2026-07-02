@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import {
+  type DropdownState,
+  getDropdownOpenState,
+  useDropdown,
+} from '../../composables/useDropdown';
 import { useSettingsStore } from '../../stores/settings';
-import { getDropdownOpenState, useDropdown, type DropdownState } from '../../composables/useDropdown';
 
 const props = withDefaults(
   defineProps<{
@@ -24,14 +28,14 @@ const permissionModes = [
   { value: 'confirm_changes' as const, label: '变更前确认', icon: '✓', desc: '修改前需确认' },
 ];
 
-const currentPerm = computed(
+const _currentPerm = computed(
   () =>
     permissionModes.find(
       (permission) => permission.value === settingsStore.settings.permissionMode,
     ) ?? permissionModes[1],
 );
 
-function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
+function _selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
   settingsStore.update({ permissionMode: mode });
   dropdown.value.close();
 }

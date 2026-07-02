@@ -12,16 +12,16 @@
  */
 
 import { createHash } from 'node:crypto';
-import type {
-  Message,
-  ContextBudgetPolicy,
-  ContextBudgetDiagnostic,
-  ArchivedToolResultPlaceholder,
-} from '@shared/types';
 import { CHARS_PER_TOKEN } from '@shared/constants';
+import type {
+  ArchivedToolResultPlaceholder,
+  ContextBudgetDiagnostic,
+  ContextBudgetPolicy,
+  Message,
+} from '@shared/types';
 import { countStringTokens } from '../utils/token-counter';
 import { compactMessages } from './compaction';
-import { snipUnreferencedResults, collapseContext } from './snip-compact';
+import { collapseContext, snipUnreferencedResults } from './snip-compact';
 
 // ============================================================================
 // Types
@@ -168,7 +168,7 @@ export function applyContextBudget(
 export function pruneStaleToolResults(
   messages: Message[],
   policy: ContextBudgetPolicy,
-  charsPerToken = CHARS_PER_TOKEN,
+  _charsPerToken = CHARS_PER_TOKEN,
 ): { messages: Message[]; prunedCount: number; tokensSaved: number } {
   const prunePolicy = policy.staleToolResultPrune;
   if (!prunePolicy?.enabled) {
@@ -387,7 +387,10 @@ export function buildMessageTurnMap(messages: Message[]): Map<Message, string> {
   return map;
 }
 
-export function recentTurnIdsFromGroups(messageTurnMap: Map<Message, string>, count: number): Set<string> {
+export function recentTurnIdsFromGroups(
+  messageTurnMap: Map<Message, string>,
+  count: number,
+): Set<string> {
   if (count <= 0) return new Set();
   // Collect unique non-system turn IDs in document order
   const order: string[] = [];

@@ -1,5 +1,5 @@
-import type { Message, ContentBlock, TextContent, ToolCallContent } from '@shared/types';
 import { CHARS_PER_TOKEN, CONTEXT_SAFETY_MARGIN } from '@shared/constants';
+import type { Message, TextContent, ToolCallContent } from '@shared/types';
 
 /**
  * Estimate the number of tokens in a message or text.

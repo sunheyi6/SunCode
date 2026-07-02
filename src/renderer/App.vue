@@ -3,7 +3,6 @@ import { onMounted } from 'vue';
 import { useModelsStore } from './stores/models';
 import { useSettingsStore } from './stores/settings';
 import { useUpdateStore } from './stores/update';
-import AppLayout from './components/layout/AppLayout.vue';
 import './styles/code-theme.css';
 
 const modelsStore = useModelsStore();

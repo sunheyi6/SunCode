@@ -10,12 +10,12 @@ const props = defineProps<{
   visible: boolean;
 }>();
 
-const emit = defineEmits<{
+const _emit = defineEmits<{
   confirm: [];
   deny: [];
 }>();
 
-const toolLabel = computed(() => {
+const _toolLabel = computed(() => {
   const labels: Record<string, string> = {
     bash: '终端命令',
     write: '写入文件',
@@ -25,7 +25,7 @@ const toolLabel = computed(() => {
   return labels[props.toolName] || props.toolName;
 });
 
-const toolIcon = computed(() => {
+const _toolIcon = computed(() => {
   const icons: Record<string, string> = {
     bash: '💻',
     write: '📝',

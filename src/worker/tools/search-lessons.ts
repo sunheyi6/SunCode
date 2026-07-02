@@ -1,6 +1,6 @@
-import { BaseTool, obj, p } from './types';
-import { searchLessons, loadLessonFile } from '../agent/lessons';
 import type { LessonTriggerType } from '@shared/types';
+import { loadLessonFile, searchLessons } from '../agent/lessons';
+import { BaseTool, obj, p } from './types';
 
 /**
  * search_lessons tool — searches the failure lessons library.

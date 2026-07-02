@@ -1,6 +1,6 @@
 import { readdir, stat } from 'node:fs/promises';
-import { resolve, isAbsolute, normalize, relative, join, sep } from 'node:path';
-import { BaseTool, p, obj } from './types';
+import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
+import { BaseTool, obj, p } from './types';
 
 export function createGlobTool(workingDir: string) {
   return new (class GlobTool extends BaseTool {

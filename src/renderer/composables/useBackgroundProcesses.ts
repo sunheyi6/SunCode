@@ -1,5 +1,5 @@
-import { ref } from 'vue';
 import type { BackgroundProcess } from '@shared/types';
+import { ref } from 'vue';
 import { bridge } from '../api/bridge';
 import {
   completeProcess,

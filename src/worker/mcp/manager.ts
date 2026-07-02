@@ -1,7 +1,7 @@
-import type { Tool } from '../tools/types';
 import type { McpServerConfig } from '@shared/types';
-import { createMcpClient } from './client';
+import type { Tool } from '../tools/types';
 import type { McpClient } from './client';
+import { createMcpClient } from './client';
 
 /**
  * Manages MCP server connections and tool discovery.

@@ -1,16 +1,16 @@
-import { BaseTool, type Tool } from './types';
-import { createReadTool } from './read';
-import { createWriteTool } from './write';
+import type { AppSettings } from '@shared/types';
+import { type BashToolCallbacks, type BashToolOptions, createBashTool } from './bash';
 import { createEditTool } from './edit';
-import { createBashTool, type BashToolCallbacks, type BashToolOptions } from './bash';
-import { createGrepTool } from './grep';
-import { createGlobTool } from './glob';
-import { createLsTool } from './ls';
 import { createFindTool } from './find';
+import { createGlobTool } from './glob';
+import { createGrepTool } from './grep';
+import { createLsTool } from './ls';
+import { createReadTool } from './read';
+import { createSearchLessonsTool } from './search-lessons';
+import type { Tool } from './types';
 import { createWebFetchTool } from './web-fetch';
 import { createWebSearchTool } from './web-search';
-import { createSearchLessonsTool } from './search-lessons';
-import type { AppSettings } from '@shared/types';
+import { createWriteTool } from './write';
 
 /**
  * Tool Registry manages all available tools (built-in + MCP).

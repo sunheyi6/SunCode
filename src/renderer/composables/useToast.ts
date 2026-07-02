@@ -12,7 +12,11 @@ let nextId = 0;
 const DEFAULT_DURATION = 3000;
 
 /** Show a toast notification. Returns its id for manual dismiss. */
-function showToast(message: string, type: Toast['type'] = 'info', duration = DEFAULT_DURATION): number {
+function showToast(
+  message: string,
+  type: Toast['type'] = 'info',
+  duration = DEFAULT_DURATION,
+): number {
   const id = nextId++;
   const toast: Toast = { id, message, type };
   toasts.value.push(toast);

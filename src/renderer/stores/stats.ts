@@ -1,6 +1,6 @@
+import type { TokenUsageSummary } from '@shared/types';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import type { TokenUsageSummary } from '@shared/types';
 import { bridge } from '../api/bridge';
 
 export const useStatsStore = defineStore('stats', () => {

@@ -104,8 +104,7 @@ function createCallbacks(sessionId: string) {
       post({ type: 'toolProgress', sessionId, toolCallId, output }),
     onDone: (message: import('@shared/types').Message) =>
       post({ type: 'done', sessionId, message }),
-    onError: (errorMsg: string) =>
-      post({ type: 'error', sessionId, message: errorMsg }),
+    onError: (errorMsg: string) => post({ type: 'error', sessionId, message: errorMsg }),
     onBgProcessStarted: (proc: import('@shared/types').BackgroundProcess) => {
       backgroundProcessMonitor.register(sessionId, proc);
       post({ type: 'bgProcessStarted', sessionId, process: proc });
@@ -118,10 +117,7 @@ function createCallbacks(sessionId: string) {
       post({ type: 'bgProcessPortsVerified', sessionId, pid, ports }),
     onRunEvent: (event: import('@shared/types').RunEvent) =>
       post({ type: 'runEvent', sessionId, event }),
-    onSubagentEvent: (
-      type: string,
-      data: unknown,
-    ) => {
+    onSubagentEvent: (type: string, data: unknown) => {
       const base = { sessionId, ...(data as Record<string, unknown>) };
       post({ type: type as WorkerOutMessage['type'], ...base } as WorkerOutMessage);
     },
@@ -247,9 +243,19 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
       const agent = getAgent(sid);
       if (agent) {
         agent.setMessages(msg.messages);
-        console.log('[Worker] Conversation context replaced:', msg.messages.length, 'messages', 'session=', sid.slice(-8));
+        console.log(
+          '[Worker] Conversation context replaced:',
+          msg.messages.length,
+          'messages',
+          'session=',
+          sid.slice(-8),
+        );
       } else {
-        console.warn('[Worker] setMessages for unknown session:', sid.slice(-8), '- no agent exists yet');
+        console.warn(
+          '[Worker] setMessages for unknown session:',
+          sid.slice(-8),
+          '- no agent exists yet',
+        );
       }
       break;
     }

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue';
 import type { ToolCallContent } from '@shared/types';
+import { computed, nextTick, ref, watch } from 'vue';
 import { commandSummary, parseToolArguments } from '../../utils/tool-presentation';
-import CodeBlock from '../code/CodeBlock.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -15,9 +14,9 @@ const details = computed(() =>
   props.call.result?.details?.type === 'command' ? props.call.result.details : undefined,
 );
 
-const title = computed(() => commandSummary(args.value));
+const _title = computed(() => commandSummary(args.value));
 
-const isFailed = computed(
+const _isFailed = computed(
   () =>
     props.call.status === 'error' ||
     props.call.result?.success === false ||
@@ -26,7 +25,7 @@ const isFailed = computed(
       details.value.exitCode !== 0),
 );
 
-const isRunning = computed(() => props.call.status === 'running');
+const _isRunning = computed(() => props.call.status === 'running');
 const streamingOutput = computed(() => props.call.partialOutput || '');
 
 // ── Expandable output ──
@@ -45,8 +44,12 @@ function previewLines(text: string, expanded: boolean): { text: string; hidden: 
   };
 }
 
-const stdoutPreview = computed(() => previewLines(details.value?.stdout || '', stdoutExpanded.value));
-const stderrPreview = computed(() => previewLines(details.value?.stderr || '', stderrExpanded.value));
+const _stdoutPreview = computed(() =>
+  previewLines(details.value?.stdout || '', stdoutExpanded.value),
+);
+const _stderrPreview = computed(() =>
+  previewLines(details.value?.stderr || '', stderrExpanded.value),
+);
 
 // Auto-scroll to bottom of streaming output
 watch(streamingOutput, async () => {
@@ -56,7 +59,7 @@ watch(streamingOutput, async () => {
   }
 });
 
-const exitCodeLabel = computed(() => {
+const _exitCodeLabel = computed(() => {
   if (details.value?.exitCode === null || details.value?.exitCode === undefined) return '—';
   return String(details.value.exitCode);
 });

@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useModelsStore } from '../../stores/models';
-import { useChatStore } from '../../stores/chat';
-import { getDropdownOpenState, useDropdown, type DropdownState } from '../../composables/useDropdown';
 import { bridge } from '../../api/bridge';
+import {
+  type DropdownState,
+  getDropdownOpenState,
+  useDropdown,
+} from '../../composables/useDropdown';
+import { useChatStore } from '../../stores/chat';
+import { useModelsStore } from '../../stores/models';
 
 const props = withDefaults(
   defineProps<{
@@ -24,7 +28,7 @@ const availableModels = computed(() =>
   modelsStore.recommendedModels.filter((m) => modelsStore.hasKey(m.provider)),
 );
 
-const currentModelLabel = computed(() => {
+const _currentModelLabel = computed(() => {
   const model = availableModels.value.find(
     (option) =>
       option.model === modelsStore.activeModel && option.provider === modelsStore.activeProvider,
@@ -32,7 +36,7 @@ const currentModelLabel = computed(() => {
   return model?.label ?? `${modelsStore.activeProvider}/${modelsStore.activeModel}`;
 });
 
-async function selectModel(option: { provider: string; model: string }): Promise<void> {
+async function _selectModel(option: { provider: string; model: string }): Promise<void> {
   const chatStore = useChatStore();
   const msgCount = chatStore.messages.length;
   if (msgCount > 0) {

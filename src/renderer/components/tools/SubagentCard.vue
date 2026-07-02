@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { SubagentResult, ToolCallContent } from '@shared/types';
 import { computed, nextTick, ref, watch } from 'vue';
-import InlineCallTrace from '../chat/InlineCallTrace.vue';
 import { buildSubagentInlineTrace } from '../chat/call-trace-view-model';
 
 const props = defineProps<{
@@ -17,22 +16,22 @@ const results = computed<SubagentResult[]>(() => {
 });
 
 const isRunning = computed(() => props.call.status === 'running');
-const isDone = computed(() => props.call.status === 'done');
-const isError = computed(() => props.call.status === 'error');
+const _isDone = computed(() => props.call.status === 'done');
+const _isError = computed(() => props.call.status === 'error');
 
-function toggleExpand(): void {
+function _toggleExpand(): void {
   expanded.value = !expanded.value;
 }
 
-function setOutputRef(agent: string, el: Element | null): void {
+function _setOutputRef(agent: string, el: Element | null): void {
   if (el) outputRefs.value.set(agent, el as HTMLElement);
 }
 
-function resultTrace(result: SubagentResult) {
+function _resultTrace(result: SubagentResult) {
   return buildSubagentInlineTrace(result, isRunning.value);
 }
 
-function hasResultOutput(result: SubagentResult): boolean {
+function _hasResultOutput(result: SubagentResult): boolean {
   return Boolean(result.output && result.output !== '执行中...');
 }
 

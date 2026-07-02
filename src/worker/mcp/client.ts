@@ -1,5 +1,5 @@
-import type { Tool } from '../tools/types';
 import type { McpServerConfig } from '@shared/types';
+import type { Tool } from '../tools/types';
 
 /**
  * Simple MCP client that connects to an MCP server via stdio.

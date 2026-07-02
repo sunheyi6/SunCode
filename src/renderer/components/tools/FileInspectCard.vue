@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
 import type { ToolCallContent } from '@shared/types';
+import { computed, ref } from 'vue';
 import { parseToolArguments } from '../../utils/tool-presentation';
-import CodeBlock from '../code/CodeBlock.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -10,31 +9,38 @@ const props = defineProps<{
 
 const args = computed(() => parseToolArguments(props.call.arguments));
 
-const label = computed(() => {
+const _label = computed(() => {
   switch (props.call.name) {
-    case 'read':  return '读取';
-    case 'glob':  return '查找';
-    case 'grep':  return '搜索';
-    default:      return props.call.name;
+    case 'read':
+      return '读取';
+    case 'glob':
+      return '查找';
+    case 'grep':
+      return '搜索';
+    default:
+      return props.call.name;
   }
 });
 
-const target = computed(() => {
+const _target = computed(() => {
   const fp = args.value.file_path as string;
   const pat = args.value.pattern as string;
   return fp || pat || '';
 });
 
 // Detect output language from tool + args
-const outputLang = computed(() => {
+const _outputLang = computed(() => {
   switch (props.call.name) {
     case 'read': {
       const fp = (args.value.file_path as string) || '';
       return detectLangFromPath(fp);
     }
-    case 'grep': return 'text';
-    case 'glob': return 'text';
-    default:    return undefined;
+    case 'grep':
+      return 'text';
+    case 'glob':
+      return 'text';
+    default:
+      return undefined;
   }
 });
 
@@ -42,14 +48,41 @@ function detectLangFromPath(filePath: string): string | undefined {
   const ext = filePath.split('.').pop()?.toLowerCase();
   if (!ext) return undefined;
   const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    vue: 'html', html: 'html', css: 'css', scss: 'scss', less: 'less',
-    py: 'python', rs: 'rust', go: 'go', java: 'java', c: 'c', cpp: 'cpp',
-    h: 'c', hpp: 'cpp', json: 'json', yaml: 'yaml', yml: 'yaml',
-    xml: 'xml', md: 'markdown', sh: 'bash', bash: 'bash', zsh: 'bash',
-    ps1: 'powershell', bat: 'batch', cmd: 'batch',
-    sql: 'sql', graphql: 'graphql', toml: 'toml', ini: 'ini', cfg: 'ini',
-    Dockerfile: 'dockerfile', Makefile: 'makefile',
+    ts: 'typescript',
+    tsx: 'typescript',
+    js: 'javascript',
+    jsx: 'javascript',
+    vue: 'html',
+    html: 'html',
+    css: 'css',
+    scss: 'scss',
+    less: 'less',
+    py: 'python',
+    rs: 'rust',
+    go: 'go',
+    java: 'java',
+    c: 'c',
+    cpp: 'cpp',
+    h: 'c',
+    hpp: 'cpp',
+    json: 'json',
+    yaml: 'yaml',
+    yml: 'yaml',
+    xml: 'xml',
+    md: 'markdown',
+    sh: 'bash',
+    bash: 'bash',
+    zsh: 'bash',
+    ps1: 'powershell',
+    bat: 'batch',
+    cmd: 'batch',
+    sql: 'sql',
+    graphql: 'graphql',
+    toml: 'toml',
+    ini: 'ini',
+    cfg: 'ini',
+    Dockerfile: 'dockerfile',
+    Makefile: 'makefile',
   };
   if (map[ext]) return map[ext];
   // Try the whole filename
@@ -59,19 +92,19 @@ function detectLangFromPath(filePath: string): string | undefined {
 }
 
 // Args entries (non-sensitive fields only)
-const argsEntries = computed(() => {
+const _argsEntries = computed(() => {
   const e: Array<{ key: string; value: string }> = [];
   const skip = new Set(['file_path', 'pattern', 'content', 'text', 'old_string', 'new_string']);
   for (const [k, v] of Object.entries(args.value)) {
     if (skip.has(k)) continue;
     if (v === undefined || v === null) continue;
     const s = typeof v === 'string' ? v : JSON.stringify(v);
-    e.push({ key: k, value: s.length > 100 ? s.slice(0, 97) + '...' : s });
+    e.push({ key: k, value: s.length > 100 ? `${s.slice(0, 97)}...` : s });
   }
   return e;
 });
 
-const showArgs = ref(false);
+const _showArgs = ref(false);
 
 // ── Expandable output ──
 const OUTPUT_PREVIEW_LINES = 5;
@@ -80,19 +113,19 @@ const outputText = computed(() => props.call.result?.output ?? '');
 
 const outputLines = computed(() => outputText.value.split('\n'));
 
-const outputPreview = computed(() => {
+const _outputPreview = computed(() => {
   if (outputExpanded.value || outputLines.value.length <= OUTPUT_PREVIEW_LINES) {
     return outputText.value;
   }
   return outputLines.value.slice(0, OUTPUT_PREVIEW_LINES).join('\n');
 });
 
-const outputHiddenLines = computed(() => {
+const _outputHiddenLines = computed(() => {
   if (outputLines.value.length <= OUTPUT_PREVIEW_LINES) return 0;
   return outputLines.value.length - OUTPUT_PREVIEW_LINES;
 });
 
-const isFailed = computed(
+const _isFailed = computed(
   () => props.call.status === 'error' || props.call.result?.success === false,
 );
 </script>

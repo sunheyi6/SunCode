@@ -1,20 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { useConfirmDialog } from '../../composables/useConfirmDialog';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
-import ChatPanel from '../chat/ChatPanel.vue';
-import CallTracePanel from '../chat/CallTracePanel.vue';
-import ConfirmDialog from '../chat/ConfirmDialog.vue';
-import ConversationSidebar from './ConversationSidebar.vue';
-import GitPanel from './GitPanel.vue';
-import ToastContainer from './ToastContainer.vue';
-import SettingsPanel from '../settings/SettingsPanel.vue';
-import { useConfirmDialog } from '../../composables/useConfirmDialog';
 
 const chatStore = useChatStore();
 const sessionsStore = useSessionsStore();
 
-const activeSession = computed(() =>
+const _activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
 
@@ -25,15 +18,16 @@ const isResizingTrace = ref(false);
 const showSettings = ref(false);
 const settingsSection = ref('general');
 
-function openSettingsAt(section: string): void {
+function _openSettingsAt(section: string): void {
   settingsSection.value = section;
   showSettings.value = true;
 }
 
 // Tool confirmation dialog (confirm_changes permission mode)
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const { confirmState, handleConfirm, handleDeny } = useConfirmDialog();
 
-function startResize(e: MouseEvent): void {
+function _startResize(e: MouseEvent): void {
   isResizing.value = true;
   const startX = e.clientX;
   const startWidth = sidebarWidth.value;
@@ -53,7 +47,7 @@ function startResize(e: MouseEvent): void {
   document.addEventListener('mouseup', onUp);
 }
 
-function startTraceResize(e: MouseEvent): void {
+function _startTraceResize(e: MouseEvent): void {
   isResizingTrace.value = true;
   const startX = e.clientX;
   const startWidth = tracePanelWidth.value;
@@ -74,10 +68,10 @@ function startTraceResize(e: MouseEvent): void {
 }
 
 /** System prompt from the last assistant message. */
-const traceSystemPrompt = computed(() => {
+const _traceSystemPrompt = computed(() => {
   const msgs = chatStore.messages;
   for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i]?.systemPrompt) return msgs[i]!.systemPrompt!;
+    if (msgs[i]?.systemPrompt) return msgs[i].systemPrompt;
   }
   return '';
 });

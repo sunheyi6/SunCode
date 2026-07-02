@@ -29,10 +29,7 @@ export function latestProcess(processes: BackgroundProcess[]): BackgroundProcess
   );
 }
 
-export function markProcessKilled(
-  processes: BackgroundProcess[],
-  pid: number,
-): void {
+export function markProcessKilled(processes: BackgroundProcess[], pid: number): void {
   const process = processes.find((item) => item.pid === pid);
   if (!process) return;
   process.killed = true;
@@ -40,10 +37,7 @@ export function markProcessKilled(
 }
 
 /** Remove a process from the array by PID (called after OS confirms kill) */
-export function removeProcess(
-  processes: BackgroundProcess[],
-  pid: number,
-): void {
+export function removeProcess(processes: BackgroundProcess[], pid: number): void {
   const index = processes.findIndex((item) => item.pid === pid);
   if (index >= 0) processes.splice(index, 1);
 }

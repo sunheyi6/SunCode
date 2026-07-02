@@ -1,25 +1,26 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
 import type { AppSettings } from '@shared/types';
+import { computed, onMounted, ref } from 'vue';
 import { bridge } from '../../api/bridge';
 import { useSettingsStore } from '../../stores/settings';
 import { useStatsStore } from '../../stores/stats';
 import { useUpdateStore } from '../../stores/update';
-import ModelSelector from './ModelSelector.vue';
-import TokenUsage from './TokenUsage.vue';
 
-const emit = defineEmits<{
+const _emit = defineEmits<{
   close: [];
 }>();
 
-const props = withDefaults(defineProps<{
-  initialSection?: string;
-}>(), {
-  initialSection: 'general',
-});
+const props = withDefaults(
+  defineProps<{
+    initialSection?: string;
+  }>(),
+  {
+    initialSection: 'general',
+  },
+);
 
 const settingsStore = useSettingsStore();
-const updateStore = useUpdateStore();
+const _updateStore = useUpdateStore();
 const statsStore = useStatsStore();
 const appVersion = ref('');
 const logPath = ref('');
@@ -37,9 +38,11 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'about', label: '关于', icon: 'ⓘ' },
 ];
 
-const activeTitle = computed(() => navItems.find((item) => item.key === activeSection.value)?.label ?? '设置');
+const _activeTitle = computed(
+  () => navItems.find((item) => item.key === activeSection.value)?.label ?? '设置',
+);
 
-const thinkingLevels = [
+const _thinkingLevels = [
   { value: 'minimal', label: '最小', desc: '最快，不保留额外推理预算' },
   { value: 'low', label: '低', desc: '轻量思考，适合日常任务' },
   { value: 'medium', label: '中等', desc: '质量和速度的平衡' },
@@ -47,14 +50,14 @@ const thinkingLevels = [
   { value: 'xhigh', label: '最大', desc: '优先质量，速度和费用更高' },
 ];
 
-const permissionModes = [
+const _permissionModes = [
   { value: 'plan' as const, label: '计划模式', desc: '仅规划，不修改文件' },
   { value: 'confirm_changes' as const, label: '变更前确认', desc: '修改前需要用户确认' },
   { value: 'auto_edit' as const, label: '自动编辑', desc: '自动编辑文件，无需逐次确认' },
   { value: 'full_access' as const, label: '完全访问', desc: '允许自由读写和执行命令' },
 ];
 
-const enabledMcpCount = computed(
+const _enabledMcpCount = computed(
   () => settingsStore.settings.mcpServers.filter((server) => server.enabled).length,
 );
 
@@ -74,67 +77,67 @@ onMounted(async () => {
   void statsStore.loadTokenUsage();
 });
 
-function openLogFile(): void {
+function _openLogFile(): void {
   if (logPath.value) {
     bridge.showItemInFolder(logPath.value);
   }
 }
 
-function updateThinkingLevel(event: Event): void {
+function _updateThinkingLevel(event: Event): void {
   const level = (event.target as HTMLSelectElement).value as AppSettings['thinkingLevel'];
   settingsStore.update({ thinkingLevel: level });
 }
 
-function updateMaxTurns(event: Event): void {
+function _updateMaxTurns(event: Event): void {
   const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
   if (Number.isFinite(value) && value > 0 && value <= 200) {
     settingsStore.update({ maxTurns: value });
   }
 }
 
-function updateGoalMaxTurns(event: Event): void {
+function _updateGoalMaxTurns(event: Event): void {
   const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
   if (Number.isFinite(value) && value > 0 && value <= 50) {
     settingsStore.update({ goalMaxTurns: value });
   }
 }
 
-function updateCompactThreshold(event: Event): void {
+function _updateCompactThreshold(event: Event): void {
   const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
   if (Number.isFinite(value) && value >= 50 && value <= 95) {
     settingsStore.update({ compactThreshold: value / 100 });
   }
 }
 
-function updateMaxLessons(event: Event): void {
+function _updateMaxLessons(event: Event): void {
   const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
   if (Number.isFinite(value) && value >= 20 && value <= 1000) {
     settingsStore.update({ maxLessons: value });
   }
 }
 
-function updatePermissionMode(event: Event): void {
+function _updatePermissionMode(event: Event): void {
   const mode = (event.target as HTMLSelectElement).value as AppSettings['permissionMode'];
   settingsStore.update({ permissionMode: mode });
 }
 
-function updateWindowsShell(event: Event): void {
+function _updateWindowsShell(event: Event): void {
   const windowsShell = (event.target as HTMLSelectElement).value as AppSettings['windowsShell'];
   settingsStore.update({ windowsShell });
 }
 
-function updateFontSize(event: Event): void {
+function _updateFontSize(event: Event): void {
   const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
   if (Number.isFinite(value) && value >= 12 && value <= 20) {
     settingsStore.setFontSize(value);
   }
 }
 
-function updateAutoCompact(event: Event): void {
+function _updateAutoCompact(event: Event): void {
   settingsStore.update({ autoCompact: (event.target as HTMLInputElement).checked });
 }
 
-function themeLabel(theme: AppSettings['theme']): string {
+function _themeLabel(theme: AppSettings['theme']): string {
   if (theme === 'system') return '系统';
   if (theme === 'light') return '浅色';
   return '深色';

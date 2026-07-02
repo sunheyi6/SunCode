@@ -11,8 +11,6 @@
  * - groq, mistral, together, fireworks, cerebras, openrouter, and many more
  */
 
-import type { AppSettings } from '@shared/types';
-
 export interface ModelInfo {
   id: string;
   name: string;
@@ -27,7 +25,7 @@ export interface ModelInfo {
  * Create a model registry that wraps pi-ai.
  */
 export function createModelRegistry() {
-  let modelsCache: ModelInfo[] | null = null;
+  const _modelsCache: ModelInfo[] | null = null;
   let providersCache: string[] | null = null;
 
   return {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { marked } from 'marked';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
   text: string;
@@ -44,14 +44,35 @@ function renderMarkdown(text: string): string {
   const html = marked.parse(text, { async: false }) as string;
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      'p', 'br', 'strong', 'em', 'u', 's', 'a',
-      'code', 'pre',
-      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'ul', 'ol', 'li',
+      'p',
+      'br',
+      'strong',
+      'em',
+      'u',
+      's',
+      'a',
+      'code',
+      'pre',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'ul',
+      'ol',
+      'li',
       'blockquote',
-      'table', 'thead', 'tbody', 'tr', 'th', 'td',
-      'span', 'div',
-      'details', 'summary',
+      'table',
+      'thead',
+      'tbody',
+      'tr',
+      'th',
+      'td',
+      'span',
+      'div',
+      'details',
+      'summary',
     ],
     ALLOWED_ATTR: ['href', 'target', 'class', 'rel'],
   });
@@ -61,16 +82,13 @@ function renderMarkdown(text: string): string {
  *  Preserves newlines and escapes HTML, but doesn't parse markdown syntax. */
 function escapeAndLinkify(text: string): string {
   // Escape HTML entities
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   // Preserve line breaks
   html = html.replace(/\n/g, '<br>');
   return html;
 }
 
-const renderedHtml = computed(() => {
+const _renderedHtml = computed(() => {
   if (!props.text) return '';
   // During streaming: cheap raw text (avoids O(n²) markdown re-parse)
   if (props.isStreaming) {
@@ -80,7 +98,7 @@ const renderedHtml = computed(() => {
   return finalHtml.value || escapeAndLinkify(props.text);
 });
 
-const containerClass = computed(() => ({
+const _containerClass = computed(() => ({
   'streaming-text': true,
   'is-streaming': props.isStreaming,
 }));
