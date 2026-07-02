@@ -75,12 +75,17 @@ export const useSessionsStore = defineStore('sessions', () => {
   function prewarmRemaining(maxMessages: number): void {
     const remaining = sortedSessions.value.slice(1);
     for (const session of remaining) {
-      bridge.loadSession(session.id, maxMessages).then((messages) => {
-        sessionMessagesCache.set(session.id, messages);
-        console.log(`[Sessions] Prewarmed session id=${session.id.slice(-8)} msgs=${messages.length}`);
-      }).catch(() => {
-        // Skip unreadable sessions
-      });
+      bridge
+        .loadSession(session.id, maxMessages)
+        .then((messages) => {
+          sessionMessagesCache.set(session.id, messages);
+          console.log(
+            `[Sessions] Prewarmed session id=${session.id.slice(-8)} msgs=${messages.length}`,
+          );
+        })
+        .catch(() => {
+          // Skip unreadable sessions
+        });
     }
   }
 
