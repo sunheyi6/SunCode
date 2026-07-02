@@ -4,6 +4,7 @@ import { useModelsStore } from './stores/models';
 import { useSettingsStore } from './stores/settings';
 import { useUpdateStore } from './stores/update';
 import './styles/code-theme.css';
+import AppLayout from './components/layout/AppLayout.vue';
 
 const modelsStore = useModelsStore();
 const settingsStore = useSettingsStore();

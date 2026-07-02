@@ -29,13 +29,13 @@ const thinkingLevels = [
   { value: 'xhigh' as const, label: '最高' },
 ];
 
-const _currentThinking = computed(
+const currentThinking = computed(
   () =>
     thinkingLevels.find((level) => level.value === settingsStore.settings.thinkingLevel) ??
     thinkingLevels[2],
 );
 
-function _selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
+function selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
   settingsStore.update({ thinkingLevel: level });
   dropdown.value.close();
 }

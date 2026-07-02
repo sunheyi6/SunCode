@@ -22,7 +22,7 @@ const showFullSystemPrompt = ref(false);
 const OUTPUT_PREVIEW_LINES = 5;
 const expandedOutputs = ref(new Set<string>());
 
-function _toggleOutput(toolCallId: string): void {
+function toggleOutput(toolCallId: string): void {
   const s = expandedOutputs.value;
   if (s.has(toolCallId)) {
     s.delete(toolCallId);
@@ -33,7 +33,7 @@ function _toggleOutput(toolCallId: string): void {
   expandedOutputs.value = new Set(s);
 }
 
-function _outputPreview(text: string, toolCallId: string): { text: string; hidden: number } {
+function outputPreview(text: string, toolCallId: string): { text: string; hidden: number } {
   const lines = text.split('\n');
   if (expandedOutputs.value.has(toolCallId) || lines.length <= OUTPUT_PREVIEW_LINES) {
     return { text, hidden: 0 };
@@ -172,7 +172,7 @@ function toolStatusLabel(tc: ToolCallContent): string {
   return '待执行';
 }
 
-function _detectOutputLang(tc: ToolCallContent): string | undefined {
+function detectOutputLang(tc: ToolCallContent): string | undefined {
   if (tc.name === 'bash') return 'bash';
   if (tc.name === 'web-search' || tc.name === 'web-fetch') return 'json';
   try {

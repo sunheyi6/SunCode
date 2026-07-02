@@ -39,6 +39,10 @@ export const useUpdateStore = defineStore('update', () => {
     bridge.checkForUpdates();
   }
 
+  function installUpdate(): void {
+    bridge.installUpdate();
+  }
+
   function dismiss(): void {
     if (status.value.version) {
       bridge.skipVersion(status.value.version);
@@ -52,6 +56,7 @@ export const useUpdateStore = defineStore('update', () => {
     cleanup,
     startUpdate,
     checkForUpdates,
+    installUpdate,
     dismiss,
   };
 });

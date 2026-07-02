@@ -7,12 +7,12 @@ const props = defineProps<{
   filename?: string;
 }>();
 
-const _codeRef = ref<HTMLElement | null>(null);
-let _editorInstance: { destroy: () => void } | null = null;
+const codeRef = ref<HTMLElement | null>(null);
+let editorInstance: { destroy: () => void } | null = null;
 
 const copied = ref(false);
 
-async function _copyCode(): Promise<void> {
+async function copyCode(): Promise<void> {
   try {
     await navigator.clipboard.writeText(props.code);
     copied.value = true;

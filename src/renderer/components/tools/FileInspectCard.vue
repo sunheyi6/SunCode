@@ -2,6 +2,7 @@
 import type { ToolCallContent } from '@shared/types';
 import { computed, ref } from 'vue';
 import { parseToolArguments } from '../../utils/tool-presentation';
+import CodeBlock from '../code/CodeBlock.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -9,7 +10,7 @@ const props = defineProps<{
 
 const args = computed(() => parseToolArguments(props.call.arguments));
 
-const _label = computed(() => {
+const label = computed(() => {
   switch (props.call.name) {
     case 'read':
       return '读取';
@@ -22,14 +23,14 @@ const _label = computed(() => {
   }
 });
 
-const _target = computed(() => {
+const target = computed(() => {
   const fp = args.value.file_path as string;
   const pat = args.value.pattern as string;
   return fp || pat || '';
 });
 
 // Detect output language from tool + args
-const _outputLang = computed(() => {
+const outputLang = computed(() => {
   switch (props.call.name) {
     case 'read': {
       const fp = (args.value.file_path as string) || '';
@@ -92,7 +93,7 @@ function detectLangFromPath(filePath: string): string | undefined {
 }
 
 // Args entries (non-sensitive fields only)
-const _argsEntries = computed(() => {
+const argsEntries = computed(() => {
   const e: Array<{ key: string; value: string }> = [];
   const skip = new Set(['file_path', 'pattern', 'content', 'text', 'old_string', 'new_string']);
   for (const [k, v] of Object.entries(args.value)) {
@@ -104,7 +105,7 @@ const _argsEntries = computed(() => {
   return e;
 });
 
-const _showArgs = ref(false);
+const showArgs = ref(false);
 
 // ── Expandable output ──
 const OUTPUT_PREVIEW_LINES = 5;
@@ -113,19 +114,19 @@ const outputText = computed(() => props.call.result?.output ?? '');
 
 const outputLines = computed(() => outputText.value.split('\n'));
 
-const _outputPreview = computed(() => {
+const outputPreview = computed(() => {
   if (outputExpanded.value || outputLines.value.length <= OUTPUT_PREVIEW_LINES) {
     return outputText.value;
   }
   return outputLines.value.slice(0, OUTPUT_PREVIEW_LINES).join('\n');
 });
 
-const _outputHiddenLines = computed(() => {
+const outputHiddenLines = computed(() => {
   if (outputLines.value.length <= OUTPUT_PREVIEW_LINES) return 0;
   return outputLines.value.length - OUTPUT_PREVIEW_LINES;
 });
 
-const _isFailed = computed(
+const isFailed = computed(
   () => props.call.status === 'error' || props.call.result?.success === false,
 );
 </script>

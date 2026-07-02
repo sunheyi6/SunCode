@@ -4,9 +4,9 @@ import { useUpdateStore } from '../../stores/update';
 
 const store = useUpdateStore();
 
-const _progressPercent = computed(() => Math.round(store.status.downloadProgress ?? 0));
+const progressPercent = computed(() => Math.round(store.status.downloadProgress ?? 0));
 
-const _speedLabel = computed(() => {
+const speedLabel = computed(() => {
   const bps = store.status.downloadBytesPerSecond;
   if (!bps || bps <= 0) return '';
   if (bps > 1024 * 1024) return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
@@ -18,7 +18,7 @@ const _speedLabel = computed(() => {
 <template>
   <Transition name="slide-down">
     <div
-      v-if="store.showNotification && store.status.state !== 'idle' && store.status.state !== 'no-update'"
+      v-if="store.status.state !== 'idle' && store.status.state !== 'no-update'"
       class="update-banner"
       :class="`state-${store.status.state}`"
     >
@@ -34,7 +34,7 @@ const _speedLabel = computed(() => {
         <span class="banner-text">
           新版本 <strong>{{ store.status.version }}</strong> 可用
         </span>
-        <button class="btn-primary" @click="store.downloadUpdate()">下载更新</button>
+        <button class="btn-primary" @click="store.startUpdate()">下载更新</button>
         <button class="btn-dismiss" title="跳过此版本" @click="store.dismiss()">&times;</button>
       </div>
 

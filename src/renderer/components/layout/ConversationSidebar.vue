@@ -8,14 +8,14 @@ import { useSettingsStore } from '../../stores/settings';
 import { useUpdateStore } from '../../stores/update';
 import { getVisibleSessionGroups } from './session-list';
 
-const _emit = defineEmits<{
+const emit = defineEmits<{
   openSettings: [section: string];
 }>();
 
 const sessionsStore = useSessionsStore();
-const _chatStore = useChatStore();
-const _updateStore = useUpdateStore();
-const _settingsStore = useSettingsStore();
+const chatStore = useChatStore();
+const updateStore = useUpdateStore();
+const settingsStore = useSettingsStore();
 const searchQuery = ref('');
 const searchOpen = ref(false);
 const searchInputRef = ref<HTMLInputElement>();
@@ -33,7 +33,7 @@ const selectedIds = ref<Set<string>>(new Set());
 const collapsedGroups = ref<Set<string>>(new Set());
 const expandedSessionGroups = ref<Set<string>>(new Set());
 
-function _toggleGroup(path: string) {
+function toggleGroup(path: string) {
   const next = new Set(collapsedGroups.value);
   if (next.has(path)) {
     next.delete(path);
@@ -43,7 +43,7 @@ function _toggleGroup(path: string) {
   collapsedGroups.value = next;
 }
 
-function _showAllSessions(path: string): void {
+function showAllSessions(path: string): void {
   const next = new Set(expandedSessionGroups.value);
   next.add(path);
   expandedSessionGroups.value = next;
@@ -63,21 +63,21 @@ onMounted(() => {
   });
 });
 
-async function _handleCreateSession(): Promise<void> {
+async function handleCreateSession(): Promise<void> {
   const dir = sessionsStore.sessions.find(
     (s) => s.id === sessionsStore.activeSessionId,
   )?.workingDirectory;
   await sessionsStore.createSession(dir);
 }
 
-async function _handleCreateSessionWithNewFolder(): Promise<void> {
+async function handleCreateSessionWithNewFolder(): Promise<void> {
   const dir = await bridge.selectDirectory();
   if (dir) {
     await sessionsStore.createSession(dir);
   }
 }
 
-function _projectName(path: string): string {
+function projectName(path: string): string {
   const segments = path.split(/[\\/]/).filter(Boolean);
   return segments[segments.length - 1] || path || '未命名项目';
 }
@@ -115,7 +115,7 @@ const visibleGroupedSessions = computed(() =>
   getVisibleSessionGroups(groupedSessions.value, expandedSessionGroups.value),
 );
 
-const _activeGroupPath = computed(
+const activeGroupPath = computed(
   () =>
     sessionsStore.sessions.find((session) => session.id === sessionsStore.activeSessionId)
       ?.workingDirectory ?? '',
@@ -137,7 +137,7 @@ const allSelected = computed(() => {
   return ids.every((id) => selectedIds.value.has(id));
 });
 
-function _toggleSelectAll(): void {
+function toggleSelectAll(): void {
   if (allSelected.value) {
     // Deselect all displayed
     for (const id of allDisplayedIds.value) {
@@ -153,7 +153,7 @@ function _toggleSelectAll(): void {
   selectedIds.value = new Set(selectedIds.value);
 }
 
-function _toggleSelect(id: string): void {
+function toggleSelect(id: string): void {
   const next = new Set(selectedIds.value);
   if (next.has(id)) {
     next.delete(id);
@@ -163,7 +163,7 @@ function _toggleSelect(id: string): void {
   selectedIds.value = next;
 }
 
-function _enterSelectMode(): void {
+function enterSelectMode(): void {
   selectMode.value = true;
   selectedIds.value = new Set();
 }
@@ -173,28 +173,28 @@ function exitSelectMode(): void {
   selectedIds.value = new Set();
 }
 
-async function _deleteSingle(id: string): Promise<void> {
+async function deleteSingle(id: string): Promise<void> {
   await sessionsStore.deleteSession(id);
 }
 
-async function _deleteSelected(): Promise<void> {
+async function deleteSelected(): Promise<void> {
   if (selectedIds.value.size === 0) return;
   await sessionsStore.deleteSessions([...selectedIds.value]);
   exitSelectMode();
 }
 
-async function _createSessionInGroup(path: string): Promise<void> {
+async function createSessionInGroup(path: string): Promise<void> {
   await sessionsStore.createSession(path);
 }
 
-function _groupTone(path: string): string {
+function groupTone(path: string): string {
   const tones = ['yellow', 'mint', 'blue', 'violet', 'rose'];
   let hash = 0;
   for (const ch of path) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return tones[hash % tones.length] ?? 'yellow';
 }
 
-function _formatTime(value: string): string {
+function formatTime(value: string): string {
   const date = new Date(value);
   const today = new Date();
   if (date.toDateString() === today.toDateString()) {

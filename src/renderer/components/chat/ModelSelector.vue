@@ -28,7 +28,7 @@ const availableModels = computed(() =>
   modelsStore.recommendedModels.filter((m) => modelsStore.hasKey(m.provider)),
 );
 
-const _currentModelLabel = computed(() => {
+const currentModelLabel = computed(() => {
   const model = availableModels.value.find(
     (option) =>
       option.model === modelsStore.activeModel && option.provider === modelsStore.activeProvider,
@@ -36,7 +36,7 @@ const _currentModelLabel = computed(() => {
   return model?.label ?? `${modelsStore.activeProvider}/${modelsStore.activeModel}`;
 });
 
-async function _selectModel(option: { provider: string; model: string }): Promise<void> {
+async function selectModel(option: { provider: string; model: string }): Promise<void> {
   const chatStore = useChatStore();
   const msgCount = chatStore.messages.length;
   if (msgCount > 0) {

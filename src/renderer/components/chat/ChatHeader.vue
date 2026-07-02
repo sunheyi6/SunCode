@@ -17,7 +17,7 @@ const branchDropdown = ref<HTMLElement | null>(null);
 
 const { processes: bgProcesses } = useBackgroundProcesses();
 
-const _runningBgCount = computed(
+const runningBgCount = computed(
   () => bgProcesses.value.filter((p) => p.status === 'running').length,
 );
 
@@ -154,8 +154,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="header-actions">
-      <span v-if="activeSession && _runningBgCount > 0" class="header-bg" title="后台运行中">
-        ↻ {{ _runningBgCount }} 个后台
+      <span v-if="activeSession && runningBgCount > 0" class="header-bg" title="后台运行中">
+        ↻ {{ runningBgCount }} 个后台
       </span>
 
       <div

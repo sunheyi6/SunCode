@@ -9,9 +9,9 @@ const props = defineProps<{
 
 const totalCount = computed(() => props.taskPlan.steps.length);
 const doneCount = computed(() => props.taskPlan.steps.filter((s) => s.status === 'done').length);
-const _allDone = computed(() => doneCount.value === totalCount.value);
+const allDone = computed(() => doneCount.value === totalCount.value);
 
-function _stepIcon(status: string): string {
+function stepIcon(status: string): string {
   if (status === 'done') return '✓';
   if (status === 'in_progress') return '◉';
   return '○';

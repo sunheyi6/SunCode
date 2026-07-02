@@ -43,25 +43,25 @@ const displayModels = computed(() => {
   );
 });
 
-const _currentModel = computed(() => ({
+const currentModel = computed(() => ({
   provider: modelsStore.activeProvider,
   model: modelsStore.activeModel,
   label: modelsStore.getCurrentLabel(),
 }));
 
-const _otherModels = computed(() =>
+const otherModels = computed(() =>
   displayModels.value.filter(
     (model) =>
       model.provider !== modelsStore.activeProvider || model.model !== modelsStore.activeModel,
   ),
 );
 
-async function _selectProvider(provider: string): Promise<void> {
+async function selectProvider(provider: string): Promise<void> {
   selectedProvider.value = provider;
   await modelsStore.loadModels(provider);
 }
 
-function _selectModel(provider: string, model: string): void {
+function selectModel(provider: string, model: string): void {
   // 如果该 provider 没有配置 Key，弹出内联输入框
   if (!modelsStore.hasKey(provider)) {
     openKeyInput(provider, model);
@@ -78,7 +78,7 @@ function openKeyInput(provider: string, model?: string): void {
   pendingModel.value = model ? { provider, model } : null;
 }
 
-async function _saveKey(): Promise<void> {
+async function saveKey(): Promise<void> {
   const provider = keyInputProvider.value;
   const key = keyInputValue.value.trim();
   if (!key || !provider) return;
@@ -122,22 +122,22 @@ async function _saveKey(): Promise<void> {
   }
 }
 
-function _cancelKeyInput(): void {
+function cancelKeyInput(): void {
   keyInputProvider.value = '';
   keyInputValue.value = '';
   keyInputError.value = '';
   pendingModel.value = null;
 }
 
-function _isActive(provider: string, model: string): boolean {
+function isActive(provider: string, model: string): boolean {
   return provider === modelsStore.activeProvider && model === modelsStore.activeModel;
 }
 
-function _isLoading(provider: string): boolean {
+function isLoading(provider: string): boolean {
   return modelsStore.loadingProviders.has(provider);
 }
 
-function _providerLabel(id: string): string {
+function providerLabel(id: string): string {
   const map: Record<string, string> = {
     anthropic: 'Anthropic',
     openai: 'OpenAI',

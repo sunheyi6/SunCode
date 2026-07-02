@@ -39,7 +39,7 @@ const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
 
-const _workspaceName = computed(() => {
+const workspaceName = computed(() => {
   const dir = activeSession.value?.workingDirectory;
   if (!dir) return '未选择文件夹';
   const segments = dir.split(/[\\/]/).filter(Boolean);
@@ -48,7 +48,7 @@ const _workspaceName = computed(() => {
 
 const workspacePath = computed(() => activeSession.value?.workingDirectory || '');
 
-const _gitBranch = computed(() => (props.gitInfo.isRepo ? props.gitInfo.branch : null));
+const gitBranch = computed(() => (props.gitInfo.isRepo ? props.gitInfo.branch : null));
 
 const branches = ref<GitBranch[]>([]);
 const isLoadingBranches = ref(false);
@@ -69,7 +69,7 @@ async function loadBranches(): Promise<void> {
   }
 }
 
-async function _switchBranch(branchName: string): Promise<void> {
+async function switchBranch(branchName: string): Promise<void> {
   const dir = workspacePath.value;
   if (!dir) return;
   branchDropdown.value.close();
@@ -86,7 +86,7 @@ async function _switchBranch(branchName: string): Promise<void> {
   }
 }
 
-function _toggleBranch(): void {
+function toggleBranch(): void {
   if (isBranchOpen.value) {
     branchDropdown.value.close();
   } else {
@@ -107,7 +107,7 @@ watch(
   },
 );
 
-const _recentFolders = computed(() => {
+const recentFolders = computed(() => {
   const seen = new Map<string, { path: string; sessionId: string; updated: number }>();
   for (const s of sessionsStore.sessions) {
     const dir = s.workingDirectory;
@@ -123,7 +123,7 @@ const _recentFolders = computed(() => {
     .slice(0, 20);
 });
 
-async function _selectFolder() {
+async function selectFolder() {
   dropdown.value.close();
   const dir = await bridge.selectDirectory();
   if (dir) {
@@ -131,7 +131,7 @@ async function _selectFolder() {
   }
 }
 
-function _switchToFolder(item: { path: string; sessionId: string }) {
+function switchToFolder(item: { path: string; sessionId: string }) {
   dropdown.value.close();
   const session = sessionsStore.sessions.find((s) => s.workingDirectory === item.path);
   if (session && session.id !== sessionsStore.activeSessionId) {

@@ -11,19 +11,19 @@ const props = defineProps<{
 const inspectCalls = computed(() =>
   props.calls.filter((c) => c.name === 'read' || c.name === 'glob' || c.name === 'grep'),
 );
-const _editCalls = computed(() =>
+const editCalls = computed(() =>
   props.calls.filter((c) => c.name === 'edit' || c.name === 'write'),
 );
-const _bashCalls = computed(() => props.calls.filter((c) => c.name === 'bash'));
-const _subagentCalls = computed(() => props.calls.filter((c) => c.name === 'subagent'));
-const _otherCalls = computed(() =>
+const bashCalls = computed(() => props.calls.filter((c) => c.name === 'bash'));
+const subagentCalls = computed(() => props.calls.filter((c) => c.name === 'subagent'));
+const otherCalls = computed(() =>
   props.calls.filter(
     (c) => !['read', 'glob', 'grep', 'edit', 'write', 'bash', 'subagent'].includes(c.name),
   ),
 );
 
 // -- Inspect merge --
-const _inspectLabel = computed(() => {
+const inspectLabel = computed(() => {
   const names = new Set(inspectCalls.value.map((c) => c.name));
   if (names.size === 1) {
     const n = inspectCalls.value[0]?.name;
@@ -34,7 +34,7 @@ const _inspectLabel = computed(() => {
   return '查看';
 });
 
-const _inspectTarget = computed(() => {
+const inspectTarget = computed(() => {
   const files = inspectCalls.value.map((c) => {
     const args = parseToolArguments(c.arguments);
     return (args.file_path as string) || (args.pattern as string) || '';
@@ -43,7 +43,7 @@ const _inspectTarget = computed(() => {
   return latest.map((f) => f.split('/').pop() || f.split('\\').pop() || f).join(', ');
 });
 
-const _inspectStatus = computed(() => {
+const inspectStatus = computed(() => {
   const running = inspectCalls.value.some((c) => c.status === 'running');
   if (running) return '读取中...';
   const failed = inspectCalls.value.filter(
@@ -54,7 +54,7 @@ const _inspectStatus = computed(() => {
 });
 
 // -- Per-call helpers --
-function _callTarget(call: ToolCallContent): string {
+function callTarget(call: ToolCallContent): string {
   const args = parseToolArguments(call.arguments);
   const fp = (args.file_path as string) || '';
   if (fp) {
@@ -65,7 +65,7 @@ function _callTarget(call: ToolCallContent): string {
   return cmd.length > 50 ? `${cmd.slice(0, 47)}...` : cmd;
 }
 
-function _callLabel(name: string): string {
+function callLabel(name: string): string {
   if (name === 'edit') return '编辑';
   if (name === 'write') return '写入';
   if (name === 'bash') return '运行';
@@ -73,13 +73,13 @@ function _callLabel(name: string): string {
   return name;
 }
 
-function _callStatusClass(call: ToolCallContent): string {
+function callStatusClass(call: ToolCallContent): string {
   if (call.status === 'running') return 'status-running';
   if (call.status === 'error' || call.result?.success === false) return 'status-failed';
   return 'status-done';
 }
 
-function _resultPreview(call: ToolCallContent): string | null {
+function resultPreview(call: ToolCallContent): string | null {
   if (!call.result || call.status === 'running') return null;
   // Bash: show stdout tail
   if (call.name === 'bash' && call.result.details?.type === 'command') {

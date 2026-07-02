@@ -10,7 +10,7 @@ const animateReady = ref(false);
 // Use cached stats from the store; if the user opens this tab before the
 // preload finishes, trigger a load now. This avoids the blank -> data flash.
 const stats = computed<TokenUsageSummary | null>(() => statsStore.tokenUsage);
-const _loading = computed(() => statsStore.tokenUsageLoading && !statsStore.hasTokenUsage);
+const loading = computed(() => statsStore.tokenUsageLoading && !statsStore.hasTokenUsage);
 
 onMounted(async () => {
   if (!statsStore.tokenUsageLoaded) {
@@ -54,28 +54,28 @@ const chartMax = computed(() => {
 });
 
 // Rough cost estimate: GPT-4 level pricing ~ $2.5/1M input, $10/1M output
-const _estimatedCost = computed(() => {
+const estimatedCost = computed(() => {
   if (!stats.value) return '0.00';
   const { input, output } = stats.value.totals;
   return ((input / 1_000_000) * 2.5 + (output / 1_000_000) * 10).toFixed(2);
 });
 
-function _barHeight(value: number): string {
+function barHeight(value: number): string {
   return `${Math.max(2, (value / chartMax.value) * 100)}%`;
 }
 
-function _modelBarWidth(value: number, models: ModelStats[]): string {
+function modelBarWidth(value: number, models: ModelStats[]): string {
   const max = Math.max(1, ...models.map((m) => m.total));
   return `${Math.max(2, (value / max) * 100)}%`;
 }
 
-function _formatTokens(n: number): string {
+function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return String(n);
 }
 
-function _formatDateLabel(date: string): string {
+function formatDateLabel(date: string): string {
   const d = new Date(date);
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }

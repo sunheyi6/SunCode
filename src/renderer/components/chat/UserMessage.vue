@@ -8,14 +8,14 @@ const props = defineProps<{
 
 const copied = ref(false);
 
-const _timeLabel = computed(() => {
+const timeLabel = computed(() => {
   const d = new Date(props.message.timestamp);
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${hh}:${mm}`;
 });
 
-async function _copyContent(text: string) {
+async function copyContent(text: string) {
   try {
     await navigator.clipboard.writeText(text);
     copied.value = true;

@@ -4,7 +4,7 @@ import { useToast } from '../../composables/useToast';
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const { toasts, dismissToast } = useToast();
 
-function _iconFor(type: 'info' | 'success' | 'warning' | 'error'): string {
+function iconFor(type: 'info' | 'success' | 'warning' | 'error'): string {
   switch (type) {
     case 'success':
       return '✓';

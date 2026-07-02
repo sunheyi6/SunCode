@@ -49,8 +49,8 @@ function getWindowChromeColors(): { background: string; foreground: string } {
 function createMainWindow(): BrowserWindow {
   const chromeColors = getWindowChromeColors();
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: 1200,
+    height: 750,
     minWidth: 900,
     minHeight: 600,
     title: 'SunCode',

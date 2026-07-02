@@ -5,7 +5,11 @@ import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses
 import { useToast } from '../../composables/useToast';
 import { useChatStore } from '../../stores/chat';
 import { useSettingsStore } from '../../stores/settings';
+import ChatHeader from './ChatHeader.vue';
+import ChatInput from './ChatInput.vue';
 import { getFantasyWelcomeMessage } from './chat-panel';
+import MessageList from './MessageList.vue';
+import PendingPromptQueue from './PendingPromptQueue.vue';
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const { send, abort, interruptAndSend, isStreaming } = useAgent();
@@ -14,10 +18,10 @@ const settingsStore = useSettingsStore();
 const { killAll: killAllBgProcesses } = useBackgroundProcesses();
 const { showToast } = useToast();
 
-const _hasMessages = computed(() => chatStore.messages.length > 0);
-const _welcomeMessage = computed(() => getFantasyWelcomeMessage());
+const hasMessages = computed(() => chatStore.messages.length > 0);
+const welcomeMessage = computed(() => getFantasyWelcomeMessage());
 
-const _chatZoom = computed(() => settingsStore.settings.fontSize / 14);
+const chatZoom = computed(() => settingsStore.settings.fontSize / 14);
 
 // Auto-dismiss model switch notice after 5 seconds
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -34,11 +38,11 @@ watch(
   },
 );
 
-function _handleSend(text: string): void {
+function handleSend(text: string): void {
   send(text);
 }
 
-function _handleStop(): void {
+function handleStop(): void {
   abort();
   const killed = killAllBgProcesses();
   if (killed > 0) {

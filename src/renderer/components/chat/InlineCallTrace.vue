@@ -4,6 +4,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { commandSummary, parseToolArguments } from '../../utils/tool-presentation';
 import type { UiLanguage } from '../../utils/ui-language';
 import { buildSubagentInlineTrace, type InlineCallTraceEntry } from './call-trace-view-model';
+import StreamingText from './StreamingText.vue';
 
 const INLINE_TEXT_LIMIT = 80;
 
@@ -21,7 +22,7 @@ const props = withDefaults(
 
 // ── helpers (shared) ──
 
-function _toolTitle(call: ToolCallContent): string {
+function toolTitle(call: ToolCallContent): string {
   const args = parseToolArguments(call.arguments);
   if (call.name === 'bash') return commandSummary(args);
 
@@ -44,7 +45,7 @@ function toolTarget(args: Record<string, unknown>): string {
   return target.length > 90 ? `${target.slice(0, 87)}...` : target;
 }
 
-function _toolStatus(call: ToolCallContent): string {
+function toolStatus(call: ToolCallContent): string {
   if (props.uiLanguage === 'en') {
     if (call.status === 'running') return 'Running';
     if (call.status === 'error' || call.result?.success === false) return 'Failed';
@@ -55,13 +56,13 @@ function _toolStatus(call: ToolCallContent): string {
   return '已运行';
 }
 
-function _toolStatusClass(call: ToolCallContent): string {
+function toolStatusClass(call: ToolCallContent): string {
   if (call.status === 'running') return 'running';
   if (call.status === 'error' || call.result?.success === false) return 'failed';
   return 'done';
 }
 
-function _outputLabel(call: ToolCallContent): string {
+function outputLabel(call: ToolCallContent): string {
   return call.name === 'bash' ? 'Shell' : localizedToolLabel(call.name);
 }
 
@@ -89,20 +90,20 @@ function toolOutput(call: ToolCallContent): string {
   return parts.filter(Boolean).join('\n');
 }
 
-function _toolHasOutput(call: ToolCallContent): boolean {
+function toolHasOutput(call: ToolCallContent): boolean {
   if (call.name === 'subagent' && (call.result?.subagentResults?.length ?? 0) > 0) return true;
   return toolOutput(call).length > 0;
 }
 
-function _isRunningSubagent(call: ToolCallContent): boolean {
+function isRunningSubagent(call: ToolCallContent): boolean {
   return call.name === 'subagent' && call.status === 'running';
 }
 
-function _hasSubagentResults(call: ToolCallContent): boolean {
+function hasSubagentResults(call: ToolCallContent): boolean {
   return call.name === 'subagent' && (call.result?.subagentResults?.length ?? 0) > 0;
 }
 
-function _subagentStatusText(output: string): string {
+function subagentStatusText(output: string): string {
   if (props.uiLanguage === 'en' && output === '执行中...') return 'Running...';
   return output;
 }
@@ -147,7 +148,7 @@ function localizedToolLabel(name: string): string {
   }
 }
 
-function _emptyOutputLabel(): string {
+function emptyOutputLabel(): string {
   return props.uiLanguage === 'en' ? 'No output yet' : '暂无输出';
 }
 
@@ -164,7 +165,7 @@ function streamingToolLabel(call: ToolCallContent): string {
   return target ? `${label}: ${target}` : label;
 }
 
-function _streamingToolEntryLabel(call: ToolCallContent): string {
+function streamingToolEntryLabel(call: ToolCallContent): string {
   const prefix = props.uiLanguage === 'en' ? 'Tool' : '工具';
   return `${prefix} · ${streamingToolLabel(call)}`;
 }
@@ -211,7 +212,7 @@ function localizedStreamingToolName(name: string): string {
   }
 }
 
-function _streamingStatusText(call: ToolCallContent): string {
+function streamingStatusText(call: ToolCallContent): string {
   if (call.status === 'running') {
     return props.uiLanguage === 'en' ? 'Running' : '运行中';
   }
@@ -225,14 +226,14 @@ function _streamingStatusText(call: ToolCallContent): string {
   return props.uiLanguage === 'en' ? 'Waiting...' : '等待中...';
 }
 
-function _streamingStatusClass(call: ToolCallContent): string {
+function streamingStatusClass(call: ToolCallContent): string {
   if (call.status === 'running') return 'streaming-running';
   if (call.status === 'error' || call.result?.success === false) return 'streaming-failed';
   if (!call.status) return 'streaming-pending';
   return 'streaming-done';
 }
 
-function _showStreamingOutput(call: ToolCallContent): boolean {
+function showStreamingOutput(call: ToolCallContent): boolean {
   return (call.status === 'running' || call.status === 'error') && Boolean(call.partialOutput);
 }
 
@@ -240,7 +241,7 @@ function _showStreamingOutput(call: ToolCallContent): boolean {
 
 const outputRefs = ref<Map<string, HTMLElement>>(new Map());
 
-function _setOutputRef(id: string, el: Element | null): void {
+function setOutputRef(id: string, el: Element | null): void {
   if (el) outputRefs.value.set(id, el as HTMLElement);
 }
 
@@ -273,37 +274,37 @@ watch(
 
 // ── subagent helpers ──
 
-function _subResultTrace(result: SubagentResult, isStreaming: boolean) {
+function subResultTrace(result: SubagentResult, isStreaming: boolean) {
   return buildSubagentInlineTrace(result, isStreaming, props.uiLanguage);
 }
 
 // ── entry helpers ──
 
 /** Get the single tool call from an entry (entries have exactly 1 tool call during streaming). */
-function _entryToolCall(entry: InlineCallTraceEntry): ToolCallContent | undefined {
+function entryToolCall(entry: InlineCallTraceEntry): ToolCallContent | undefined {
   if (entry.kind !== 'tools') return undefined;
   return entry.toolCalls[0];
 }
 
-function _isLastEntry(index: number): boolean {
+function isLastEntry(index: number): boolean {
   return index === props.entries.length - 1;
 }
 
-function _isShortInlineText(text: string): boolean {
+function isShortInlineText(text: string): boolean {
   const trimmed = text.trim();
   return trimmed.length > 0 && trimmed.length <= INLINE_TEXT_LIMIT && !trimmed.includes('\n');
 }
 
-function _inlineTextPreview(text: string): string {
+function inlineTextPreview(text: string): string {
   return text.trim().replace(/\s+/g, ' ');
 }
 
-function _thinkingLabel(entry: InlineCallTraceEntry): string {
+function thinkingLabel(entry: InlineCallTraceEntry): string {
   if (entry.kind !== 'thinking') return props.uiLanguage === 'en' ? 'Thinking' : '思考';
   return props.uiLanguage === 'en' ? 'Thinking' : '思考';
 }
 
-function _outputEntryLabel(entry: InlineCallTraceEntry): string {
+function outputEntryLabel(entry: InlineCallTraceEntry): string {
   if (entry.kind !== 'text') return props.uiLanguage === 'en' ? 'Output' : '输出';
   const label = props.uiLanguage === 'en' ? 'Output' : '输出';
   return `${label} · ${entry.text.length}`;

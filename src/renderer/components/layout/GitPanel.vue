@@ -45,11 +45,11 @@ const sortedProcesses = computed(() =>
       return b.startTime - a.startTime;
     }),
 );
-const _runningCount = computed(
+const runningCount = computed(
   () => processes.value.filter((process) => process.status === 'running' && !process.killed).length,
 );
 
-function _formatProcessTime(proc: { status: string; startTime: number; endTime?: number }): string {
+function formatProcessTime(proc: { status: string; startTime: number; endTime?: number }): string {
   if (proc.status === 'running') {
     return formatElapsedTime(now.value - proc.startTime);
   }
@@ -57,14 +57,14 @@ function _formatProcessTime(proc: { status: string; startTime: number; endTime?:
   return '已停止';
 }
 
-function _stopProcess(pid: number): void {
+function stopProcess(pid: number): void {
   const proc = processes.value.find((p) => p.pid === pid);
   if (!proc) return;
   markProcessKilled(processes.value, pid);
   bridge.killBgProcess(pid);
   showToast(`已停止进程: ${proc.command.slice(0, 40)}`, 'warning');
 }
-const _hasChanges = computed(
+const hasChanges = computed(
   () => gitStatus.value.changedFiles > 0 || gitStatus.value.stagedFiles > 0,
 );
 
@@ -74,7 +74,7 @@ const latestPlan = computed<TaskPlan | null>(() => {
   const msgs = chatStore.messages;
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i]?.role === 'assistant' && msgs[i]?.taskPlan) {
-      return msgs[i].taskPlan;
+      return msgs[i].taskPlan ?? null;
     }
   }
   return null;
@@ -84,27 +84,27 @@ const hasPlan = computed(() => latestPlan.value !== null);
 const planSteps = computed<TaskStep[]>(() => latestPlan.value?.steps ?? []);
 const planDone = computed(() => planSteps.value.filter((s) => s.status === 'done').length);
 const planTotal = computed(() => planSteps.value.length);
-const _planAllDone = computed(() => planDone.value === planTotal.value && planTotal.value > 0);
+const planAllDone = computed(() => planDone.value === planTotal.value && planTotal.value > 0);
 
-const _visiblePlanSteps = computed(() => {
+const visiblePlanSteps = computed(() => {
   if (showAllPlan.value || planSteps.value.length <= 5) return planSteps.value;
   return planSteps.value.slice(0, 5);
 });
 
-const _hiddenPlanCount = computed(() => Math.max(0, planSteps.value.length - 5));
+const hiddenPlanCount = computed(() => Math.max(0, planSteps.value.length - 5));
 
-function _planStepIcon(status: string): string {
+function planStepIcon(status: string): string {
   if (status === 'done') return '✓';
   if (status === 'in_progress') return '◉';
   return '○';
 }
 
-const _showPanel = computed(
+const showPanel = computed(
   () => chatStore.messages.length > 0 && (gitStatus.value.isRepo || hasPlan.value),
 );
 
 // Track plan elapsed time
-const _planElapsed = computed(() => {
+const planElapsed = computed(() => {
   if (!planStartTime.value) return '';
   const sec = Math.round((now.value - planStartTime.value) / 1000);
   if (sec < 60) return `${sec}s`;
@@ -121,7 +121,7 @@ watch(hasPlan, (val) => {
     planStartTime.value = 0;
   }
 });
-const _elapsedText = computed(() => {
+const elapsedText = computed(() => {
   const running = sortedProcesses.value.find((p) => p.status === 'running');
   if (!running) return '未运行';
   return formatElapsedTime(now.value - running.startTime);
@@ -160,7 +160,7 @@ watch(
   },
 );
 
-function _togglePanel(): void {
+function togglePanel(): void {
   collapsed.value = !collapsed.value;
   if (collapsed.value) {
     showCommitForm.value = false;
@@ -169,7 +169,7 @@ function _togglePanel(): void {
   }
 }
 
-function _toggleCommitForm(): void {
+function toggleCommitForm(): void {
   showCommitForm.value = !showCommitForm.value;
   commitFeedback.value = '';
   if (!showCommitForm.value) {
@@ -177,7 +177,7 @@ function _toggleCommitForm(): void {
   }
 }
 
-async function _generateCommitMessage(): Promise<void> {
+async function generateCommitMessage(): Promise<void> {
   const dir = activeSession.value?.workingDirectory;
   if (!dir) return;
   generatingCommitMsg.value = true;
@@ -191,7 +191,7 @@ async function _generateCommitMessage(): Promise<void> {
   }
 }
 
-async function _doCommit(): Promise<void> {
+async function doCommit(): Promise<void> {
   const dir = activeSession.value?.workingDirectory;
   if (!dir) return;
   let msg = commitMessage.value.trim();

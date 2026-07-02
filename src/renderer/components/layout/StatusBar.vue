@@ -4,9 +4,9 @@ import { useAgentStore } from '../../stores/agent';
 import { useModelsStore } from '../../stores/models';
 
 const agentStore = useAgentStore();
-const _modelsStore = useModelsStore();
+const modelsStore = useModelsStore();
 
-const _statusColor = computed(() => {
+const statusColor = computed(() => {
   switch (agentStore.status.state) {
     case 'thinking':
       return 'var(--color-yellow)';
@@ -21,7 +21,7 @@ const _statusColor = computed(() => {
   }
 });
 
-const _statusText = computed(() => {
+const statusText = computed(() => {
   switch (agentStore.status.state) {
     case 'idle':
       return '就绪';
@@ -38,7 +38,7 @@ const _statusText = computed(() => {
   }
 });
 
-const _tokenInfo = computed(() => {
+const tokenInfo = computed(() => {
   const t = agentStore.status.tokenUsage;
   if (t.total === 0) return '';
   return `${t.total} tokens`;
@@ -71,7 +71,7 @@ onBeforeUnmount(() => {
   if (elapsedTimer) clearInterval(elapsedTimer);
 });
 
-const _elapsedLabel = computed(() => {
+const elapsedLabel = computed(() => {
   if (elapsedSeconds.value === 0) return '';
   const s = elapsedSeconds.value;
   if (s < 60) return `${s}s`;

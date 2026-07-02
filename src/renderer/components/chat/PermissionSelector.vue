@@ -28,14 +28,14 @@ const permissionModes = [
   { value: 'confirm_changes' as const, label: '变更前确认', icon: '✓', desc: '修改前需确认' },
 ];
 
-const _currentPerm = computed(
+const currentPerm = computed(
   () =>
     permissionModes.find(
       (permission) => permission.value === settingsStore.settings.permissionMode,
     ) ?? permissionModes[1],
 );
 
-function _selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
+function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
   settingsStore.update({ permissionMode: mode });
   dropdown.value.close();
 }

@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import type { ToolCallContent } from '@shared/types';
+import CommandOperationCard from './CommandOperationCard.vue';
+import FileInspectCard from './FileInspectCard.vue';
+import FileOperationCard from './FileOperationCard.vue';
+import SubagentCard from './SubagentCard.vue';
 
 defineProps<{
   calls: ToolCallContent[];
 }>();
 
-function _isInspectTool(name: string): boolean {
+function isInspectTool(name: string): boolean {
   return name === 'read' || name === 'glob' || name === 'grep';
 }
 </script>

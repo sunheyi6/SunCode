@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { useAgentStore } from '../../stores/agent';
 
-const _emit = defineEmits<{
+const emit = defineEmits<{
   sendNow: [id: string];
 }>();
 
-const _agentStore = useAgentStore();
+const agentStore = useAgentStore();
 </script>
 
 <template>

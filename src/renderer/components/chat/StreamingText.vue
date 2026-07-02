@@ -88,7 +88,7 @@ function escapeAndLinkify(text: string): string {
   return html;
 }
 
-const _renderedHtml = computed(() => {
+const renderedHtml = computed(() => {
   if (!props.text) return '';
   // During streaming: cheap raw text (avoids O(n²) markdown re-parse)
   if (props.isStreaming) {
@@ -98,7 +98,7 @@ const _renderedHtml = computed(() => {
   return finalHtml.value || escapeAndLinkify(props.text);
 });
 
-const _containerClass = computed(() => ({
+const containerClass = computed(() => ({
   'streaming-text': true,
   'is-streaming': props.isStreaming,
 }));

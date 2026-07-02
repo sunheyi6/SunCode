@@ -22,7 +22,7 @@ const emit = defineEmits<{
 
 // ===== State =====
 const selectedIndex = ref(0);
-const _listRef = ref<HTMLElement | null>(null);
+const listRef = ref<HTMLElement | null>(null);
 
 // ===== Computed =====
 
@@ -43,7 +43,7 @@ const query = computed(() => {
 const matches = computed<CommandMatch[]>(() => matchCommands(query.value));
 const hasMatches = computed(() => matches.value.length > 0);
 
-const _dropdownStyle = computed(() => {
+const dropdownStyle = computed(() => {
   if (!props.anchorRect) return { display: 'none' };
   return {
     position: 'fixed' as const,
@@ -71,7 +71,7 @@ function confirmSelection(): void {
   if (match) emit('select', match.command);
 }
 
-function _onItemClick(cmd: SlashCommand): void {
+function onItemClick(cmd: SlashCommand): void {
   emit('select', cmd);
 }
 
@@ -112,7 +112,7 @@ watch(matches, () => {
 
 // ===== Highlight =====
 
-function _highlightName(cmd: SlashCommand, indices: number[]): string {
+function highlightName(cmd: SlashCommand, indices: number[]): string {
   if (indices.length === 0) return `/${cmd.name}`;
   let html = '/';
   const s = new Set(indices);

@@ -2,6 +2,7 @@
 import type { ToolCallContent } from '@shared/types';
 import { computed, nextTick, ref, watch } from 'vue';
 import { commandSummary, parseToolArguments } from '../../utils/tool-presentation';
+import CodeBlock from '../code/CodeBlock.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -14,9 +15,9 @@ const details = computed(() =>
   props.call.result?.details?.type === 'command' ? props.call.result.details : undefined,
 );
 
-const _title = computed(() => commandSummary(args.value));
+const title = computed(() => commandSummary(args.value));
 
-const _isFailed = computed(
+const isFailed = computed(
   () =>
     props.call.status === 'error' ||
     props.call.result?.success === false ||
@@ -25,7 +26,7 @@ const _isFailed = computed(
       details.value.exitCode !== 0),
 );
 
-const _isRunning = computed(() => props.call.status === 'running');
+const isRunning = computed(() => props.call.status === 'running');
 const streamingOutput = computed(() => props.call.partialOutput || '');
 
 // ── Expandable output ──
@@ -44,10 +45,10 @@ function previewLines(text: string, expanded: boolean): { text: string; hidden: 
   };
 }
 
-const _stdoutPreview = computed(() =>
+const stdoutPreview = computed(() =>
   previewLines(details.value?.stdout || '', stdoutExpanded.value),
 );
-const _stderrPreview = computed(() =>
+const stderrPreview = computed(() =>
   previewLines(details.value?.stderr || '', stderrExpanded.value),
 );
 
@@ -59,7 +60,7 @@ watch(streamingOutput, async () => {
   }
 });
 
-const _exitCodeLabel = computed(() => {
+const exitCodeLabel = computed(() => {
   if (details.value?.exitCode === null || details.value?.exitCode === undefined) return '—';
   return String(details.value.exitCode);
 });
