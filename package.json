@@ -27,6 +27,7 @@
     "release": "vite build && electron-builder --config electron-builder.yml --publish always",
     "test:ai": "bun run scripts/test-ai.ts",
     "test:deep-swe": "bun run scripts/run-deep-swe.ts",
+    "test:terminal-bench": "bun run scripts/run-terminal-bench.ts",
     "update:commands": "bun run scripts/fetch-windows-commands.ts"
   },
   "dependencies": {

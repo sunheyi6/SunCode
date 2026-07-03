@@ -37,3 +37,6 @@ __pycache__/
 jobs/
 pier_suncode_agent.py
 scripts/bench-agent.ts
+benchmark.env
+agent/
+harbor/__pycache__/

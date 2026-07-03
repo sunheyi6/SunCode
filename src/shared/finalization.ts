@@ -67,18 +67,54 @@ function parseStructuredMessageText(candidate: string): string | undefined {
 
 function extractStructuredMessageText(candidate: string): string | undefined {
   const match = candidate.match(/"content"\s*:\s*\{[\s\S]*?"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
-  if (!match) return undefined;
+  if (!match) return extractLooseStructuredMessageText(candidate);
 
   try {
-    return JSON.parse(`"${match[1]}"`) as string;
+    const parsed = JSON.parse(`"${match[1]}"`) as string;
+    const loose = extractLooseStructuredMessageText(candidate);
+    return loose && loose.length > parsed.length ? loose : parsed;
   } catch {
-    return match[1]
+    const fallback = match[1]
       .replace(/\\"/g, '"')
       .replace(/\\n/g, '\n')
       .replace(/\\r/g, '\r')
       .replace(/\\t/g, '\t')
       .replace(/\\\\/g, '\\');
+    const loose = extractLooseStructuredMessageText(candidate);
+    return loose && loose.length > fallback.length ? loose : fallback;
   }
+}
+
+function extractLooseStructuredMessageText(candidate: string): string | undefined {
+  const marker = /"content"\s*:\s*\{[\s\S]*?"text"\s*:\s*"/.exec(candidate);
+  if (!marker || marker.index === undefined) return undefined;
+
+  const start = marker.index + marker[0].length;
+  const end = findLooseStructuredMessageTextEnd(candidate, start);
+  if (end <= start) return undefined;
+
+  return candidate
+    .slice(start, end)
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\\\/g, '\\');
+}
+
+function findLooseStructuredMessageTextEnd(candidate: string, start: number): number {
+  // Search forward from `start` for the FIRST structural closing, not the last
+  // (lastIndexOf would over-match and swallow trailing junk; returning the
+  // string length when nothing matches is even worse). -1 means "no loose end
+  // found" — callers fall back to the strict regex result.
+  let earliest = -1;
+  for (const suffix of ['"}}', '"}\n}', '"}\r\n}', '"}']) {
+    const index = candidate.indexOf(suffix, start);
+    if (index >= start && (earliest === -1 || index < earliest)) {
+      earliest = index;
+    }
+  }
+  return earliest;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
