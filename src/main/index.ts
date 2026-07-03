@@ -1,6 +1,9 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, nativeTheme, shell } from 'electron';
+// app-identity MUST be the first local import: it sets the dev app name before
+// any other module resolves app.getPath('userData') at import time.
+import { IS_DEV } from './app-identity';
 import { initAutoUpdater } from './auto-updater';
 import { registerIpcHandlers } from './ipc-handlers';
 import { getLogPath, logger } from './logger';
@@ -53,7 +56,7 @@ function createMainWindow(): BrowserWindow {
     height: 750,
     minWidth: 900,
     minHeight: 600,
-    title: 'SunCode',
+    title: IS_DEV ? 'SunCode Dev' : 'SunCode',
     icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),

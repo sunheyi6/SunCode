@@ -17,6 +17,7 @@
 
 | 变更 | 说明 |
 |------|------|
+| **Dev/发版身份隔离** | `src/main/app-identity.ts` 作为主进程**最先 import** 的 bootstrap：dev 模式（`!app.isPackaged`）调用 `app.setName('SunCode Dev')`，使 dev 与发版 app 拥有独立的单实例锁 key 与 userData 目录（`%APPDATA%\SunCode Dev` vs `%APPDATA%\SunCode`）。避免 Windows 大小写不敏感导致 dev 与发版 app 共用锁、共用数据目录、互相"顶替"窗口。必须在任何 `app.getPath('userData')` 调用前执行，故独立成模块并置于 import 链首位 |
 | **启动流程适配器** | `scripts/launch-dev.js` 统一接管 `dev` 命令：Bun 可用性探测 → 依赖完整性自动修复 → 无 TTY/CI 适配 → Electron 桌面会话检查 → 启动失败诊断 |
 | 多 Session 并发 Agent | Worker 内 `Map<string,Agent>` 替代单例，每 session 独立 Agent 实例并行运行，消息按 sessionId 路由 |
 | SessionLock 串行化 | `withSessionLock` Promise 链保证同一 session 的 prompt/continue 操作不并发竞态；**stop/abort 不使用锁**直接中断 |
@@ -46,6 +47,7 @@
 
 | 模块 | 路径 |
 |------|------|
+| 应用身份隔离 (dev/发版) | `src/main/app-identity.ts` |
 | 启动适配器 | `scripts/launch-dev.js` |
 | Agent Worker (多 Session) | `src/worker/agent-worker.ts` |
 | Agent 核心 | `src/worker/agent/agent.ts` |

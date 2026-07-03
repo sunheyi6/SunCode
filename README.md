@@ -37,12 +37,26 @@ bun run build
 bun run electron:build
 ```
 
+## 开发与发版 app 隔离
+
+开发模式（`bun run dev`）与打包后的发版 app 使用**相互独立**的应用身份，可同时运行互不干扰：
+
+| | dev（未打包） | 发版 app（打包） |
+|---|---|---|
+| 应用名 | `SunCode Dev` | `SunCode` |
+| userData 目录 | `%APPDATA%\SunCode Dev\` | `%APPDATA%\SunCode\` |
+| 单实例锁 | 独立 key，与发版互不干扰 | 独立 key |
+| 窗口标题 | `SunCode Dev` | `SunCode` |
+
+隔离由 `src/main/app-identity.ts` 实现：该模块在主进程最先 import，在 `!app.isPackaged` 时调用 `app.setName('SunCode Dev')`。它必须在任何 `app.getPath('userData')` 调用前执行，否则 Windows 大小写不敏感会导致 dev（`suncode`）与发版（`SunCode`）共用锁和数据目录、互相顶替窗口。
+
 ## 项目结构
 
 ```
 SunCode/
 ├── src/
 │   ├── main/              # Electron 主进程，IPC 通信
+│   │   ├── app-identity.ts  # dev/发版身份隔离（最先 import，独立 userData + 单实例锁）
 │   │   ├── ipc-handlers.ts  # IPC 处理器
 │   │   ├── preload.ts       # 预加载桥接
 │   │   ├── session-store.ts # 会话持久化
