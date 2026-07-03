@@ -113,7 +113,12 @@ async function recoverSession(meta: SessionMeta): Promise<void> {
           // Append a synthetic assistant message marking the interruption
           messages.push({
             role: 'assistant',
-            content: '[Interrupted — the application was closed before the model could respond.]',
+            content: [
+              {
+                type: 'text',
+                text: '[Interrupted — the application was closed before the model could respond.]',
+              },
+            ],
           });
           meta.messageCount = messages.length;
           meta.updated = new Date().toISOString();
