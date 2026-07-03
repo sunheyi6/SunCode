@@ -263,12 +263,15 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
 
   for (const block of message.blocks ?? []) {
     if (block.type === 'thinking' && block.thinking) {
-      entries.push({
-        kind: 'thinking',
-        id: block.id,
-        text: displayThinkingText(block.thinking, uiLanguage),
-        isCurrent: false,
-      });
+      const thinkingText = displayThinkingText(block.thinking, uiLanguage);
+      if (thinkingText) {
+        entries.push({
+          kind: 'thinking',
+          id: block.id,
+          text: thinkingText,
+          isCurrent: false,
+        });
+      }
       continue;
     }
 
@@ -291,12 +294,15 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
   }
 
   if (!hasBlocks && message.thinking) {
-    entries.push({
-      kind: 'thinking',
-      id: `${message.id}:thinking`,
-      text: displayThinkingText(message.thinking, uiLanguage),
-      isCurrent: false,
-    });
+    const thinkingText = displayThinkingText(message.thinking, uiLanguage);
+    if (thinkingText) {
+      entries.push({
+        kind: 'thinking',
+        id: `${message.id}:thinking`,
+        text: thinkingText,
+        isCurrent: false,
+      });
+    }
   }
 
   const unrepresentedToolCalls = (message.toolCalls ?? []).filter(
@@ -340,12 +346,15 @@ export function buildSubagentInlineTrace(
 
   for (const block of result.internalBlocks ?? []) {
     if (block.type === 'thinking' && block.thinking) {
-      entries.push({
-        kind: 'thinking',
-        id: block.id,
-        text: displayThinkingText(block.thinking, uiLanguage),
-        isCurrent: false,
-      });
+      const thinkingText = displayThinkingText(block.thinking, uiLanguage);
+      if (thinkingText) {
+        entries.push({
+          kind: 'thinking',
+          id: block.id,
+          text: thinkingText,
+          isCurrent: false,
+        });
+      }
       continue;
     }
 
@@ -359,12 +368,15 @@ export function buildSubagentInlineTrace(
   }
 
   if (!hasBlocks && result.thinking) {
-    entries.push({
-      kind: 'thinking',
-      id: `${result.agent}:thinking`,
-      text: displayThinkingText(result.thinking, uiLanguage),
-      isCurrent: false,
-    });
+    const thinkingText = displayThinkingText(result.thinking, uiLanguage);
+    if (thinkingText) {
+      entries.push({
+        kind: 'thinking',
+        id: `${result.agent}:thinking`,
+        text: thinkingText,
+        isCurrent: false,
+      });
+    }
   }
 
   const unrepresentedToolCalls = (result.internalCalls ?? []).filter(
@@ -399,14 +411,11 @@ function pushToolGroup(
   isStreaming = false,
 ): void {
   if (toolCalls.length === 0) return;
-  // During streaming, keep each tool call as a separate entry so the tree view can render individual lines
-  if (!isStreaming) {
-    const previous = entries[entries.length - 1];
-    if (previous?.kind === 'tools' && canMergeToolGroups(previous.toolCalls, toolCalls)) {
-      const mergedToolCalls = [...previous.toolCalls, ...toolCalls];
-      entries[entries.length - 1] = buildToolEntry(mergedToolCalls, previous.id, language);
-      return;
-    }
+  const previous = entries[entries.length - 1];
+  if (previous?.kind === 'tools' && canMergeToolGroups(previous.toolCalls, toolCalls)) {
+    const mergedToolCalls = [...previous.toolCalls, ...toolCalls];
+    entries[entries.length - 1] = buildToolEntry(mergedToolCalls, previous.id, language);
+    return;
   }
 
   entries.push(buildToolEntry(toolCalls, fallbackId, language));
@@ -547,9 +556,9 @@ function formatCount(
   return `${status} ${count} ${unit}`;
 }
 
-function displayThinkingText(text: string, language: UiLanguage): string {
+function displayThinkingText(text: string, language: UiLanguage): string | undefined {
   if (textMatchesUiLanguage(text, language)) return text;
-  return language === 'zh' ? '正在分析下一步。' : 'Analyzing the next step.';
+  return undefined;
 }
 
 function localizedStatus(hasRunning: boolean, hasFailed: boolean, language: UiLanguage): string {

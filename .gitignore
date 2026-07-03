@@ -33,10 +33,17 @@ __pycache__/
 # TypeScript cache
 *.tsbuildinfo
 
+# Logs and temp artifacts
+logs/
+temp-*
+*.mjs
+*.cjs
+temp_extract.js
+
 # Benchmark / test artifacts
 jobs/
 pier_suncode_agent.py
 scripts/bench-agent.ts
 benchmark.env
-agent/
+/agent/
 harbor/__pycache__/

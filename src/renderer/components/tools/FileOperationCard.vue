@@ -45,6 +45,7 @@ const isEditing = computed(() => view.value.label === '编辑中');
   <details class="file-operation-details" :class="statusClass">
     <summary class="file-summary">
       <span class="file-icon">▤</span>
+      <span v-if="isEditing" class="file-breathe-dot" />
       <span class="file-path" :title="view.filePath">{{ view.filePath }}</span>
       <span class="file-status">{{ view.label }}</span>
       <span v-if="view.addedLines !== undefined" class="added">+{{ view.addedLines }}</span>
@@ -113,6 +114,28 @@ const isEditing = computed(() => view.value.label === '编辑中');
 
 .status-editing .file-status {
   color: var(--color-teal);
+}
+
+.file-breathe-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-teal);
+  animation: file-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes file-breathe {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px 0 color-mix(in srgb, var(--color-teal) 30%, transparent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--color-teal) 60%, transparent);
+  }
 }
 
 .status-edited .file-status {

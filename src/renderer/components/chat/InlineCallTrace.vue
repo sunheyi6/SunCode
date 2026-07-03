@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { SubagentResult, ToolCallContent } from '@shared/types';
-import { computed, nextTick, ref, watch } from 'vue';
 import { commandSummary, parseToolArguments } from '../../utils/tool-presentation';
 import type { UiLanguage } from '../../utils/ui-language';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ToolMarkdownOutput from '../tools/ToolMarkdownOutput.vue';
 import { buildSubagentInlineTrace, type InlineCallTraceEntry } from './call-trace-view-model';
 import StreamingText from './StreamingText.vue';
 
@@ -90,6 +91,11 @@ function toolOutput(call: ToolCallContent): string {
   return parts.filter(Boolean).join('\n');
 }
 
+function toolOutputCommand(call: ToolCallContent): string | undefined {
+  const args = parseToolArguments(call.arguments);
+  return typeof args.command === 'string' ? args.command : undefined;
+}
+
 function toolHasOutput(call: ToolCallContent): boolean {
   if (call.name === 'subagent' && (call.result?.subagentResults?.length ?? 0) > 0) return true;
   return toolOutput(call).length > 0;
@@ -152,126 +158,6 @@ function emptyOutputLabel(): string {
   return props.uiLanguage === 'en' ? 'No output yet' : '暂无输出';
 }
 
-// ── streaming helpers ──
-
-function streamingToolLabel(call: ToolCallContent): string {
-  const args = parseToolArguments(call.arguments);
-  const target = toolTarget(args);
-  if (call.name === 'bash') {
-    const cmd = commandSummary(args);
-    return target ? `${cmd}` : cmd;
-  }
-  const label = localizedStreamingToolName(call.name);
-  return target ? `${label}: ${target}` : label;
-}
-
-function streamingToolEntryLabel(call: ToolCallContent): string {
-  const prefix = props.uiLanguage === 'en' ? 'Tool' : '工具';
-  return `${prefix} · ${streamingToolLabel(call)}`;
-}
-
-function localizedStreamingToolName(name: string): string {
-  if (props.uiLanguage === 'en') {
-    switch (name) {
-      case 'read':
-        return 'read';
-      case 'glob':
-        return 'glob';
-      case 'grep':
-        return 'grep';
-      case 'edit':
-        return 'edit';
-      case 'write':
-        return 'write';
-      case 'subagent':
-        return 'subagent';
-      case 'bash':
-        return 'bash';
-      default:
-        return name;
-    }
-  }
-  // Chinese: use English short names for the tree view
-  switch (name) {
-    case 'read':
-      return 'read';
-    case 'glob':
-      return 'glob';
-    case 'grep':
-      return 'grep';
-    case 'edit':
-      return 'edit';
-    case 'write':
-      return 'write';
-    case 'subagent':
-      return 'subagent';
-    case 'bash':
-      return 'bash';
-    default:
-      return name;
-  }
-}
-
-function streamingStatusText(call: ToolCallContent): string {
-  if (call.status === 'running') {
-    return props.uiLanguage === 'en' ? 'Running' : '运行中';
-  }
-  if (call.status === 'error' || call.result?.success === false) {
-    return props.uiLanguage === 'en' ? 'Failed' : '失败';
-  }
-  if (call.status === 'done' || call.result?.success === true) {
-    return props.uiLanguage === 'en' ? 'Done ✓' : '已完成 ✓';
-  }
-  // No status yet — tool declared but not started
-  return props.uiLanguage === 'en' ? 'Waiting...' : '等待中...';
-}
-
-function streamingStatusClass(call: ToolCallContent): string {
-  if (call.status === 'running') return 'streaming-running';
-  if (call.status === 'error' || call.result?.success === false) return 'streaming-failed';
-  if (!call.status) return 'streaming-pending';
-  return 'streaming-done';
-}
-
-function showStreamingOutput(call: ToolCallContent): boolean {
-  return (call.status === 'running' || call.status === 'error') && Boolean(call.partialOutput);
-}
-
-// ── streaming output auto-scroll ──
-
-const outputRefs = ref<Map<string, HTMLElement>>(new Map());
-
-function setOutputRef(id: string, el: Element | null): void {
-  if (el) outputRefs.value.set(id, el as HTMLElement);
-}
-
-// Flatten all tool calls to watch their partialOutput
-const allPartialOutputs = computed(() => {
-  const vals: string[] = [];
-  for (const entry of props.entries) {
-    if (entry.kind === 'tools') {
-      for (const tc of entry.toolCalls) {
-        vals.push(tc.partialOutput || '');
-      }
-    }
-  }
-  return vals;
-});
-
-watch(
-  allPartialOutputs,
-  () => {
-    void nextTick(() => {
-      requestAnimationFrame(() => {
-        for (const [, el] of outputRefs.value) {
-          el.scrollTop = el.scrollHeight;
-        }
-      });
-    });
-  },
-  { deep: true },
-);
-
 // ── subagent helpers ──
 
 function subResultTrace(result: SubagentResult, isStreaming: boolean) {
@@ -279,16 +165,6 @@ function subResultTrace(result: SubagentResult, isStreaming: boolean) {
 }
 
 // ── entry helpers ──
-
-/** Get the single tool call from an entry (entries have exactly 1 tool call during streaming). */
-function entryToolCall(entry: InlineCallTraceEntry): ToolCallContent | undefined {
-  if (entry.kind !== 'tools') return undefined;
-  return entry.toolCalls[0];
-}
-
-function isLastEntry(index: number): boolean {
-  return index === props.entries.length - 1;
-}
 
 function isShortInlineText(text: string): boolean {
   const trimmed = text.trim();
@@ -299,150 +175,157 @@ function inlineTextPreview(text: string): string {
   return text.trim().replace(/\s+/g, ' ');
 }
 
-function thinkingLabel(entry: InlineCallTraceEntry): string {
-  if (entry.kind !== 'thinking') return props.uiLanguage === 'en' ? 'Thinking' : '思考';
-  return props.uiLanguage === 'en' ? 'Thinking' : '思考';
-}
-
 function outputEntryLabel(entry: InlineCallTraceEntry): string {
   if (entry.kind !== 'text') return props.uiLanguage === 'en' ? 'Output' : '输出';
   const label = props.uiLanguage === 'en' ? 'Output' : '输出';
   return `${label} · ${entry.text.length}`;
 }
+
+function streamingToolText(entry: InlineCallTraceEntry): string {
+  if (entry.kind !== 'tools') return '';
+  if (entry.toolCalls.length !== 1) return entry.label;
+
+  const call = entry.toolCalls[0];
+  if (!call) return entry.label;
+  return toolTitle(call);
+}
+
+function streamingToolClass(entry: InlineCallTraceEntry): string {
+  if (entry.kind !== 'tools') return '';
+  const call = entry.toolCalls[0];
+  return call ? toolStatusClass(call) : '';
+}
 </script>
 
 <template>
-  <!-- ═══ Streaming tree view ═══ -->
-  <div v-if="isStreaming" class="streaming-trace-tree">
-    <div
-      v-for="(entry, entryIdx) in entries"
-      :key="entry.id"
-      class="tree-branch"
-      :class="{ 'tree-branch-last': isLastEntry(entryIdx) }"
-    >
-      <!-- Thinking line -->
+  <!-- ═══ Streaming process view ═══ -->
+  <div v-if="isStreaming" class="streaming-process-list">
+    <template v-for="entry in entries" :key="entry.id">
       <div
-        v-if="entry.kind === 'thinking' && isShortInlineText(entry.text)"
-        class="tree-line tree-inline-text-line tree-line-thinking"
+        v-if="entry.kind === 'thinking'"
+        class="streaming-process-text streaming-thinking-text"
       >
-        <span class="tree-think-label">{{ thinkingLabel(entry) }}</span>
-        <span class="tree-inline-text">{{ inlineTextPreview(entry.text) }}</span>
+        {{ entry.text }}
       </div>
-      <details v-else-if="entry.kind === 'thinking'" class="tree-details tree-thinking">
-        <summary class="tree-line tree-line-thinking">
-          <span class="tree-think-label">{{ thinkingLabel(entry) }}</span>
+
+      <!-- Previous text entries: display plain text without streaming -->
+      <div
+        v-else-if="entry.kind === 'text' && !entry.isCurrent"
+        class="streaming-process-text"
+      >
+        {{ entry.text }}
+      </div>
+
+      <details
+        v-else-if="entry.kind === 'text' && entry.isCurrent"
+        class="trace-output-details streaming-final-answer"
+        :open="true"
+      >
+        <summary class="trace-output-summary">
+          {{ uiLanguage === 'en' ? 'Final Answer' : '最终回答' }}
         </summary>
-        <div class="tree-detail-body tree-think-text">
-          {{ entry.text }}
+        <div class="streaming-final-output">
+          <StreamingText :text="entry.text" :is-streaming="isStreaming" />
         </div>
       </details>
 
-      <!-- Text line -->
-      <div
-        v-else-if="entry.kind === 'text' && isShortInlineText(entry.text)"
-        class="tree-line tree-inline-text-line tree-line-output"
+      <details
+        v-else
+        class="streaming-tool-details"
+        :class="[streamingToolClass(entry), { current: entry.isCurrent }]"
       >
-        <span class="tree-output-label">{{ outputEntryLabel(entry) }}</span>
-        <span class="tree-inline-text tree-inline-output-text">
-          {{ inlineTextPreview(entry.text) }}
-        </span>
-      </div>
-      <details v-else-if="entry.kind === 'text'" class="tree-details tree-output-details" open>
-        <summary class="tree-line tree-line-output">
-          <span class="tree-output-label">{{ outputEntryLabel(entry) }}</span>
-        </summary>
-        <div class="tree-answer-fragment">
-          <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isCurrent" />
-        </div>
-      </details>
-
-      <!-- Tool line -->
-      <details v-else class="tree-details tree-tool-details">
-        <summary
-          class="tree-line tree-line-tool"
-          :class="{ 'tree-line-active': entry.hasRunning }"
-        >
-          <span class="tree-tool-label">{{ streamingToolEntryLabel(entryToolCall(entry)!) }}</span>
-          <span
-            class="tree-tool-status"
-            :class="streamingStatusClass(entryToolCall(entry)!)"
-          >
-            <template v-if="entryToolCall(entry)!.status === 'running'">
-              <span class="status-progress-bar" />
-              {{ streamingStatusText(entryToolCall(entry)!) }}
-            </template>
-            <template v-else>
-              {{ streamingStatusText(entryToolCall(entry)!) }}
-            </template>
-          </span>
+        <summary class="streaming-tool-row">
+          <span class="streaming-tool-dot" :class="streamingToolClass(entry)" />
+          <span class="streaming-tool-text">{{ streamingToolText(entry) }}</span>
         </summary>
 
-        <!-- Inline output for running tool -->
-        <div
-          v-if="showStreamingOutput(entryToolCall(entry)!)"
-          class="tree-output"
-        >
-          <pre
-            class="tree-output-text"
-            :ref="(el) => setOutputRef(entryToolCall(entry)!.id, el as Element)"
-          >{{ entryToolCall(entry)!.partialOutput?.trimEnd() }}</pre>
-        </div>
-
-        <!-- Subagent nested tree -->
-        <div v-if="hasSubagentResults(entryToolCall(entry)!)" class="tree-subagent">
-          <div
-            v-for="result in entryToolCall(entry)!.result?.subagentResults"
-            :key="result.agent"
-            class="tree-subagent-result"
-          >
-            <div class="tree-subagent-header">
-              <span class="tree-subagent-name">{{ result.agent }}</span>
-              <span class="tree-subagent-meta">
-                <template v-if="isRunningSubagent(entryToolCall(entry)!) && result.output === '执行中...'">
-                  {{ uiLanguage === 'en' ? 'Running' : '执行中' }}
-                </template>
-                <template v-else>
-                  {{ result.tokenUsage.total }} tokens · {{ result.toolCalls }}
-                </template>
-              </span>
-            </div>
-            <InlineCallTrace
-              v-if="subResultTrace(result, isRunningSubagent(entryToolCall(entry)!)).entries.length > 0"
-              :entries="subResultTrace(result, isRunningSubagent(entryToolCall(entry)!)).entries"
-              :ui-language="uiLanguage"
-              :is-streaming="isRunningSubagent(entryToolCall(entry)!)"
+        <div class="streaming-tool-detail">
+          <template v-if="entry.toolCalls.length === 1">
+            <ToolMarkdownOutput
+              v-if="toolHasOutput(entry.toolCalls[0])"
+              class="streaming-tool-output"
+              :output="toolOutput(entry.toolCalls[0])"
+              :command="toolOutputCommand(entry.toolCalls[0])"
+              :is-streaming="entry.toolCalls[0]?.status === 'running'"
             />
-            <pre
-              v-if="result.output && result.output !== '执行中...'"
-              class="tree-output-text tree-subagent-output"
-            >{{ subagentStatusText(result.output) }}</pre>
-            <div v-if="result.error" class="tree-error-text">{{ result.error }}</div>
-          </div>
+            <div v-else class="streaming-tool-empty">{{ emptyOutputLabel() }}</div>
+          </template>
+
+          <template v-else>
+            <details
+              v-for="call in entry.toolCalls"
+              :key="call.id"
+              class="streaming-tool-call"
+            >
+              <summary class="streaming-tool-call-summary">
+                <span class="streaming-tool-dot" :class="toolStatusClass(call)" />
+                <span class="streaming-tool-call-title">{{ toolTitle(call) }}</span>
+              </summary>
+              <ToolMarkdownOutput
+                v-if="toolHasOutput(call)"
+                class="streaming-tool-output"
+                :output="toolOutput(call)"
+                :command="toolOutputCommand(call)"
+                :is-streaming="call.status === 'running'"
+              />
+              <div v-else class="streaming-tool-empty">{{ emptyOutputLabel() }}</div>
+            </details>
+          </template>
         </div>
       </details>
-    </div>
+
+      <template v-if="entry.kind === 'tools'">
+        <div
+          v-for="call in entry.toolCalls"
+          :key="`${entry.id}:${call.id}:subagent`"
+          class="streaming-subagent-results"
+        >
+          <template v-if="hasSubagentResults(call)">
+            <div
+              v-for="result in call.result?.subagentResults"
+              :key="result.agent"
+              class="tree-subagent-result"
+            >
+              <div class="tree-subagent-header">
+                <span class="tree-subagent-name">{{ result.agent }}</span>
+                <span class="tree-subagent-meta">
+                  <template v-if="isRunningSubagent(call) && result.output === '执行中...'">
+                    {{ uiLanguage === 'en' ? 'Running' : '执行中' }}
+                  </template>
+                  <template v-else>
+                    {{ result.tokenUsage.total }} tokens · {{ result.toolCalls }}
+                  </template>
+                </span>
+              </div>
+              <InlineCallTrace
+                v-if="subResultTrace(result, isRunningSubagent(call)).entries.length > 0"
+                :entries="subResultTrace(result, isRunningSubagent(call)).entries"
+                :ui-language="uiLanguage"
+                :is-streaming="isRunningSubagent(call)"
+              />
+              <ToolMarkdownOutput
+                v-if="result.output && result.output !== '执行中...'"
+                class="tree-output-text tree-subagent-output"
+                :output="subagentStatusText(result.output)"
+              />
+              <div v-if="result.error" class="tree-error-text">{{ result.error }}</div>
+            </div>
+          </template>
+        </div>
+      </template>
+    </template>
   </div>
 
   <!-- ═══ Completed (details) view ═══ -->
   <div v-else class="inline-call-trace">
     <template v-for="entry in entries" :key="entry.id">
       <div
-        v-if="entry.kind === 'thinking' && isShortInlineText(entry.text)"
-        class="trace-inline-text-row trace-thinking-inline"
+        v-if="entry.kind === 'thinking'"
+        class="trace-node-text"
         :class="{ current: entry.isCurrent }"
       >
-        <span class="trace-inline-label">{{ thinkingLabel(entry) }}</span>
-        <span class="trace-inline-text">{{ inlineTextPreview(entry.text) }}</span>
+        {{ entry.text }}
       </div>
-
-      <details
-        v-else-if="entry.kind === 'thinking'"
-        class="trace-thinking-details"
-        :class="{ current: entry.isCurrent }"
-      >
-        <summary class="trace-thinking-summary">{{ thinkingLabel(entry) }}</summary>
-        <div class="trace-node-text">{{ entry.text }}</div>
-      </details>
 
       <div
         v-else-if="entry.kind === 'text' && isShortInlineText(entry.text)"
@@ -512,14 +395,21 @@ function outputEntryLabel(entry: InlineCallTraceEntry): string {
                     :entries="buildSubagentInlineTrace(result, isRunningSubagent(call), uiLanguage).entries"
                     :ui-language="uiLanguage"
                   />
-                  <pre
+                  <ToolMarkdownOutput
                     v-if="result.output && result.output !== '执行中...'"
                     class="trace-tool-output-text trace-subagent-output"
-                  >{{ subagentStatusText(result.output) }}</pre>
+                    :output="subagentStatusText(result.output)"
+                  />
                   <div v-if="result.error" class="trace-tool-empty">{{ result.error }}</div>
                 </div>
               </div>
-              <pre v-else-if="toolHasOutput(call)" class="trace-tool-output-text">{{ toolOutput(call) }}</pre>
+              <ToolMarkdownOutput
+                v-else-if="toolHasOutput(call)"
+                class="trace-tool-output-text"
+                :output="toolOutput(call)"
+                :command="toolOutputCommand(call)"
+                :is-streaming="call.status === 'running'"
+              />
               <div v-else class="trace-tool-empty">{{ emptyOutputLabel() }}</div>
             </div>
           </details>
@@ -531,14 +421,199 @@ function outputEntryLabel(entry: InlineCallTraceEntry): string {
 
 <style scoped>
 /* ═══════════════════════════════════════════
-   Streaming tree view
+   Streaming process view
    ═══════════════════════════════════════════ */
 
-.streaming-trace-tree {
+.streaming-process-list {
   display: flex;
   flex-direction: column;
+  gap: 0;
   margin: 0;
   padding: 0;
+}
+
+.streaming-process-text {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+
+.streaming-thinking-text {
+  color: var(--color-text);
+}
+
+.streaming-tool-details {
+  min-width: 0;
+  color: var(--color-text-muted);
+}
+
+.streaming-tool-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 14px;
+  line-height: 1.75;
+  cursor: pointer;
+  list-style: none;
+}
+
+.streaming-tool-row::-webkit-details-marker,
+.streaming-tool-call-summary::-webkit-details-marker {
+  display: none;
+}
+
+.streaming-tool-details.running .streaming-tool-row {
+  color: var(--color-accent);
+}
+
+.streaming-tool-details.running.current .streaming-tool-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.streaming-tool-details.running.current .streaming-tool-row::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-accent) 18%, transparent) 45%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  animation: trace-shimmer-sweep 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.streaming-tool-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+  background: var(--color-green);
+}
+
+.streaming-tool-dot.running {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border: none;
+  background: var(--color-accent);
+  animation: tool-breathe 1.4s ease-in-out infinite;
+}
+
+.streaming-tool-dot.failed {
+  background: var(--color-red);
+}
+
+@keyframes tool-breathe {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px 0 color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  }
+}
+
+.streaming-tool-details.failed .streaming-tool-row {
+  color: var(--color-red);
+}
+
+.streaming-tool-details.current .streaming-tool-row {
+  color: var(--color-text);
+}
+
+.streaming-tool-details.current:not(.running) .streaming-tool-row {
+  color: var(--color-text-secondary);
+}
+
+.streaming-tool-call[open] > .streaming-tool-call-summary::after {
+  transform: rotate(90deg);
+}
+
+.streaming-tool-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.streaming-subagent-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 22px;
+}
+
+.streaming-tool-detail {
+  margin: 2px 0 4px 22px;
+  color: var(--color-text-secondary);
+}
+
+.streaming-tool-call {
+  min-width: 0;
+}
+
+.streaming-tool-call-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.streaming-tool-call-summary::after {
+  content: '>';
+  display: inline-block;
+  margin-left: 2px;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: currentColor;
+  opacity: 0.65;
+  transition: transform 0.15s;
+}
+
+.streaming-tool-call-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.streaming-tool-output {
+  margin: 4px 0 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.streaming-tool-empty {
+  margin: 2px 0 6px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .tree-branch {
@@ -693,6 +768,27 @@ function outputEntryLabel(entry: InlineCallTraceEntry): string {
   font-size: 14px;
   line-height: 1.6;
   padding: 3px 0 7px;
+}
+
+.streaming-final-pending {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 0 7px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.streaming-final-cursor {
+  color: var(--color-accent);
+  font-weight: 100;
+  animation: streaming-final-blink 1s step-end infinite;
+}
+
+@keyframes streaming-final-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
 .tree-output-details .tree-answer-fragment {
@@ -859,10 +955,6 @@ function outputEntryLabel(entry: InlineCallTraceEntry): string {
   color: var(--color-text-secondary);
 }
 
-.trace-thinking-details {
-  color: var(--color-text-muted);
-}
-
 .trace-inline-text-row {
   display: flex;
   align-items: baseline;
@@ -889,7 +981,6 @@ function outputEntryLabel(entry: InlineCallTraceEntry): string {
   color: var(--color-text);
 }
 
-.trace-thinking-summary,
 .trace-output-summary {
   display: inline-flex;
   align-items: center;
@@ -899,12 +990,10 @@ function outputEntryLabel(entry: InlineCallTraceEntry): string {
   line-height: 1.4;
 }
 
-.trace-thinking-summary::-webkit-details-marker,
 .trace-output-summary::-webkit-details-marker {
   display: none;
 }
 
-.trace-thinking-summary::after,
 .trace-output-summary::after {
   content: '>';
   display: inline-block;
@@ -916,14 +1005,8 @@ function outputEntryLabel(entry: InlineCallTraceEntry): string {
   transition: transform 0.15s;
 }
 
-.trace-thinking-details[open] > .trace-thinking-summary::after,
 .trace-output-details[open] > .trace-output-summary::after {
   transform: rotate(90deg);
-}
-
-.trace-thinking-details .trace-node-text {
-  margin-top: 8px;
-  color: var(--color-text-secondary);
 }
 
 .trace-output-details .trace-answer-fragment {
@@ -1012,6 +1095,18 @@ function outputEntryLabel(entry: InlineCallTraceEntry): string {
 
 .trace-tool-item.running {
   color: var(--color-accent);
+}
+
+.trace-tool-item.running .trace-tool-status::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--color-accent);
+  animation: tool-breathe 1.4s ease-in-out infinite;
 }
 
 .trace-tool-item.failed {

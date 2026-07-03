@@ -461,7 +461,15 @@ watch(
             title="停止生成 (Esc)"
             @click="$emit('stop')"
           >
-            <span aria-hidden="true">■</span>
+            <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <rect x="4" y="4" width="16" height="16" rx="4" />
+              </svg>
           </button>
 
           <!-- Send / Queue button -->
@@ -473,7 +481,20 @@ watch(
             aria-label="发送消息"
             @click="handleSend"
           >
-            <span aria-hidden="true">↑</span>
+            <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 19V5" />
+                <path d="M5 12l7-7 7 7" />
+              </svg>
           </button>
         </div>
       </div>
@@ -843,55 +864,75 @@ watch(
 }
 
 .send-btn {
-  width: 36px;
-  height: 36px;
-  margin-left: 2px;
-  padding: 0;
-  flex-shrink: 0;
-  border-radius: 12px;
-  background: var(--color-accent);
-  color: var(--color-bg);
-  font-size: 22px;
-  font-weight: 700;
-  transition:
-    background 0.15s ease,
-    opacity 0.15s ease,
-    transform 0.15s ease;
-}
+    width: 38px;
+    height: 38px;
+    margin-left: 2px;
+    padding: 0;
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--color-accent) 0%, color-mix(in srgb, var(--color-accent) 85%, #000) 100%);
+    color: var(--color-bg);
+    cursor: pointer;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-accent) 25%, transparent);
+    transition:
+      background 0.2s ease,
+      opacity 0.2s ease,
+      transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+      box-shadow 0.2s ease;
+  }
 
-.send-btn:not(:disabled):hover {
-  background: var(--color-accent-hover);
-  transform: translateY(-1px);
-}
+  .send-btn:not(:disabled):hover {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 90%, #000) 0%, var(--color-accent) 100%);
+    transform: translateY(-2px) scale(1.06);
+    box-shadow: 0 4px 18px color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
 
-.send-btn:disabled {
-  cursor: default;
-  background: var(--color-overlay);
-  color: var(--color-bg);
-  opacity: 0.62;
-}
+  .send-btn:not(:disabled):active {
+    transform: translateY(0) scale(0.94);
+  }
 
-.send-btn.queued:not(:disabled) {
-  background: var(--color-purple);
-}
+  .send-btn:disabled {
+    cursor: default;
+    background: var(--color-overlay);
+    color: var(--color-bg);
+    opacity: 0.55;
+    box-shadow: none;
+  }
 
-.stop-btn {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-red);
-  color: #fff;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background 0.15s, opacity 0.15s;
-}
-.stop-btn:hover {
-  opacity: 0.85;
-}
+  .send-btn.queued:not(:disabled) {
+    background: linear-gradient(135deg, var(--color-purple) 0%, color-mix(in srgb, var(--color-purple) 85%, #000) 100%);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-purple) 25%, transparent);
+  }
+
+  .stop-btn {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--color-red) 0%, color-mix(in srgb, var(--color-red) 80%, #000) 100%);
+    color: #fff;
+    border: 0;
+    border-radius: 10px;
+    cursor: pointer;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-red) 25%, transparent);
+    transition:
+      background 0.2s ease,
+      transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+      opacity 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .stop-btn:hover {
+    opacity: 0.9;
+    transform: scale(1.06);
+    box-shadow: 0 4px 18px color-mix(in srgb, var(--color-red) 35%, transparent);
+  }
+
+  .stop-btn:active {
+    transform: scale(0.94);
+  }
 
 .dropdown-menu {
   position: absolute;

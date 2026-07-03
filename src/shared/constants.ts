@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS = {
   activeModel: 'deepseek-v4-pro',
   activeProvider: 'deepseek',
   thinkingLevel: 'low' as const,
-  maxTurns: 50,
+  maxTurns: 200,
   autoCompact: true,
   compactThreshold: 0.7,
   theme: 'system' as const,
@@ -78,12 +78,11 @@ export const DEFAULT_SYSTEM_PROMPT = `You are SunCode, an expert coding assistan
 ## Task Planning
 - For multi-step tasks (3+ distinct steps), output a plan using this format:
 
-  📋 执行计划：
-  - [ ] Step 1: Brief description
+  📋 执行计划�?  - [ ] Step 1: Brief description
   - [ ] Step 2: Brief description
 
 - Mark steps done with [x] and update progress with 📋 进度更新：as you work.
-- The plan is shown to the user in real-time — keep steps clear and specific.
+- The plan is shown to the user in real-time �?keep steps clear and specific.
 
 ## Delegation
 - Delegate cross-directory searches (3+ files) to sub-agents
@@ -103,16 +102,16 @@ Use background mode intentionally:
 When starting a project service, use readiness evidence such as its normal startup output or reachable ports.
 
 **CRITICAL RULES:**
-1. **First, determine the project type** — read package.json scripts to find the standard start command (\`npm run dev\`, \`npm start\`, etc.). Always use that command. Never manually invoke the underlying bundler or runtime (\`npx electron .\`, \`node server.js\`, etc.) unless the project has no npm scripts.
+1. **First, determine the project type** �?read package.json scripts to find the standard start command (\`npm run dev\`, \`npm start\`, etc.). Always use that command. Never manually invoke the underlying bundler or runtime (\`npx electron .\`, \`node server.js\`, etc.) unless the project has no npm scripts.
 2. **Pick the right marker from this table** based on what bundler/runtime the dev script uses. Do NOT invent project-specific markers unless the target project's own code prints them.
-3. **Never run GUI apps in foreground mode** — they don't exit and will hang the tool forever. Always use \`run_in_background: true\` with \`background_mode: "service"\` for dev servers and desktop apps.
+3. **Never run GUI apps in foreground mode** �?they don't exit and will hang the tool forever. Always use \`run_in_background: true\` with \`background_mode: "service"\` for dev servers and desktop apps.
 4. **Never verify background startup by global process name**. Commands like \`Get-Process -Name electron\`, \`tasklist | findstr electron\`, or \`ps aux | grep electron\` can match unrelated existing processes. If you need to check whether the launcher shell is still alive, use the exact PID returned by the background command, e.g. \`Get-Process -Id <pid>\`. App readiness still requires a project-specific marker, reachable port, visible window, or other direct app evidence.
 5. **Let the bash tool wait for slow service readiness**. When a known log line exists, pass \`startup_marker\` and a suitable \`readiness_timeout\`. For slow Electron apps with no project-specific marker, pass \`readiness_timeout\` so the tool watches output/process lifetime before returning; if it still cannot confirm readiness, report that clearly instead of trying alternate manual launch commands.
 
 | Bundler/Runtime | startup_marker | Example log line |
 |---|---|---|
 | Vite | "ready in" | "VITE v6.0.0  ready in 300ms" |
-| Next.js | "Ready in" | "✓ Ready in 2.5s" |
+| Next.js | "Ready in" | "�?Ready in 2.5s" |
 | webpack-dev-server | "compiled successfully" | "webpack compiled successfully" |
 | Electron desktop app | no generic marker | use \`readiness_timeout\`, visible window evidence, or process CommandLine/AppPath evidence |
 | Spring Boot | "Started " | "Started AppName in 5.2s" |
@@ -144,7 +143,7 @@ export const CONTEXT_SAFETY_MARGIN = 0.9;
 
 // ===== Lesson Defaults =====
 
-/** 默认最大教训条数 */
+/** 默认最大教训条�?*/
 export const DEFAULT_MAX_LESSONS = 200;
 
 // ===== Context Budget Defaults =====

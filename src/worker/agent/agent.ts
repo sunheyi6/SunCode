@@ -15,6 +15,7 @@ import type {
   SubagentDefinition,
   ToolCallContent,
   ToolResult,
+  UiLanguage,
 } from '@shared/types';
 import { createMcpManager } from '../mcp/manager';
 import { createModelRegistry } from '../models/registry';
@@ -26,6 +27,7 @@ import { getAgentDataSubdir } from './agent-data-dir';
 import { runAgentLoop } from './agent-loop';
 import { applyContextBudget } from './context-budget';
 import { extractGoalDefinition, runGoalLoop } from './goal-loop';
+import { parseInitCommand } from './init-handler';
 import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
 import { loadMemories, type MemoryEntry, saveMemory } from './memory';
 
@@ -49,6 +51,7 @@ export class Agent {
   private totalTokens = { input: 0, output: 0, total: 0 };
   /** Token usage from the currently active run — merged into totalTokens on completion. */
   private activeRunTokens = { input: 0, output: 0, total: 0 };
+  private currentResponseLanguage: UiLanguage = 'zh';
   /** Stable session ID for prompt cache affinity (Anthropic). */
   private sessionId: string;
 
@@ -239,12 +242,13 @@ export class Agent {
     this.totalTokens = { input: 0, output: 0, total: 0 };
   }
 
-  async prompt(text: string): Promise<void> {
+  async prompt(text: string, uiLanguage?: UiLanguage): Promise<void> {
     if (this.isRunning) {
       this.onError('Agent is already processing a request');
       return;
     }
 
+    this.currentResponseLanguage = uiLanguage ?? inferLatestUiLanguage(this.messages);
     this.isRunning = true;
     this.abortController = new AbortController();
     this.turnCount = 0;
@@ -254,6 +258,7 @@ export class Agent {
     const userMessage: Message = {
       role: 'user',
       content: [{ type: 'text', text }],
+      uiLanguage: this.currentResponseLanguage,
     };
     this.messages.push(userMessage);
 
@@ -272,11 +277,24 @@ export class Agent {
       timestamp: new Date().toISOString(),
     });
 
+    // Detect /init prefix → set up AGENTS.md initialization
+    const initPrompt = parseInitCommand(text);
+    if (initPrompt) {
+      // Replace the user message with the init instruction
+      this.messages[this.messages.length - 1] = {
+        role: 'user',
+        content: [{ type: 'text', text: initPrompt }],
+        uiLanguage: this.currentResponseLanguage,
+      };
+    }
+
     // Detect /goal prefix → run autonomous goal loop
-    const goalDef = extractGoalDefinition(text, {
-      maxGoalTurns: this.settings.goalMaxTurns,
-      maxWallTimeMs: this.settings.goalMaxWallTimeMs,
-    });
+    const goalDef = !initPrompt
+      ? extractGoalDefinition(text, {
+          maxGoalTurns: this.settings.goalMaxTurns,
+          maxWallTimeMs: this.settings.goalMaxWallTimeMs,
+        })
+      : null;
 
     let summarizeAfterStop = false;
 
@@ -478,6 +496,7 @@ export class Agent {
       agentsMdContent,
       memoryContent,
       relevantLessonsContent,
+      responseLanguage: this.currentResponseLanguage,
       abortSignal: this.abortController!.signal,
       runId,
       sessionId: this.sessionId,
@@ -569,8 +588,12 @@ export class Agent {
     this.saveTaskPlan(result.finalMessage);
 
     // Extract failure lessons (fire-and-forget)
+    // Tool results are JSON strings from formatToolResultForModel, check success field
     const hasFailures = this.messages.some(
-      (m) => m.role === 'tool' && typeof m.content === 'string' && m.content.startsWith('错误:'),
+      (m) =>
+        m.role === 'tool' &&
+        typeof m.content === 'string' &&
+        (m.content.includes('"success": false') || m.content.includes('"success":false')),
     );
     if (hasFailures) {
       const extractionContexts = buildExtractionContexts(this.messages, runId);
@@ -634,6 +657,7 @@ export class Agent {
       agentsMdContent,
       memoryContent,
       relevantLessonsContent,
+      responseLanguage: this.currentResponseLanguage,
       abortSignal: this.abortController!.signal,
       sessionId: this.sessionId,
       onStream: (event: StreamEvent) => {
@@ -914,6 +938,11 @@ function latestUserText(messages: Message[]): string {
         .filter((b) => b.type === 'text')
         .map((b) => ('text' in b ? b.text : ''))
         .join(' ');
+}
+
+function inferLatestUiLanguage(messages: Message[]): UiLanguage {
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
+  return lastUserMsg?.uiLanguage ?? 'zh';
 }
 
 /**

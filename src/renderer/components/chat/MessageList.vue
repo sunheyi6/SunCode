@@ -8,6 +8,20 @@ const chatStore = useChatStore();
 const messageListRef = ref<HTMLElement | null>(null);
 const userScrolledUp = ref(false);
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+let userScrollIntent = false;
+
+function markUserScrollIntent(): void {
+  userScrollIntent = true;
+}
+
+function markScrollbarPointerIntent(event: PointerEvent): void {
+  const el = messageListRef.value;
+  if (!el || event.target !== el) return;
+  const rect = el.getBoundingClientRect();
+  if (event.clientX >= rect.right - 18) {
+    markUserScrollIntent();
+  }
+}
 
 function scrollToBottom(smooth = false): void {
   const el = messageListRef.value;
@@ -26,37 +40,71 @@ function scrollToBottom(smooth = false): void {
 function isAtBottom(): boolean {
   const el = messageListRef.value;
   if (!el) return false;
-  // 20px threshold — must be essentially at the very bottom
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 4;
 }
 
-/** Composite key — changes less frequently than every character. */
+function newestBlockContentLength(): number {
+  const last = chatStore.messages[chatStore.messages.length - 1];
+  if (!last) return 0;
+  return (
+    last.blocks?.reduce(
+      (sum, block) =>
+        sum +
+        (block.thinking?.length ?? 0) +
+        (block.text?.length ?? 0) +
+        (block.toolCall?.partialOutput?.length ?? 0),
+      0,
+    ) ?? 0
+  );
+}
+
+function newestToolContentLength(): number {
+  const last = chatStore.messages[chatStore.messages.length - 1];
+  if (!last) return 0;
+  return (
+    last.toolCalls?.reduce(
+      (sum, toolCall) =>
+        sum +
+        (toolCall.partialOutput?.length ?? 0) +
+        (toolCall.result?.output?.length ?? 0) +
+        (toolCall.result?.error?.length ?? 0),
+      0,
+    ) ?? 0
+  );
+}
+
+/** Composite key for every visible growth source in the newest message. */
 let lastKey = '';
 function lastMessageContentKey(): string {
   const last = chatStore.messages[chatStore.messages.length - 1];
   if (!last) return '';
-  // Only trigger on ~100 char chunks, not every character
-  const thinkLen = Math.floor((last.thinking?.length ?? 0) / 100);
-  const contentLen = Math.floor((last.content?.length ?? 0) / 100);
+  const thinkLen = last.thinking?.length ?? 0;
+  const contentLen = last.content?.length ?? 0;
   const blockLen = last.blocks?.length ?? 0;
-  const toolOutputLen = Math.floor(
-    (last.toolCalls?.reduce((sum, toolCall) => sum + (toolCall.partialOutput?.length ?? 0), 0) ??
-      0) / 100,
-  );
+  const blocksContentLen = newestBlockContentLength();
+  const toolOutputLen = newestToolContentLength();
   const tcLen = last.toolCalls?.length ?? 0;
   const tcRunning = last.toolCalls?.filter((t) => t.status === 'running').length ?? 0;
-  return `${thinkLen}|${contentLen}|${blockLen}|${toolOutputLen}|${tcLen}|${tcRunning}`;
+  return `${thinkLen}|${contentLen}|${blockLen}|${blocksContentLen}|${toolOutputLen}|${tcLen}|${tcRunning}`;
 }
 
 function onUserScroll(): void {
-  userScrolledUp.value = !isAtBottom();
+  if (isAtBottom()) {
+    userScrolledUp.value = false;
+    userScrollIntent = false;
+    return;
+  }
+  if (userScrollIntent) {
+    userScrolledUp.value = true;
+    userScrollIntent = false;
+  }
 }
 
 // Scroll to bottom when a new message is added (user initiated)
 watch(
   () => chatStore.messages.length,
   () => {
-    userScrolledUp.value = false;
+    if (userScrolledUp.value) return;
     void nextTick().then(() => scrollToBottom());
   },
 );
@@ -70,21 +118,19 @@ watch(
     if (key === lastKey) return;
     lastKey = key;
     if (userScrolledUp.value) return;
-    // Throttle: max one scroll per 150ms
     if (scrollTimer) return;
     scrollTimer = setTimeout(() => {
       scrollTimer = null;
       scrollToBottom();
-    }, 150);
+    }, 16);
   },
 );
 
-// When streaming finishes, keep the newest content anchored at the bottom.
+// When streaming finishes, keep the newest content anchored unless the user moved away.
 watch(
   () => chatStore.isStreaming,
   (streaming) => {
-    if (!streaming) {
-      userScrolledUp.value = false;
+    if (!streaming && !userScrolledUp.value) {
       setTimeout(() => scrollToBottom(true), 100);
     }
   },
@@ -92,9 +138,17 @@ watch(
 
 onMounted(() => {
   messageListRef.value?.addEventListener('scroll', onUserScroll, { passive: true });
+  messageListRef.value?.addEventListener('wheel', markUserScrollIntent, { passive: true });
+  messageListRef.value?.addEventListener('touchstart', markUserScrollIntent, { passive: true });
+  messageListRef.value?.addEventListener('pointerdown', markScrollbarPointerIntent, {
+    passive: true,
+  });
 });
 onUnmounted(() => {
   messageListRef.value?.removeEventListener('scroll', onUserScroll);
+  messageListRef.value?.removeEventListener('wheel', markUserScrollIntent);
+  messageListRef.value?.removeEventListener('touchstart', markUserScrollIntent);
+  messageListRef.value?.removeEventListener('pointerdown', markScrollbarPointerIntent);
 });
 </script>
 

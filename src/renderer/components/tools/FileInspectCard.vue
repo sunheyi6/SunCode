@@ -2,7 +2,8 @@
 import type { ToolCallContent } from '@shared/types';
 import { computed, ref } from 'vue';
 import { parseToolArguments } from '../../utils/tool-presentation';
-import CodeBlock from '../code/CodeBlock.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -10,6 +11,7 @@ const props = defineProps<{
 
 const args = computed(() => parseToolArguments(props.call.arguments));
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const label = computed(() => {
   switch (props.call.name) {
     case 'read':
@@ -23,76 +25,15 @@ const label = computed(() => {
   }
 });
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const target = computed(() => {
   const fp = args.value.file_path as string;
   const pat = args.value.pattern as string;
   return fp || pat || '';
 });
 
-// Detect output language from tool + args
-const outputLang = computed(() => {
-  switch (props.call.name) {
-    case 'read': {
-      const fp = (args.value.file_path as string) || '';
-      return detectLangFromPath(fp);
-    }
-    case 'grep':
-      return 'text';
-    case 'glob':
-      return 'text';
-    default:
-      return undefined;
-  }
-});
-
-function detectLangFromPath(filePath: string): string | undefined {
-  const ext = filePath.split('.').pop()?.toLowerCase();
-  if (!ext) return undefined;
-  const map: Record<string, string> = {
-    ts: 'typescript',
-    tsx: 'typescript',
-    js: 'javascript',
-    jsx: 'javascript',
-    vue: 'html',
-    html: 'html',
-    css: 'css',
-    scss: 'scss',
-    less: 'less',
-    py: 'python',
-    rs: 'rust',
-    go: 'go',
-    java: 'java',
-    c: 'c',
-    cpp: 'cpp',
-    h: 'c',
-    hpp: 'cpp',
-    json: 'json',
-    yaml: 'yaml',
-    yml: 'yaml',
-    xml: 'xml',
-    md: 'markdown',
-    sh: 'bash',
-    bash: 'bash',
-    zsh: 'bash',
-    ps1: 'powershell',
-    bat: 'batch',
-    cmd: 'batch',
-    sql: 'sql',
-    graphql: 'graphql',
-    toml: 'toml',
-    ini: 'ini',
-    cfg: 'ini',
-    Dockerfile: 'dockerfile',
-    Makefile: 'makefile',
-  };
-  if (map[ext]) return map[ext];
-  // Try the whole filename
-  const base = filePath.split(/[/\\]/).pop()?.toLowerCase() || '';
-  if (map[base]) return map[base];
-  return undefined;
-}
-
 // Args entries (non-sensitive fields only)
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const argsEntries = computed(() => {
   const e: Array<{ key: string; value: string }> = [];
   const skip = new Set(['file_path', 'pattern', 'content', 'text', 'old_string', 'new_string']);
@@ -105,6 +46,7 @@ const argsEntries = computed(() => {
   return e;
 });
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const showArgs = ref(false);
 
 // ── Expandable output ──
@@ -114,6 +56,7 @@ const outputText = computed(() => props.call.result?.output ?? '');
 
 const outputLines = computed(() => outputText.value.split('\n'));
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const outputPreview = computed(() => {
   if (outputExpanded.value || outputLines.value.length <= OUTPUT_PREVIEW_LINES) {
     return outputText.value;
@@ -121,23 +64,29 @@ const outputPreview = computed(() => {
   return outputLines.value.slice(0, OUTPUT_PREVIEW_LINES).join('\n');
 });
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const outputHiddenLines = computed(() => {
   if (outputLines.value.length <= OUTPUT_PREVIEW_LINES) return 0;
   return outputLines.value.length - OUTPUT_PREVIEW_LINES;
 });
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const isFailed = computed(
   () => props.call.status === 'error' || props.call.result?.success === false,
 );
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const isRunning = computed(() => props.call.status === 'running');
 </script>
 
 <template>
-  <details class="file-inspect" :class="{ 'inspect-failed': isFailed }">
+  <details class="file-inspect" :class="{ 'inspect-failed': isFailed, 'inspect-running': isRunning }">
     <summary class="inspect-summary">
       <span class="inspect-icon">{{ isFailed ? '✗' : '▤' }}</span>
+      <span v-if="isRunning" class="inspect-breathe-dot" />
       <span class="inspect-label">{{ label }}</span>
       <span class="inspect-path" :title="target">{{ target || '等待参数...' }}</span>
-      <span class="inspect-status">{{ isFailed ? '失败' : '完成' }}</span>
+      <span class="inspect-status">{{ isFailed ? '失败' : isRunning ? '执行中' : '完成' }}</span>
     </summary>
     <div class="inspect-body">
       <!-- Args (collapsed toggle) -->
@@ -153,10 +102,10 @@ const isFailed = computed(
         </div>
       </div>
 
-      <!-- Output (CodeBlock with syntax highlighting frame) -->
+      <!-- Output (Markdown-rendered fenced code block) -->
       <div v-if="outputText" class="inspect-output">
         <div class="output-label">输出 ({{ outputLines.length }} 行 · {{ outputText.length }} 字符)</div>
-        <CodeBlock :code="outputPreview" :language="outputLang" />
+        <ToolMarkdownOutput :output="outputPreview" :command="target" />
         <button
           v-if="outputHiddenLines > 0"
           class="output-expand-btn"
@@ -184,6 +133,7 @@ const isFailed = computed(
   overflow: hidden;
 }
 .inspect-failed { border-color: rgba(243, 139, 168, 0.3); }
+.inspect-running { border-color: var(--color-teal); }
 
 .inspect-summary {
   display: flex; align-items: center; gap: var(--spacing-sm);
@@ -207,6 +157,28 @@ const isFailed = computed(
 
 .inspect-status { flex-shrink: 0; font-size: 11px; color: var(--color-green); }
 .inspect-failed .inspect-status { color: var(--color-red); }
+
+.inspect-breathe-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-teal);
+  animation: inspect-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes inspect-breathe {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px 0 color-mix(in srgb, var(--color-teal) 30%, transparent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--color-teal) 60%, transparent);
+  }
+}
 
 .inspect-body {
   padding: var(--spacing-xs) var(--spacing-md) var(--spacing-md);

@@ -1,176 +1,171 @@
 <script setup lang="ts">
-import type { ModelStats, TokenUsageSummary } from '@shared/types';
+import type { TokenUsageSummary } from '@shared/types';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useStatsStore } from '../../stores/stats';
+import { buildUsageViewModel } from './token-usage-view-model';
 
 const statsStore = useStatsStore();
-const chartDays = ref(14); // last N days to show
+const selectedRange = ref(30);
 const animateReady = ref(false);
 
-// Use cached stats from the store; if the user opens this tab before the
-// preload finishes, trigger a load now. This avoids the blank -> data flash.
 const stats = computed<TokenUsageSummary | null>(() => statsStore.tokenUsage);
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const loading = computed(() => statsStore.tokenUsageLoading && !statsStore.hasTokenUsage);
+const viewModel = computed(() =>
+  stats.value ? buildUsageViewModel(stats.value, selectedRange.value) : null,
+);
 
 onMounted(async () => {
   if (!statsStore.tokenUsageLoaded) {
     await statsStore.loadTokenUsage();
   }
-  // Defer enabling CSS transitions until after the initial paint to avoid
-  // animating every bar from 0 simultaneously when the tab first appears.
+  armAnimations();
+});
+
+watch(
+  () => [statsStore.tokenUsage, selectedRange.value],
+  (value, oldValue) => {
+    if (value && oldValue && animateReady.value) {
+      animateReady.value = false;
+      armAnimations();
+    }
+  },
+);
+
+function armAnimations(): void {
   void nextTick().then(() => {
     requestAnimationFrame(() => {
       animateReady.value = true;
     });
   });
-});
-
-// Reset animation readiness when cached data changes after the first load,
-// so subsequent refreshes still animate smoothly instead of jumping.
-watch(
-  () => statsStore.tokenUsage,
-  (value, oldValue) => {
-    if (value && oldValue && animateReady.value) {
-      animateReady.value = false;
-      void nextTick().then(() => {
-        requestAnimationFrame(() => {
-          animateReady.value = true;
-        });
-      });
-    }
-  },
-);
-
-const filteredDaily = computed(() => {
-  if (!stats.value) return [];
-  const all = stats.value.daily;
-  if (all.length <= chartDays.value) return all;
-  return all.slice(-chartDays.value);
-});
-
-const chartMax = computed(() => {
-  const max = Math.max(0, ...filteredDaily.value.map((d) => d.total));
-  return max === 0 ? 1 : max;
-});
-
-// Rough cost estimate: GPT-4 level pricing ~ $2.5/1M input, $10/1M output
-const estimatedCost = computed(() => {
-  if (!stats.value) return '0.00';
-  const { input, output } = stats.value.totals;
-  return ((input / 1_000_000) * 2.5 + (output / 1_000_000) * 10).toFixed(2);
-});
-
-function barHeight(value: number): string {
-  return `${Math.max(2, (value / chartMax.value) * 100)}%`;
 }
 
-function modelBarWidth(value: number, models: ModelStats[]): string {
-  const max = Math.max(1, ...models.map((m) => m.total));
-  return `${Math.max(2, (value / max) * 100)}%`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-  return String(n);
-}
-
-function formatDateLabel(date: string): string {
-  const d = new Date(date);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function shouldShowAxisLabel(index: number): boolean {
+  const days = viewModel.value?.days ?? [];
+  if (days.length === 0) return false;
+  if (index === 0 || index === days.length - 1) return true;
+  return index % 5 === 0;
 }
 </script>
 
 <template>
-  <div class="token-usage">
-    <!-- Summary cards -->
-    <div class="summary-cards">
-      <div class="stat-card">
-        <span class="stat-label">总 Token 用量</span>
-        <span class="stat-value">{{ stats ? formatTokens(stats.totals.total) : '—' }}</span>
-        <span class="stat-sub">输入 {{ stats ? formatTokens(stats.totals.input) : '—' }} / 输出 {{ stats ? formatTokens(stats.totals.output) : '—' }}</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">运行次数</span>
-        <span class="stat-value">{{ stats ? stats.totals.runs : '—' }}</span>
-        <span class="stat-sub">次 Agent 运行</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">预估费用</span>
-        <span class="stat-value">${{ estimatedCost }}</span>
-        <span class="stat-sub">基于 GPT-4 级定价估算</span>
+  <div class="usage-panel">
+    <div class="usage-toolbar">
+      <span>时间范围</span>
+      <div class="range-switch" aria-label="时间范围">
+        <button
+          v-for="range in [7, 30]"
+          :key="range"
+          type="button"
+          :class="{ active: selectedRange === range }"
+          @click="selectedRange = range"
+        >
+          最近 {{ range }} 天
+        </button>
       </div>
     </div>
 
-    <!-- Loading state -->
-    <div v-if="loading" class="loading-state">加载中...</div>
+    <div v-if="loading" class="usage-state">加载中...</div>
 
-    <!-- Empty state -->
-    <div v-else-if="!stats || stats.totals.runs === 0" class="empty-state">
-      <span class="empty-icon">📊</span>
-      <p>暂无 Token 使用数据</p>
-      <p class="empty-hint">运行一次 Agent 对话后将开始记录用量统计</p>
+    <div v-else-if="!viewModel || viewModel.runs === 0" class="usage-state empty">
+      <strong>暂无 Token 使用数据</strong>
+      <span>运行一次 Agent 对话后将开始记录用量统计</span>
     </div>
 
-    <!-- Charts -->
     <template v-else>
-      <!-- Daily chart -->
-      <section class="chart-section">
-        <div class="chart-header">
-          <h3>📅 每日用量</h3>
-          <div class="chart-toggles">
-            <button
-              v-for="d in [7, 14, 30]"
-              :key="d"
-              class="toggle-btn"
-              :class="{ active: chartDays === d }"
-              @click="chartDays = d"
-            >{{ d }}天</button>
-          </div>
+      <section class="metric-grid">
+        <div class="metric-card">
+          <span class="metric-label"><span class="metric-icon">♨</span> tokens 用量</span>
+          <strong>{{ viewModel.totalTokensLabel }}</strong>
         </div>
-
-        <div class="bar-chart" v-if="filteredDaily.length > 0">
-          <div class="bars-row">
-            <div
-              v-for="day in filteredDaily"
-              :key="day.date"
-              class="bar-col"
-            >
-              <div
-                class="bar-fill"
-                :class="{ animate: animateReady }"
-                :style="{ height: barHeight(day.total) }"
-              >
-                <span class="bar-tip">{{ formatTokens(day.total) }}</span>
-              </div>
-              <span class="bar-label">{{ formatDateLabel(day.date) }}</span>
-            </div>
-          </div>
-          <div class="chart-legend">
-            <span class="legend-item"><span class="legend-dot input-dot" />输入</span>
-            <span class="legend-item"><span class="legend-dot output-dot" />输出</span>
-          </div>
+        <div class="metric-card">
+          <span class="metric-label"><span class="metric-icon">▱</span> 会话数量</span>
+          <strong>{{ viewModel.runs }}</strong>
         </div>
-        <p v-else class="no-data">无每日数据</p>
+        <div class="metric-card">
+          <span class="metric-label"><span class="metric-icon">▭</span> 消息数量</span>
+          <strong>{{ viewModel.messageCount }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label"><span class="metric-icon">▦</span> 活跃天数</span>
+          <strong>{{ viewModel.activeDays }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label"><span class="metric-icon">▣</span> 当前连续天数</span>
+          <strong>{{ viewModel.currentStreak }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label"><span class="metric-icon">⌁</span> 最常用模型</span>
+          <strong class="model-title">{{ viewModel.topModel?.modelName ?? '-' }}</strong>
+          <small>占比 {{ viewModel.topModel?.percentLabel ?? '0%' }}</small>
+        </div>
       </section>
 
-      <!-- Model breakdown -->
-      <section class="chart-section">
-        <h3>🧠 模型用量分布</h3>
-        <div class="model-list" v-if="stats.byModel.length > 0">
-          <div v-for="m in stats.byModel" :key="m.modelName" class="model-row">
-            <div class="model-info">
-              <span class="model-name">{{ m.modelName }}</span>
-              <span class="model-runs">{{ m.runs }} 次</span>
-            </div>
-            <div class="model-bar-wrap">
+      <section class="usage-card heatmap-card">
+        <div class="section-header">
+          <h3>活跃热力图</h3>
+          <div class="heat-legend" aria-hidden="true">
+            <span>较少</span>
+            <i v-for="level in [0, 1, 2, 3, 4, 5]" :key="level" :class="`heat-${level}`" />
+            <span>较多</span>
+          </div>
+        </div>
+        <div class="heatmap">
+          <span
+            v-for="day in viewModel.days"
+            :key="day.date"
+            class="heat-cell"
+            :class="`heat-${day.intensity}`"
+            :title="`${day.label}: ${day.total} tokens`"
+          />
+        </div>
+      </section>
+
+      <section class="usage-card trend-card">
+        <h3>按天 Token 趋势</h3>
+        <div class="trend-plot">
+          <div class="grid-lines" aria-hidden="true">
+            <span v-for="line in 5" :key="line" />
+          </div>
+          <div class="trend-bars">
+            <div v-for="(day, index) in viewModel.days" :key="day.date" class="trend-column">
               <div
-                class="model-bar-fill"
-                :class="{ animate: animateReady }"
-                :style="{ width: modelBarWidth(m.total, stats.byModel) }"
+                class="trend-bar"
+                :class="{ animate: animateReady, empty: day.total === 0 }"
+                :style="{ height: day.height }"
+                :title="`${day.label}: ${day.total} tokens`"
               />
+              <span :class="{ visible: shouldShowAxisLabel(index) }">{{ day.label }}</span>
             </div>
-            <span class="model-tokens">{{ formatTokens(m.total) }}</span>
+          </div>
+        </div>
+        <div class="model-legend">
+          <span v-for="model in viewModel.models" :key="model.modelName">
+            <i :style="{ background: model.color }" />
+            {{ model.modelName }}
+          </span>
+        </div>
+      </section>
+
+      <section class="usage-card model-card">
+        <h3>模型用量</h3>
+        <div v-if="viewModel.models.length > 0" class="model-usage">
+          <div class="donut" :style="{ background: viewModel.donutBackground }">
+            <div class="donut-hole">
+              <strong>{{ viewModel.totalTokensLabel }}</strong>
+              <span>tokens</span>
+            </div>
+          </div>
+          <div class="model-breakdown">
+            <div v-for="model in viewModel.models" :key="model.modelName" class="model-row">
+              <span class="model-dot" :style="{ background: model.color }" />
+              <span class="model-copy">
+                <strong>{{ model.modelName }}</strong>
+                <small>{{ model.tokenLabel }}</small>
+              </span>
+              <span class="model-percent">{{ model.percentLabel }}</span>
+            </div>
           </div>
         </div>
         <p v-else class="no-data">无模型数据</p>
@@ -180,278 +175,407 @@ function formatDateLabel(date: string): string {
 </template>
 
 <style scoped>
-.token-usage {
+.usage-panel {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
 }
 
-/* Summary cards */
-.summary-cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-}
-
-.stat-card {
+.usage-toolbar {
   display: flex;
-  flex-direction: column;
-  padding: 14px;
-  background: var(--color-surface);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  gap: 4px;
-}
-
-.stat-label {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.stat-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.stat-sub {
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-
-/* Loading & empty */
-.loading-state {
-  text-align: center;
-  padding: 40px 0;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-.empty-state {
-  text-align: center;
-  padding: 40px 0;
-  color: var(--color-text-muted);
-}
-
-.empty-icon {
-  font-size: 40px;
-  display: block;
-  margin-bottom: 10px;
-}
-
-.empty-state p {
-  margin: 4px 0;
-  font-size: 13px;
-}
-
-.empty-hint {
-  font-size: 11px;
-  opacity: 0.7;
-}
-
-/* Chart section */
-.chart-section {
-  background: var(--color-surface);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.chart-section h3 {
-  margin: 0 0 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.chart-header {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--color-text);
+  font-size: 15px;
 }
 
-.chart-header h3 {
-  margin: 0;
-}
-
-.chart-toggles {
-  display: flex;
-  gap: 4px;
-}
-
-.toggle-btn {
-  padding: 3px 10px;
-  font-size: 11px;
-  border: 1px solid var(--border-color);
+.range-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: 10px;
   background: var(--color-bg);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  border-radius: 4px;
 }
 
-.toggle-btn.active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-bg);
+.range-switch button {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 14px;
 }
 
-/* Bar chart */
-.bar-chart {
+.range-switch button.active {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+  font-weight: 560;
+}
+
+.usage-state {
   display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.usage-state.empty {
   flex-direction: column;
   gap: 8px;
+  border-radius: 8px;
+  background: var(--color-surface);
 }
 
-.bars-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 140px;
-  padding: 0 4px;
-}
-
-.bar-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: 100%;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
-.bar-fill {
-  width: 100%;
-  max-width: 32px;
-  background: color-mix(in srgb, var(--color-accent) 70%, transparent);
-  border-radius: 3px 3px 0 0;
-  position: relative;
-  min-height: 2px;
-  will-change: height;
-}
-
-.bar-fill.animate {
-  transition: height 0.25s ease;
-}
-
-.bar-fill:hover {
-  background: var(--color-accent);
-}
-
-.bar-tip {
-  position: absolute;
-  top: -18px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 10px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  opacity: 0;
-}
-
-.bar-fill:hover .bar-tip {
-  opacity: 1;
-}
-
-.bar-label {
-  font-size: 10px;
-  color: var(--color-text-muted);
-}
-
-.chart-legend {
-  display: flex;
-  gap: 16px;
-  justify-content: center;
-  margin-top: 4px;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  color: var(--color-text-muted);
-}
-
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.input-dot { background: color-mix(in srgb, var(--color-accent) 40%, transparent); }
-.output-dot { background: var(--color-accent); }
-
-.no-data {
-  color: var(--color-text-muted);
-  font-size: 12px;
-  text-align: center;
-  padding: 20px 0;
-}
-
-/* Model list */
-.model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.model-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.model-info {
-  width: 130px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.model-name {
-  font-size: 12px;
+.usage-state strong {
   color: var(--color-text);
-  font-weight: 550;
+  font-size: 16px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.metric-card {
+  display: flex;
+  min-height: 110px;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.metric-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 15px;
+}
+
+.metric-icon {
+  width: 18px;
+  color: var(--color-text-secondary);
+  font-size: 15px;
+  text-align: center;
+}
+
+.metric-card strong {
   overflow: hidden;
+  color: var(--color-text);
+  font-size: 38px;
+  font-weight: 780;
+  letter-spacing: 0;
+  line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.model-runs {
-  font-size: 10px;
+.metric-card .model-title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.metric-card small {
   color: var(--color-text-muted);
+  font-size: 14px;
 }
 
-.model-bar-wrap {
-  flex: 1;
-  height: 8px;
-  background: var(--color-bg);
-  border-radius: 4px;
-  overflow: hidden;
+.usage-card {
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: 20px;
 }
 
-.model-bar-fill {
-  height: 100%;
-  background: var(--color-accent);
-  border-radius: 4px;
-  will-change: width;
+.usage-card h3,
+.section-header h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 560;
 }
 
-.model-bar-fill.animate {
-  transition: width 0.25s ease;
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
-.model-tokens {
+.heat-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
   font-size: 12px;
-  color: var(--color-text-secondary);
-  font-weight: 550;
-  flex-shrink: 0;
-  width: 50px;
+}
+
+.heat-legend i,
+.heat-cell {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+}
+
+.heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 18px);
+  justify-content: start;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 0 2px;
+}
+
+.heat-0 { background: color-mix(in srgb, var(--color-bg) 72%, var(--color-surface)); }
+.heat-1 { background: #d7e9fb; }
+.heat-2 { background: #acd0f4; }
+.heat-3 { background: #7cb7ef; }
+.heat-4 { background: #459bea; }
+.heat-5 { background: #177fe8; }
+
+.trend-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.trend-plot {
+  position: relative;
+  height: 330px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--color-bg);
+  padding: 24px 24px 30px;
+}
+
+.grid-lines {
+  position: absolute;
+  inset: 24px 24px 52px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.grid-lines span {
+  border-top: 1px dashed var(--border-color);
+}
+
+.trend-bars {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100%;
+  align-items: end;
+  gap: 4px;
+}
+
+.trend-column {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.trend-bar {
+  width: min(24px, 70%);
+  min-height: 4px;
+  border-radius: 2px 2px 0 0;
+  background: #1683f7;
+  will-change: height;
+}
+
+.trend-bar.empty {
+  min-height: 0;
+  background: transparent;
+}
+
+.trend-bar.animate {
+  transition: height 0.25s ease;
+}
+
+.trend-column span {
+  width: 58px;
+  height: 16px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  opacity: 0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.trend-column span.visible {
+  opacity: 1;
+}
+
+.model-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 48px;
+}
+
+.model-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-muted);
+  font-size: 15px;
+}
+
+.model-legend i,
+.model-dot {
+  display: block;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.model-usage {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 36px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 36px 20px;
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.donut {
+  display: flex;
+  width: 232px;
+  height: 232px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.donut-hole {
+  display: flex;
+  width: 112px;
+  height: 112px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bg);
+}
+
+.donut-hole strong {
+  color: var(--color-text);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.donut-hole span {
+  margin-top: 8px;
+  color: var(--color-text-muted);
+  font-size: 15px;
+}
+
+.model-breakdown {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.model-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 74px;
+  gap: 12px;
+  align-items: center;
+  min-height: 72px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.model-row:last-child {
+  border-bottom: 0;
+}
+
+.model-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-copy strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-copy small,
+.model-percent {
+  color: var(--color-text-muted);
+  font-size: 15px;
+}
+
+.model-percent {
+  font-family: var(--font-mono);
   text-align: right;
+}
+
+.no-data {
+  margin: 18px 0 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+@media (max-width: 980px) {
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .model-usage {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .model-breakdown {
+    width: 100%;
+  }
+}
+
+@media (max-width: 680px) {
+  .usage-toolbar,
+  .section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .range-switch {
+    align-self: flex-start;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trend-plot {
+    height: 260px;
+    padding-inline: 12px;
+  }
 }
 </style>

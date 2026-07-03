@@ -63,6 +63,13 @@ export const BUILTIN_COMMANDS: SlashCommand[] = [
     icon: '❓',
     handler: 'text',
   },
+  {
+    name: 'init',
+    description: '为当前项目初始化 AGENTS.md 项目约束',
+    hint: 'AI 自动扫描项目结构，生成项目约束文件 AGENTS.md。核心是项目约束，不要将实现细节写入——详细文档请放在 docs/ 目录。',
+    icon: '🚀',
+    handler: 'text',
+  },
 ];
 
 // ===== Fuzzy Match =====

@@ -2,7 +2,10 @@
 import type { SubagentResult, ToolCallContent } from '@shared/types';
 import { computed, nextTick, ref, watch } from 'vue';
 import { buildSubagentInlineTrace } from '../chat/call-trace-view-model';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import InlineCallTrace from '../chat/InlineCallTrace.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -17,21 +20,27 @@ const results = computed<SubagentResult[]>(() => {
 });
 
 const isRunning = computed(() => props.call.status === 'running');
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const isDone = computed(() => props.call.status === 'done');
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const isError = computed(() => props.call.status === 'error');
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function toggleExpand(): void {
   expanded.value = !expanded.value;
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function setOutputRef(agent: string, el: Element | null): void {
   if (el) outputRefs.value.set(agent, el as HTMLElement);
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function resultTrace(result: SubagentResult) {
   return buildSubagentInlineTrace(result, isRunning.value);
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function hasResultOutput(result: SubagentResult): boolean {
   return Boolean(result.output && result.output !== '执行中...');
 }
@@ -102,7 +111,9 @@ watch(
 
         <!-- Sub-agent's output -->
         <div v-if="hasResultOutput(r)" class="result-output">
-          <pre class="output-text" :ref="(el) => setOutputRef(r.agent, el as Element)">{{ r.output }}</pre>
+          <div class="output-text" :ref="(el) => setOutputRef(r.agent, el as Element)">
+            <ToolMarkdownOutput :output="r.output" />
+          </div>
         </div>
 
         <!-- Error -->
@@ -142,10 +153,25 @@ watch(
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
   background: var(--color-overlay);
 }
-.running .status-dot { background: var(--color-accent); animation: pulse 1.2s infinite; }
+.running .status-dot {
+  background: var(--color-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 50%, transparent);
+  animation: subagent-breathe 1.4s ease-in-out infinite;
+}
 .done .status-dot { background: var(--color-green); }
 .error .status-dot { background: var(--color-red); }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+@keyframes subagent-breathe {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px 0 color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  }
+}
 
 .agent-icon { font-size: 13px; }
 .agent-label { font-size: 13px; font-weight: 550; color: var(--color-text); flex: 1; }
@@ -177,11 +203,7 @@ watch(
 
 .result-output { margin: 8px 0 0; }
 .output-text {
-  font-size: 13px; line-height: 1.5; color: var(--color-text);
-  padding: 0;
-  margin: 0;
   max-height: 300px; overflow-y: auto;
-  white-space: pre-wrap; word-break: break-all;
 }
 
 .result-error {

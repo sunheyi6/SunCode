@@ -1,4 +1,4 @@
-import type { MessageRole, ToolCallContent, ToolDefinition } from '@shared/types';
+import type { MessageRole, ToolCallContent, ToolDefinition, UiLanguage } from '@shared/types';
 
 const STRUCTURED_CONTENT_VERSION = 1;
 
@@ -12,6 +12,10 @@ export interface StructuredSystemPromptInput {
   relevantLessonsContent?: string;
   agentsMdContent?: string;
   skillsContent?: string;
+  responseLanguage?: {
+    language: UiLanguage;
+    instruction: string;
+  };
   currentDate: string;
   workingDirectory: string;
 }
@@ -48,6 +52,7 @@ export function buildStructuredSystemPrompt(input: StructuredSystemPromptInput):
       projectInstructions: input.agentsMdContent,
       skills: input.skillsContent,
     },
+    responseLanguage: input.responseLanguage,
     environment: {
       currentDate: input.currentDate,
       workingDirectory: input.workingDirectory,

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { ToolExecution } from '../../stores/agent';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 defineProps<{
   execution: ToolExecution;
@@ -9,6 +11,7 @@ defineProps<{
 <template>
   <div class="tool-card" :class="execution.status">
     <div class="tool-header">
+      <span v-if="execution.status === 'running'" class="tool-breathe-dot" />
       <span class="tool-icon">
         {{ execution.status === 'running' ? '⏳' : execution.status === 'done' ? '✅' : '❌' }}
       </span>
@@ -18,7 +21,7 @@ defineProps<{
       </span>
     </div>
     <div v-if="execution.result && execution.status !== 'running'" class="tool-output">
-      <pre>{{ execution.result.output || execution.result.error }}</pre>
+      <ToolMarkdownOutput :output="execution.result.output || execution.result.error || ''" />
     </div>
   </div>
 </template>
@@ -34,6 +37,28 @@ defineProps<{
 
 .tool-card.running {
   border-color: var(--color-teal);
+}
+
+.tool-breathe-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-teal);
+  animation: tool-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes tool-breathe {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px 0 color-mix(in srgb, var(--color-teal) 30%, transparent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--color-teal) 60%, transparent);
+  }
 }
 
 .tool-card.done {
@@ -73,16 +98,4 @@ defineProps<{
   border-top: 1px solid var(--border-color);
 }
 
-.tool-output pre {
-  margin: 0;
-  padding: 0;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 300px;
-  overflow-y: auto;
-  background: transparent;
-  border: none;
-}
 </style>

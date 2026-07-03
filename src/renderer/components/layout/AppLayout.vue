@@ -117,8 +117,10 @@ const traceSystemPrompt = computed(() => {
 
       <!-- Main: Chat Panel -->
       <main class="main-content">
-        <GitPanel />
+        <!-- Always-present drag region for frameless window (44px = titleBarOverlay height) -->
+        <div class="titlebar-drag-region" />
         <ChatPanel />
+        <GitPanel />
 
         <!-- 调用轨迹 右侧边缘竖条标签 -->
         <div
@@ -259,6 +261,25 @@ const traceSystemPrompt = computed(() => {
   overflow: hidden;
   background: var(--color-bg);
   position: relative;
+}
+
+/*
+ * Always-present drag region at the top of the main content area.
+ * Matches titleBarOverlay height (44px) so the frameless window can be
+ * dragged even when ChatHeader is hidden (welcome screen).
+ * When ChatHeader is visible it paints on top and its own no-drag
+ * rules take precedence over this absolute-positioned drag region.
+ */
+.titlebar-drag-region {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  -webkit-app-region: drag;
+  app-region: drag;
+  z-index: 9;
+  pointer-events: auto;
 }
 
 /* ── 调用轨迹 右侧边缘标签 ── */

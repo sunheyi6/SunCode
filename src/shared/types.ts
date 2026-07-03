@@ -3,6 +3,9 @@
 /** Role of a message in the conversation */
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 
+/** User-facing language for localized UI and model responses. */
+export type UiLanguage = 'zh' | 'en';
+
 /** Text content block within a message */
 export interface TextContent {
   type: 'text';
@@ -45,7 +48,7 @@ export interface Message {
   content: string | ContentBlock[];
   toolCallId?: string;
   /** UI language selected from the user prompt for localized progress display. */
-  uiLanguage?: 'zh' | 'en';
+  uiLanguage?: UiLanguage;
   /** Only on assistant messages with tool calls */
   toolCalls?: ToolCallContent[];
   /** System prompt for this run (persisted for call trace panel). */
@@ -533,7 +536,13 @@ export interface PreExecutedToolCall {
 
 /** Messages sent from main process to agent worker */
 export type WorkerInMessage =
-  | { type: 'prompt'; sessionId: string; text: string; attachments?: string[] }
+  | {
+      type: 'prompt';
+      sessionId: string;
+      text: string;
+      uiLanguage?: UiLanguage;
+      attachments?: string[];
+    }
   | { type: 'abort'; sessionId: string }
   | { type: 'stop'; sessionId: string }
   | { type: 'continue'; sessionId: string }
@@ -804,7 +813,7 @@ export interface TokenUsageSummary {
   /** Per-model aggregated token usage */
   byModel: ModelStats[];
   /** Grand totals */
-  totals: { input: number; output: number; total: number; runs: number };
+  totals: { input: number; output: number; total: number; runs: number; messages: number };
 }
 
 export interface DayStats {

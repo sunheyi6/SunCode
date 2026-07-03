@@ -14,6 +14,7 @@ import type {
   TokenUsageSummary,
   ToolCallContent,
   ToolResult,
+  UiLanguage,
   UpdateStatus,
 } from '@shared/types';
 import { contextBridge, ipcRenderer } from 'electron';
@@ -27,8 +28,8 @@ const suncodeAPI = {
   // ===== Agent Control =====
 
   /** Send a prompt to the agent */
-  prompt(text: string): void {
-    ipcRenderer.send('agent:prompt', text);
+  prompt(text: string, uiLanguage?: UiLanguage): void {
+    ipcRenderer.send('agent:prompt', text, uiLanguage);
   },
 
   /** Abort the current agent run (hard stop). */

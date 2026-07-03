@@ -1,4 +1,6 @@
-export type UiLanguage = 'zh' | 'en';
+import type { UiLanguage } from '@shared/types';
+
+export type { UiLanguage } from '@shared/types';
 
 const CJK_RE = /[\u3400-\u9fff]/g;
 const LATIN_RE = /[a-zA-Z]/g;

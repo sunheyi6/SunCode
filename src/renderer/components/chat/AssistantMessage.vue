@@ -88,32 +88,14 @@ const fullTextForCopy = computed(() => {
 });
 
 const thinkingSummary = computed(() => {
-  const trace = inlineTrace.value;
   const time = formattedElapsed.value;
 
   if (props.message.isStreaming) {
-    if (trace.toolCount > 0) {
-      const label = uiLanguage.value === 'en' ? 'Processing' : '处理中';
-      const toolLabel = uiLanguage.value === 'en' ? 'tools' : '工具';
-      return `${label} ${time} · ${toolLabel} ${trace.completedToolCount}/${trace.toolCount}`;
-    }
     return `${uiLanguage.value === 'en' ? 'Processing' : '处理中'} ${time}`;
   }
 
   const parts: string[] = [uiLanguage.value === 'en' ? 'Processed' : '已处理'];
-  const turn = props.message.turnCount ?? 0;
-  if (turn > 1) parts.push(uiLanguage.value === 'en' ? `${turn} requests` : `${turn} 次请求`);
   if (elapsedSeconds.value > 0) parts.push(time);
-  if (trace.toolCount > 0) {
-    const failed =
-      trace.failedToolCount > 0
-        ? uiLanguage.value === 'en'
-          ? `, failed ${trace.failedToolCount}`
-          : `，失败 ${trace.failedToolCount}`
-        : '';
-    const toolLabel = uiLanguage.value === 'en' ? 'tools' : '工具';
-    parts.push(`${toolLabel} ${trace.completedToolCount}/${trace.toolCount}${failed}`);
-  }
   return parts.join('  ');
 });
 
@@ -210,18 +192,24 @@ async function copyContent() {
 }
 
 .inline-trace-header {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
   padding: 2px 0 8px;
+  font-weight: 600;
 }
 
 .inline-trace-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--color-accent);
-  animation: pulse-dot 1.4s ease-in-out infinite;
+  width: 10px;
+  height: 10px;
+  border: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  flex: 0 0 10px;
+  animation: streaming-spin 0.7s linear infinite;
 }
-
-@keyframes pulse-dot { 0%,100%{opacity:.4} 50%{opacity:1} }
 
 .trace-fallback-text {
   font-size: 14px;
@@ -291,6 +279,12 @@ details[open] > .thinking-summary-done::before {
 .dot:nth-child(3) { animation-delay: 0.32s; }
 
 @keyframes pulse { 0%,80%,100%{opacity:.3;transform:scale(.8)} 40%{opacity:1;transform:scale(1)} }
+
+@keyframes streaming-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 /* -- footer -- */
 .message-footer { display: flex; align-items: center; gap: 4px; margin-top: 2px; padding-left: 4px; }

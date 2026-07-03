@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Failure Lessons — automatic extraction and retrieval of coding lessons.
  *
  * Stores structured lessons under `.suncode/lessons/` so the agent
@@ -531,7 +531,7 @@ export function buildExtractionContexts(
                 .map((b) => b.text)
                 .join('');
 
-        if (resultText.startsWith('错误:')) {
+        if (isToolFailure(resultText)) {
           const key = `tool_failure:${tc.name}`;
           if (!usedKeys.has(key) && !isRateLimited('tool_failure', tc.name)) {
             usedKeys.add(key);
@@ -591,6 +591,20 @@ export function buildExtractionContexts(
 
   // Cap to 3 per run
   return contexts.slice(0, 3);
+}
+
+/** Detect tool failure from result text (JSON from formatToolResultForModel or legacy text). */
+function isToolFailure(resultText: string): boolean {
+  // Legacy format: starts with '错误:'
+  if (resultText.startsWith('错误:')) return true;
+
+  // JSON format from formatToolResultForModel: check success field
+  try {
+    const parsed = JSON.parse(resultText);
+    return parsed?.type === 'tool_result' && parsed.success === false;
+  } catch {
+    return false;
+  }
 }
 
 // ---- LLM Extraction ----

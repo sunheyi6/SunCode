@@ -1,103 +1,19 @@
 <script setup lang="ts">
-import DOMPurify from 'dompurify';
-import { marked } from 'marked';
-import { computed, ref, watch } from 'vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import MarkdownRender from 'markstream-vue';
+import 'markstream-vue/index.css';
+import { computed } from 'vue';
+import { buildStreamingTextRenderOptions } from './streaming-text-renderer';
 
 const props = defineProps<{
   text: string;
   isStreaming: boolean;
 }>();
 
-// ── Streaming optimization ──
-// During streaming, we render raw text (simple newline→<br> + HTML escape)
-// to avoid the O(n²) cost of re-parsing full markdown on every token delta.
-// When streaming finishes, we do a one-time full markdown render.
-const finalHtml = ref('');
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const renderOptions = computed(() => buildStreamingTextRenderOptions(props.isStreaming));
 
-// Track whether we've rendered the final markdown for the current completed text
-let lastRenderedCompletedText = '';
-
-watch(
-  () => props.isStreaming,
-  (streaming) => {
-    if (!streaming && props.text) {
-      finalHtml.value = renderMarkdown(props.text);
-      lastRenderedCompletedText = props.text;
-    }
-  },
-);
-
-// Also catch the case where text arrives already complete (e.g. restore from session)
-watch(
-  () => props.text,
-  (text) => {
-    if (!props.isStreaming && text && text !== lastRenderedCompletedText) {
-      finalHtml.value = renderMarkdown(text);
-      lastRenderedCompletedText = text;
-    }
-  },
-  { immediate: true },
-);
-
-function renderMarkdown(text: string): string {
-  if (!text) return '';
-  const html = marked.parse(text, { async: false }) as string;
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: [
-      'p',
-      'br',
-      'strong',
-      'em',
-      'u',
-      's',
-      'a',
-      'code',
-      'pre',
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6',
-      'ul',
-      'ol',
-      'li',
-      'blockquote',
-      'table',
-      'thead',
-      'tbody',
-      'tr',
-      'th',
-      'td',
-      'span',
-      'div',
-      'details',
-      'summary',
-    ],
-    ALLOWED_ATTR: ['href', 'target', 'class', 'rel'],
-  });
-}
-
-/** Simple raw-text→HTML that avoids full markdown parsing during streaming.
- *  Preserves newlines and escapes HTML, but doesn't parse markdown syntax. */
-function escapeAndLinkify(text: string): string {
-  // Escape HTML entities
-  let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // Preserve line breaks
-  html = html.replace(/\n/g, '<br>');
-  return html;
-}
-
-const renderedHtml = computed(() => {
-  if (!props.text) return '';
-  // During streaming: cheap raw text (avoids O(n²) markdown re-parse)
-  if (props.isStreaming) {
-    return escapeAndLinkify(props.text);
-  }
-  // After streaming: use the pre-rendered final markdown
-  return finalHtml.value || escapeAndLinkify(props.text);
-});
-
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const containerClass = computed(() => ({
   'streaming-text': true,
   'is-streaming': props.isStreaming,
@@ -106,8 +22,16 @@ const containerClass = computed(() => ({
 
 <template>
   <div :class="containerClass">
-    <div class="markdown-content" v-html="renderedHtml" />
-    <span v-if="isStreaming" class="cursor-blink">▌</span>
+    <MarkdownRender
+      custom-id="chat"
+      mode="chat"
+      :content="text"
+      :final="renderOptions.final"
+      :smooth-streaming="renderOptions.smoothStreaming"
+      :fade="renderOptions.fade"
+      :typewriter="renderOptions.typewriter"
+      :max-live-nodes="renderOptions.maxLiveNodes"
+    />
   </div>
 </template>
 
@@ -116,74 +40,89 @@ const containerClass = computed(() => ({
   line-height: 1.6;
 }
 
-.markdown-content :deep(p) {
+.streaming-text :deep([data-custom-id="chat"]) {
+  color: inherit;
+  font: inherit;
+}
+
+.streaming-text :deep(p) {
   margin: 0 0 8px 0;
 }
 
-.markdown-content :deep(p:last-child) {
+.streaming-text :deep(p:last-child) {
   margin-bottom: 0;
 }
 
-.markdown-content :deep(a) {
+.streaming-text :deep(a) {
   color: var(--color-accent);
   text-decoration: none;
 }
 
-.markdown-content :deep(a:hover) {
+.streaming-text :deep(a:hover) {
   text-decoration: underline;
 }
 
-.markdown-content :deep(pre) {
+.streaming-text :deep(pre) {
   margin: 8px 0;
 }
 
-.markdown-content :deep(code) {
+.streaming-text :deep(code) {
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
 
-.markdown-content :deep(blockquote) {
+.streaming-text :deep(blockquote) {
   border-left: 3px solid var(--color-accent);
   padding-left: 12px;
   margin: 8px 0;
   color: var(--color-text-secondary);
 }
 
-.markdown-content :deep(ul), .markdown-content :deep(ol) {
+.streaming-text :deep(ul),
+.streaming-text :deep(ol) {
   padding-left: 20px;
   margin: 4px 0;
 }
 
-.markdown-content :deep(li) {
+.streaming-text :deep(li) {
   margin: 2px 0;
 }
 
-.markdown-content :deep(h1), .markdown-content :deep(h2), .markdown-content :deep(h3) {
+.streaming-text :deep(h1),
+.streaming-text :deep(h2),
+.streaming-text :deep(h3) {
   margin: 12px 0 8px 0;
   font-weight: 600;
 }
 
-.markdown-content :deep(h1) { font-size: 1.4em; }
-.markdown-content :deep(h2) { font-size: 1.2em; }
-.markdown-content :deep(h3) { font-size: 1.1em; }
+.streaming-text :deep(h1) {
+  font-size: 1.4em;
+}
 
-/* ---- tables ---- */
-.markdown-content :deep(table) {
+.streaming-text :deep(h2) {
+  font-size: 1.2em;
+}
+
+.streaming-text :deep(h3) {
+  font-size: 1.1em;
+}
+
+.streaming-text :deep(table) {
   width: 100%;
   border-collapse: collapse;
   margin: 8px 0 12px 0;
   font-size: 13px;
 }
 
-.markdown-content :deep(th),
-.markdown-content :deep(td) {
+.streaming-text :deep(th),
+.streaming-text :deep(td) {
   padding: 6px 10px;
   border: 1px solid var(--border-color);
   text-align: left;
   vertical-align: top;
 }
 
-.markdown-content :deep(th) {
+.streaming-text :deep(th) {
   background: var(--color-surface);
   color: var(--color-text-secondary);
   font-weight: 600;
@@ -192,29 +131,17 @@ const containerClass = computed(() => ({
   letter-spacing: 0.03em;
 }
 
-.markdown-content :deep(tr:nth-child(even) td) {
+.streaming-text :deep(tr:nth-child(even) td) {
   background: color-mix(in srgb, var(--color-surface) 40%, transparent);
 }
 
-.markdown-content :deep(tr:hover td) {
+.streaming-text :deep(tr:hover td) {
   background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
-/* ---- horizontal rule ---- */
-.markdown-content :deep(hr) {
+.streaming-text :deep(hr) {
   border: 0;
   border-top: 1px solid var(--border-color);
   margin: 16px 0;
-}
-
-.cursor-blink {
-  color: var(--color-accent);
-  animation: blink 1s step-end infinite;
-  font-weight: 100;
-}
-
-@keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
 }
 </style>

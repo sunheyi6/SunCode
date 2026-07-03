@@ -549,24 +549,25 @@ describe('buildInlineCallTrace', () => {
     ]);
   });
 
-  test('does not show English thinking text for a Chinese UI language', () => {
+  test('shows answer output instead of English thinking for a Chinese UI language', () => {
     const message: ChatMessage = {
       id: 'a-language',
       role: 'assistant',
-      content: '',
+      content: '我先检查相关代码。',
       thinking: 'Read files and inspect the result.',
       timestamp: 1,
       isStreaming: true,
       uiLanguage: 'zh',
       blocks: [
         { id: 'b1', type: 'thinking', thinking: 'Read files and inspect the result.' },
+        { id: 'b2', type: 'text', text: '我先检查相关代码。' },
       ],
     };
 
     const trace = buildInlineCallTrace(message);
 
     expect(trace.entries).toMatchObject([
-      { kind: 'thinking', text: '正在分析下一步。' },
+      { kind: 'text', text: '我先检查相关代码。' },
     ]);
   });
 });

@@ -2,21 +2,26 @@
 import type { ToolCallContent } from '@shared/types';
 import { computed, nextTick, ref, watch } from 'vue';
 import { commandSummary, parseToolArguments } from '../../utils/tool-presentation';
-import CodeBlock from '../code/CodeBlock.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
 }>();
 
-const streamingPre = ref<HTMLPreElement | null>(null);
+const streamingOutputRef = ref<HTMLElement | null>(null);
 
 const args = computed(() => parseToolArguments(props.call.arguments));
 const details = computed(() =>
   props.call.result?.details?.type === 'command' ? props.call.result.details : undefined,
 );
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const title = computed(() => commandSummary(args.value));
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const commandText = computed(() => (details.value?.command || args.value.command || '') as string);
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const isFailed = computed(
   () =>
     props.call.status === 'error' ||
@@ -26,10 +31,10 @@ const isFailed = computed(
       details.value.exitCode !== 0),
 );
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const isRunning = computed(() => props.call.status === 'running');
 const streamingOutput = computed(() => props.call.partialOutput || '');
 
-// ── Expandable output ──
 const OUTPUT_PREVIEW_LINES = 5;
 const stdoutExpanded = ref(false);
 const stderrExpanded = ref(false);
@@ -45,23 +50,25 @@ function previewLines(text: string, expanded: boolean): { text: string; hidden: 
   };
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const stdoutPreview = computed(() =>
   previewLines(details.value?.stdout || '', stdoutExpanded.value),
 );
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const stderrPreview = computed(() =>
   previewLines(details.value?.stderr || '', stderrExpanded.value),
 );
 
-// Auto-scroll to bottom of streaming output
 watch(streamingOutput, async () => {
   await nextTick();
-  if (streamingPre.value) {
-    streamingPre.value.scrollTop = streamingPre.value.scrollHeight;
+  if (streamingOutputRef.value) {
+    streamingOutputRef.value.scrollTop = streamingOutputRef.value.scrollHeight;
   }
 });
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const exitCodeLabel = computed(() => {
-  if (details.value?.exitCode === null || details.value?.exitCode === undefined) return '—';
+  if (details.value?.exitCode === null || details.value?.exitCode === undefined) return '-';
   return String(details.value.exitCode);
 });
 </script>
@@ -69,31 +76,31 @@ const exitCodeLabel = computed(() => {
 <template>
   <details class="command-operation" :class="{ 'command-failed': isFailed, 'command-running': isRunning }" :open="isRunning">
     <summary class="command-summary">
-      <span class="command-icon">▸</span>
+      <span class="command-icon">&gt;</span>
+      <span v-if="isRunning" class="command-breathe-dot" />
       <span class="command-title">{{ title }}</span>
       <span class="command-status">{{ isRunning ? '执行中' : isFailed ? '失败' : '完成' }}</span>
-      <span class="command-exit-code" v-if="!isRunning">退出码：{{ exitCodeLabel }}</span>
+      <span v-if="!isRunning" class="command-exit-code">退出码：{{ exitCodeLabel }}</span>
     </summary>
     <div class="command-body">
       <div class="command-field">
         <span class="field-label">命令</span>
-        <CodeBlock
-          :code="(details?.command || args.command || '') as string"
-          language="bash"
-        />
+        <ToolMarkdownOutput :output="commandText" :command="commandText" />
       </div>
-      <div class="command-meta" v-if="!isRunning">
+      <div v-if="!isRunning" class="command-meta">
         <span>工作目录：{{ details?.cwd || '等待执行' }}</span>
         <span>退出码：{{ exitCodeLabel }}</span>
         <span v-if="details?.signal">终止信号：{{ details.signal }}</span>
       </div>
       <section v-if="isRunning && streamingOutput" class="command-section streaming">
         <h4>实时输出</h4>
-        <pre ref="streamingPre">{{ streamingOutput }}</pre>
+        <div ref="streamingOutputRef" class="streaming-output-scroll">
+          <ToolMarkdownOutput :output="streamingOutput" :command="commandText" :is-streaming="true" />
+        </div>
       </section>
       <section v-if="!isRunning" class="command-section">
         <h4>标准输出</h4>
-        <CodeBlock :code="stdoutPreview.text || '无输出'" language="text" />
+        <ToolMarkdownOutput :output="stdoutPreview.text || '无输出'" :command="commandText" />
         <button
           v-if="stdoutPreview.hidden > 0"
           class="output-expand-btn"
@@ -104,7 +111,7 @@ const exitCodeLabel = computed(() => {
       </section>
       <section v-if="!isRunning && details?.stderr" class="command-section">
         <h4>错误输出</h4>
-        <CodeBlock :code="stderrPreview.text" language="text" />
+        <ToolMarkdownOutput :output="stderrPreview.text" :command="commandText" />
         <button
           v-if="stderrPreview.hidden > 0"
           class="output-expand-btn"
@@ -136,6 +143,28 @@ const exitCodeLabel = computed(() => {
 
 .command-running .command-status {
   color: var(--color-accent);
+}
+
+.command-breathe-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: command-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes command-breathe {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px 0 color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  }
 }
 
 .command-running .command-summary {
@@ -217,21 +246,6 @@ details[open] .command-icon {
   text-transform: uppercase;
 }
 
-.command-field pre,
-.command-section pre {
-  margin: 0;
-  padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--color-bg-secondary);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
 .command-meta {
   display: flex;
   flex-wrap: wrap;
@@ -248,10 +262,9 @@ details[open] .command-icon {
   font-weight: 500;
 }
 
-.command-section.streaming pre {
+.streaming-output-scroll {
   max-height: 300px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+  overflow-y: auto;
 }
 
 .output-expand-btn {
@@ -267,6 +280,7 @@ details[open] .command-icon {
   text-align: center;
   border-top: 1px solid var(--border-color);
 }
+
 .output-expand-btn:hover {
   color: var(--color-accent);
 }

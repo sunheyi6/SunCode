@@ -168,7 +168,7 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
       console.log('[Worker] Dispatching prompt:', msg.text.slice(0, 50), 'session=', sid.slice(-8));
       withSessionLock(sid, async () => {
         try {
-          await agent.prompt(msg.text);
+          await agent.prompt(msg.text, msg.uiLanguage);
           console.log('[Worker] Prompt completed session=', sid.slice(-8));
         } catch (error) {
           console.error('[Worker] Prompt error:', error);

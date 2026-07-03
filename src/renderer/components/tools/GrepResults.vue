@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
+
 defineProps<{
   matches: string;
   count?: number;
@@ -11,7 +14,9 @@ defineProps<{
       <span class="grep-label">搜索结果</span>
       <span v-if="count !== undefined" class="grep-count">{{ count }} matches</span>
     </div>
-    <pre class="grep-content"><code>{{ matches }}</code></pre>
+    <div class="grep-content">
+      <ToolMarkdownOutput :output="matches" command="grep" />
+    </div>
   </div>
 </template>
 
@@ -46,16 +51,9 @@ defineProps<{
 }
 
 .grep-content {
-  margin: 0;
   padding: 8px 12px;
-  font-size: 12px;
-  line-height: 1.4;
-  font-family: var(--font-mono);
   background: var(--color-bg-tertiary);
-  white-space: pre-wrap;
   max-height: 400px;
   overflow-y: auto;
-  border-radius: 0;
-  border: none;
 }
 </style>

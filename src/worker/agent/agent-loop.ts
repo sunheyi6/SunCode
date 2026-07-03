@@ -13,6 +13,7 @@ import type {
   ToolCallContent,
   ToolDefinition,
   ToolResult,
+  UiLanguage,
 } from '@shared/types';
 
 import type { Tool } from '../tools/types';
@@ -55,6 +56,8 @@ export interface AgentLoopInput {
   memoryContent?: string;
   /** Retrieved failure lessons relevant to this request. */
   relevantLessonsContent?: string;
+  /** User-facing response language derived from the current user prompt. */
+  responseLanguage?: UiLanguage;
   abortSignal: AbortSignal;
   /** Unique identifier for this run (used for event logging). */
   runId: string;
@@ -122,6 +125,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     agentsMdContent,
     memoryContent,
     relevantLessonsContent,
+    responseLanguage,
     abortSignal,
     runId,
     sessionId,
@@ -207,6 +211,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         agentsMdContent,
         memoryContent,
         relevantLessonsContent,
+        responseLanguage,
       });
       if (systemPrompt !== lastSystemPrompt) {
         if (contextMessages[0]?.role === 'system') {

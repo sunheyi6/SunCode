@@ -2,6 +2,8 @@
 import type { ToolCallContent } from '@shared/types';
 import { computed } from 'vue';
 import { parseToolArguments } from '../../utils/tool-presentation';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 const props = defineProps<{
   calls: ToolCallContent[];
@@ -43,9 +45,10 @@ const inspectTarget = computed(() => {
   return latest.map((f) => f.split('/').pop() || f.split('\\').pop() || f).join(', ');
 });
 
+const inspectRunning = computed(() => inspectCalls.value.some((c) => c.status === 'running'));
+
 const inspectStatus = computed(() => {
-  const running = inspectCalls.value.some((c) => c.status === 'running');
-  if (running) return '读取中...';
+  if (inspectRunning.value) return '读取中...';
   const failed = inspectCalls.value.filter(
     (c) => c.status === 'error' || c.result?.success === false,
   ).length;
@@ -104,12 +107,18 @@ function resultPreview(call: ToolCallContent): string | null {
   if (call.result.error) return call.result.error.slice(0, 120);
   return null;
 }
+
+function resultCommand(call: ToolCallContent): string | undefined {
+  const args = parseToolArguments(call.arguments);
+  return typeof args.command === 'string' ? args.command : undefined;
+}
 </script>
 
 <template>
   <div class="compact-tool-bar">
     <!-- File inspect (merged) -->
-    <div v-if="inspectCalls.length > 0" class="compact-line inspect-line">
+    <div v-if="inspectCalls.length > 0" class="compact-line inspect-line" :class="{ 'status-running': inspectRunning }">
+      <span v-if="inspectRunning" class="compact-breathe-dot" />
       <span class="compact-icon">$</span>
       <span class="compact-label">{{ inspectLabel }}</span>
       <span class="compact-target">{{ inspectTarget }}</span>
@@ -119,17 +128,24 @@ function resultPreview(call: ToolCallContent): string | null {
     <!-- Bash (each gets a line + output preview) -->
     <div v-for="call in bashCalls" :key="call.id">
       <div class="compact-line" :class="callStatusClass(call)">
+        <span v-if="call.status === 'running'" class="compact-breathe-dot" />
         <span class="compact-icon">&gt;</span>
         <span class="compact-label">{{ callLabel(call.name) }}</span>
         <span class="compact-target">{{ callTarget(call) }}</span>
         <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
       </div>
-      <pre v-if="resultPreview(call)" class="compact-output">{{ resultPreview(call) }}</pre>
+      <ToolMarkdownOutput
+        v-if="resultPreview(call)"
+        class="compact-output"
+        :output="resultPreview(call) || ''"
+        :command="resultCommand(call)"
+      />
     </div>
 
     <!-- Edit/Write (each gets a line + diff summary) -->
     <div v-for="call in editCalls" :key="call.id">
       <div class="compact-line" :class="callStatusClass(call)">
+        <span v-if="call.status === 'running'" class="compact-breathe-dot" />
         <span class="compact-icon">+</span>
         <span class="compact-label">{{ callLabel(call.name) }}</span>
         <span class="compact-target">{{ callTarget(call) }}</span>
@@ -143,6 +159,7 @@ function resultPreview(call: ToolCallContent): string | null {
 
     <!-- Subagent -->
     <div v-for="call in subagentCalls" :key="call.id" class="compact-line" :class="callStatusClass(call)">
+      <span v-if="call.status === 'running'" class="compact-breathe-dot" />
       <span class="compact-icon">@</span>
       <span class="compact-label">{{ callLabel(call.name) }}</span>
       <span class="compact-target">{{ callTarget(call) }}</span>
@@ -151,6 +168,7 @@ function resultPreview(call: ToolCallContent): string | null {
 
     <!-- Other -->
     <div v-for="call in otherCalls" :key="call.id" class="compact-line" :class="callStatusClass(call)">
+      <span v-if="call.status === 'running'" class="compact-breathe-dot" />
       <span class="compact-icon">*</span>
       <span class="compact-label">{{ call.name }}</span>
       <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
@@ -175,6 +193,28 @@ function resultPreview(call: ToolCallContent): string | null {
 .compact-status { flex-shrink: 0; font-size: 10px; color: var(--color-text-muted); }
 .status-running .compact-status { color: var(--color-accent); }
 .status-failed  .compact-status { color: var(--color-red); }
+
+.compact-breathe-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: compact-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes compact-breathe {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px 0 color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+    box-shadow: 0 0 6px 2px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  }
+}
 
 /* Output preview for completed bash commands */
 .compact-output {

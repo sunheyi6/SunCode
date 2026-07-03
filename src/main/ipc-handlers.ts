@@ -18,6 +18,7 @@ import type {
   ModelStats,
   SessionMeta,
   TokenUsageSummary,
+  UiLanguage,
   WorkerInMessage,
   WorkerOutMessage,
 } from '@shared/types';
@@ -330,11 +331,13 @@ export function registerIpcHandlers(wm: WindowManager): void {
   initSessionStore();
 
   // Agent
-  ipcMain.on('agent:prompt', (_event, text: string) => {
+  ipcMain.on('agent:prompt', (_event, text: string, uiLanguage?: UiLanguage) => {
     try {
+      const sessionId = currentSessionId;
+      if (!sessionId) return;
       console.log('[Main] agent:prompt received:', text.slice(0, 80));
-      promptSessionId = currentSessionId; // Snap the owning session
-      sendToWorker({ type: 'prompt', sessionId: currentSessionId!, text });
+      promptSessionId = sessionId; // Snap the owning session
+      sendToWorker({ type: 'prompt', sessionId, text, uiLanguage });
     } catch (err) {
       console.error('[Main] agent:prompt failed:', (err as Error).message);
     }
@@ -901,21 +904,31 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.handle('stats:getTokenUsage', async (): Promise<TokenUsageSummary> => {
     try {
       const aggregate = await getTokenUsageAggregate();
+      const messageCount = await getTotalMessageCount();
 
       // Fallback: if the aggregate is empty (e.g. legacy install without the
       // aggregate file), build it once from existing run event logs.
       if (aggregate.totals.runs === 0) {
-        return await buildTokenUsageSummaryFromRuns();
+        return await buildTokenUsageSummaryFromRuns(messageCount);
       }
 
-      return aggregate;
+      return { ...aggregate, totals: { ...aggregate.totals, messages: messageCount } };
     } catch (err) {
       console.error('[Main] stats:getTokenUsage failed:', (err as Error).message);
-      return { daily: [], byModel: [], totals: { input: 0, output: 0, total: 0, runs: 0 } };
+      return {
+        daily: [],
+        byModel: [],
+        totals: { input: 0, output: 0, total: 0, runs: 0, messages: 0 },
+      };
     }
   });
 
-  async function buildTokenUsageSummaryFromRuns(): Promise<TokenUsageSummary> {
+  async function getTotalMessageCount(): Promise<number> {
+    const diskSessions = await loadAllSessions();
+    return diskSessions.reduce((total, session) => total + session.messageCount, 0);
+  }
+
+  async function buildTokenUsageSummaryFromRuns(messageCount: number): Promise<TokenUsageSummary> {
     const dailyMap = new Map<
       string,
       { input: number; output: number; total: number; runs: number }
@@ -978,6 +991,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       output: byModel.reduce((s, m) => s + m.output, 0),
       total: byModel.reduce((s, m) => s + m.total, 0),
       runs: byModel.reduce((s, m) => s + m.runs, 0),
+      messages: messageCount,
     };
 
     return { daily, byModel, totals };

@@ -20,6 +20,7 @@ export function useAgent() {
   const isBusy = computed(() => chatStore.isStreaming);
 
   function dispatch(text: string): void {
+    const uiLanguage = detectUiLanguage(text);
     chatStore.addUserMessage(text);
     chatStore.setActiveSessionId(sessionsStore.activeSessionId ?? '');
     chatStore.startAssistantMessage();
@@ -27,10 +28,10 @@ export function useAgent() {
       .saveMessage({
         role: 'user',
         content: [{ type: 'text', text }],
-        uiLanguage: detectUiLanguage(text),
+        uiLanguage,
       })
       .then(() => sessionsStore.refresh());
-    bridge.prompt(text);
+    bridge.prompt(text, uiLanguage);
   }
 
   function scheduleNextPrompt(): void {

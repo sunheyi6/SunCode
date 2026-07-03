@@ -375,15 +375,11 @@ function formatTime(value: string): string {
 
             <button
               class="conversation-item"
+              :class="{ running: chatStore.streamingSessionIds.has(session.id) }"
               @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
             >
               <span class="conversation-mark" :class="{ running: chatStore.streamingSessionIds.has(session.id) }" />
               <span class="conversation-name">{{ session.name }}</span>
-              <span
-                v-if="chatStore.streamingSessionIds.has(session.id)"
-                class="conversation-spinner"
-                aria-hidden="true"
-              />
               <span class="conversation-time">{{ formatTime(session.updated) }}</span>
             </button>
 
@@ -1145,7 +1141,7 @@ function formatTime(value: string): string {
 }
 
 .project-heading:hover {
-  background: transparent;
+  background: color-mix(in srgb, var(--sidebar-panel-hover) 70%, transparent);
   color: var(--sidebar-panel-text);
 }
 
@@ -1262,10 +1258,10 @@ function formatTime(value: string): string {
 
 .conversation-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: 6px minmax(0, 1fr) auto;
   gap: 8px;
   min-height: 35px;
-  padding: 0 10px 0 13px;
+  padding: 0 10px 0 8px;
   border: 0;
   border-radius: 7px;
   color: var(--sidebar-panel-text);
@@ -1282,7 +1278,18 @@ function formatTime(value: string): string {
 }
 
 .conversation-mark {
-  display: none;
+  width: 6px;
+  height: 6px;
+  align-self: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: transparent;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.conversation-mark.running {
+  background: var(--color-green, #22c55e);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-green, #22c55e) 30%, transparent);
+  animation: breathe 1.4s ease-in-out infinite;
 }
 
 .conversation-name {
@@ -1308,15 +1315,7 @@ function formatTime(value: string): string {
   opacity: 0;
 }
 
-.conversation-spinner {
-  width: 16px;
-  height: 16px;
-  align-self: center;
-  border: 2px solid color-mix(in srgb, var(--sidebar-panel-muted) 40%, transparent);
-  border-top-color: var(--sidebar-panel-secondary);
-  border-radius: 50%;
-  animation: update-spin 0.8s linear infinite;
-}
+
 
 .conversation-row .delete-btn {
   top: 50%;

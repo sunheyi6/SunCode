@@ -1,5 +1,5 @@
 import { DEFAULT_SYSTEM_PROMPT } from '@shared/constants';
-import type { AppSettings, ToolDefinition } from '@shared/types';
+import type { AppSettings, ToolDefinition, UiLanguage } from '@shared/types';
 import { buildStructuredSystemPrompt } from './model-structured-content';
 
 export interface SystemPromptInput {
@@ -16,6 +16,8 @@ export interface SystemPromptInput {
   memoryContent?: string;
   /** Optional: Retrieved failure lessons relevant to the current request */
   relevantLessonsContent?: string;
+  /** User-facing language derived from the current user prompt. */
+  responseLanguage?: UiLanguage;
 }
 
 /**
@@ -32,6 +34,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     agentsMdContent,
     memoryContent,
     relevantLessonsContent,
+    responseLanguage,
   } = input;
 
   const now = new Date();
@@ -50,9 +53,23 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     agentsMdContent,
     skillsContent,
     relevantLessonsContent,
+    responseLanguage: responseLanguage
+      ? {
+          language: responseLanguage,
+          instruction: responseLanguageInstruction(responseLanguage),
+        }
+      : undefined,
     currentDate: date,
     workingDirectory: promptCwd,
   });
+}
+
+function responseLanguageInstruction(language: UiLanguage): string {
+  if (language === 'zh') {
+    return 'Respond in Chinese for all user-facing natural language, including streaming partial responses, progress updates, plans, summaries, and final answers. Keep code, commands, file paths, identifiers, and quoted source text unchanged.';
+  }
+
+  return 'Respond in English for all user-facing natural language, including streaming partial responses, progress updates, plans, summaries, and final answers. Keep code, commands, file paths, identifiers, and quoted source text unchanged.';
 }
 
 function sortToolsForPrompt(tools: ToolDefinition[]): ToolDefinition[] {

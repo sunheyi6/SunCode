@@ -185,6 +185,42 @@ function providerLabel(id: string): string {
       </div>
     </section>
 
+    <!-- ====== 内联 Key 输入框（紧跟在当前模型卡片下方） ====== -->
+    <div v-if="keyInputProvider" class="inline-key-input">
+      <div class="inline-key-header">
+        <span>🔑 配置 {{ providerLabel(keyInputProvider) }} API Key</span>
+        <button class="close-btn-sm" @click="cancelKeyInput">✕</button>
+      </div>
+      <p class="inline-key-hint">
+        使用此模型需要 API Key，Key 仅保存在本地。
+      </p>
+
+      <!-- 成功提示 -->
+      <div v-if="keyInputSaved" class="key-saved-msg">✓ Key 已保存，正在切换模型...</div>
+
+      <!-- 错误提示 -->
+      <div v-if="keyInputError" class="key-error-msg">{{ keyInputError }}</div>
+
+      <div v-if="!keyInputSaved" class="inline-key-row">
+        <input
+          v-model="keyInputValue"
+          class="inline-key-field"
+          type="password"
+          placeholder="粘贴 API Key..."
+          @keyup.enter="saveKey"
+          @keyup.escape="cancelKeyInput"
+          autofocus
+        />
+        <button
+          class="save-key-btn"
+          :disabled="!keyInputValue.trim() || keyInputSaving"
+          @click="saveKey"
+        >
+          {{ keyInputSaving ? '保存中...' : '保存并选择' }}
+        </button>
+      </div>
+    </div>
+
     <div class="list-heading">
       <div>
         <h4>其他模型</h4>
@@ -243,42 +279,6 @@ function providerLabel(id: string): string {
       </button>
 
       <div v-if="otherModels.length === 0" class="empty-hint">暂无其他模型</div>
-    </div>
-
-    <!-- ====== 内联 Key 输入框 ====== -->
-    <div v-if="keyInputProvider" class="inline-key-input">
-      <div class="inline-key-header">
-        <span>🔑 配置 {{ providerLabel(keyInputProvider) }} API Key</span>
-        <button class="close-btn-sm" @click="cancelKeyInput">✕</button>
-      </div>
-      <p class="inline-key-hint">
-        使用此模型需要 API Key，Key 仅保存在本地。
-      </p>
-
-      <!-- 成功提示 -->
-      <div v-if="keyInputSaved" class="key-saved-msg">✓ Key 已保存，正在切换模型...</div>
-
-      <!-- 错误提示 -->
-      <div v-if="keyInputError" class="key-error-msg">{{ keyInputError }}</div>
-
-      <div v-if="!keyInputSaved" class="inline-key-row">
-        <input
-          v-model="keyInputValue"
-          class="inline-key-field"
-          type="password"
-          placeholder="粘贴 API Key..."
-          @keyup.enter="saveKey"
-          @keyup.escape="cancelKeyInput"
-          autofocus
-        />
-        <button
-          class="save-key-btn"
-          :disabled="!keyInputValue.trim() || keyInputSaving"
-          @click="saveKey"
-        >
-          {{ keyInputSaving ? '保存中...' : '保存并选择' }}
-        </button>
-      </div>
     </div>
 
   </div>
@@ -459,7 +459,7 @@ function providerLabel(id: string): string {
 
 /* ===== 内联 Key 输入 ===== */
 .inline-key-input {
-  margin: 8px 0; padding: 12px;
+  margin: -4px 0 18px; padding: 12px;
   background: color-mix(in srgb, var(--color-yellow) 8%, var(--color-surface));
   border: 1px solid var(--color-yellow); border-radius: var(--border-radius);
 }

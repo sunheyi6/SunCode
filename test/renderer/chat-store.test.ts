@@ -404,4 +404,34 @@ describe('chat store stream blocks', () => {
     expect(store.messages[0]?.content).toContain('稍后重试');
     expect(store.messages[0]?.content).not.toContain('Error: Request timed out.');
   });
+
+  test('parses streamed task plans that use an ASCII colon marker', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+    store.handleStreamEvent({ type: 'message_start' }, 'session-1');
+
+    store.handleStreamEvent(
+      {
+        type: 'message_update',
+        data: {
+          text: '📋 执行计划:\n- [ ] Step 1: 定位计划展示链路\n- [ ] Step 2: 同步当前任务状态',
+          thinking: '',
+          toolCalls: [],
+        },
+      },
+      'session-1',
+    );
+
+    expect(store.messages[0]?.taskPlan?.taskType).toBe('execution');
+    expect(store.messages[0]?.taskPlan?.steps[0]).toMatchObject({
+      index: 1,
+      description: '定位计划展示链路',
+      status: 'pending',
+    });
+    expect(store.messages[0]?.taskPlan?.steps[1]).toMatchObject({
+      index: 2,
+      description: '同步当前任务状态',
+      status: 'pending',
+    });
+  });
 });

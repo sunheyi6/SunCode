@@ -18,6 +18,7 @@ import type {
   TokenUsageSummary,
   ToolCallContent,
   ToolResult,
+  UiLanguage,
   UpdateStatus,
 } from '@shared/types';
 
@@ -99,7 +100,7 @@ declare global {
   interface Window {
     suncode: {
       // Agent
-      prompt(text: string): void;
+      prompt(text: string, uiLanguage?: UiLanguage): void;
       abort(): void;
       stop(): void;
       continue(): void;

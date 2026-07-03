@@ -11,6 +11,7 @@ import type {
   Message,
   SessionMeta,
   TokenUsageSummary,
+  UiLanguage,
   UpdateStatus,
 } from '@shared/types';
 import type {
@@ -39,8 +40,8 @@ const api = (): NonNullable<Window['suncode']> => {
 
 export const bridge = {
   // ===== Agent =====
-  prompt(text: string): void {
-    api().prompt(text);
+  prompt(text: string, uiLanguage?: UiLanguage): void {
+    api().prompt(text, uiLanguage);
   },
 
   abort(): void {

@@ -17,10 +17,7 @@ export function parseTaskPlan(content: string, isStreaming: boolean): TaskPlan |
   // Quick rejection — only check content that has a plan marker
   if (!content.includes('📋')) return null;
 
-  // Find the LAST plan marker in the content (most recent update wins)
-  const executiveMarker = content.lastIndexOf('📋 执行计划：');
-  const progressMarker = content.lastIndexOf('📋 进度更新：');
-  const markerIdx = Math.max(executiveMarker, progressMarker);
+  const markerIdx = findLastPlanMarker(content);
 
   if (markerIdx < 0) return null;
 
@@ -109,9 +106,20 @@ export function stripPlanFromContent(content: string): string {
   // Remove from 📋 marker through all consecutive checklist lines
   // (lenient: any line starting with - [ ] or - [x] after the marker)
   return content
-    .replace(/📋\s*(?:执行计划|进度更新)：[\s\S]*?(?=\n\n(?![-*+]\s*\[[ xX]\]\s)|$)/g, '')
+    .replace(/📋\s*(?:执行计划|进度更新)[：:]\s*[\s\S]*?(?=\n\n(?![-*+]\s*\[[ xX]\]\s)|$)/g, '')
     .replace(/\n{3,}/g, '\n\n') // collapse excessive blank lines
     .trim();
+}
+
+function findLastPlanMarker(content: string): number {
+  const markerRegex = /📋\s*(?:执行计划|进度更新)[：:]/g;
+  let markerIdx = -1;
+  let match: RegExpExecArray | null = markerRegex.exec(content);
+  while (match !== null) {
+    markerIdx = match.index;
+    match = markerRegex.exec(content);
+  }
+  return markerIdx;
 }
 
 /** Convert Chinese numerals (一二三...) to integer. */

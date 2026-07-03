@@ -1,7 +1,11 @@
 <script setup lang="ts">
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
+
 defineProps<{
   output: string;
   exitCode?: number;
+  command?: string;
 }>();
 </script>
 
@@ -13,7 +17,9 @@ defineProps<{
         退出码: {{ exitCode }}
       </span>
     </div>
-    <pre class="bash-content"><code>{{ output }}</code></pre>
+    <div class="bash-content">
+      <ToolMarkdownOutput :output="output" :command="command" />
+    </div>
   </div>
 </template>
 
@@ -52,17 +58,9 @@ defineProps<{
 }
 
 .bash-content {
-  margin: 0;
   padding: 8px 12px;
-  font-size: 12px;
-  line-height: 1.4;
-  font-family: var(--font-mono);
   background: var(--color-bg-tertiary);
-  white-space: pre-wrap;
-  word-break: break-all;
   max-height: 400px;
   overflow-y: auto;
-  border-radius: 0;
-  border: none;
 }
 </style>
