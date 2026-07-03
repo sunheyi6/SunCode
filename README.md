@@ -1,5 +1,13 @@
 # SunCode
 
+<div align="center">
+  <a href="https://github.com/sunheyi6/SunCode"><img src="https://img.shields.io/github/stars/sunheyi6/SunCode?style=social" alt="Stars"></a>
+  <a href="https://github.com/sunheyi6/SunCode"><img src="https://img.shields.io/github/v/tag/sunheyi6/SunCode?label=version&style=social" alt="Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
+</div>
+
+**GitHub**: [https://github.com/sunheyi6/SunCode](https://github.com/sunheyi6/SunCode)
+
 AI 驱动的桌面编程助手客户端，基于 **Electron + Vue 3 + TypeScript** 构建。
 
 ## 功能特性
