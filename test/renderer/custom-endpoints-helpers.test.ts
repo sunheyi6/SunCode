@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { CustomEndpoint } from '@shared/types';
 import {
   buildCustomModelOptions,
+  computeProviderKeyStatus,
   computeCustomEndpointState,
+  mergeProvidersWithCustom,
 } from '../../src/renderer/stores/custom-endpoints-helpers';
 
 function ep(over: Partial<CustomEndpoint>): CustomEndpoint {
@@ -43,5 +45,44 @@ describe('computeCustomEndpointState', () => {
     ]);
     expect(state.providerModels.get('custom-b')).toHaveLength(2);
     expect(state.keyStatus).toEqual({ 'custom-a': true, 'custom-b': true });
+  });
+});
+
+describe('computeProviderKeyStatus', () => {
+  it('合并内置 env key 与自定义 endpoint key', () => {
+    expect(
+      computeProviderKeyStatus({
+        providers: ['openai', 'custom-a'],
+        envApiKeys: { openai: 'sk-openai' },
+        customEndpoints: [ep({ id: 'custom-a', apiKey: 'sk-custom' })],
+      }),
+    ).toEqual({ openai: true, 'custom-a': true });
+  });
+
+  it('自定义 endpoint 没有 key 时标记为未配置', () => {
+    expect(
+      computeProviderKeyStatus({
+        providers: ['custom-a'],
+        envApiKeys: {},
+        customEndpoints: [ep({ id: 'custom-a', apiKey: ' ' })],
+      }),
+    ).toEqual({ 'custom-a': false });
+  });
+});
+
+describe('mergeProvidersWithCustom', () => {
+  it('加载内置 provider 时保留自定义 provider', () => {
+    expect(mergeProvidersWithCustom(['openai', 'deepseek'], ['custom-ollama'])).toEqual([
+      'openai',
+      'deepseek',
+      'custom-ollama',
+    ]);
+  });
+
+  it('去重并保留内置 provider 顺序', () => {
+    expect(mergeProvidersWithCustom(['custom-ollama', 'openai'], ['custom-ollama'])).toEqual([
+      'custom-ollama',
+      'openai',
+    ]);
   });
 });

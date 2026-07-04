@@ -194,6 +194,12 @@ export interface SessionMeta {
   updated: string;
   messageCount: number;
   workingDirectory: string;
+  /** Git worktree branch name if this session uses a Git worktree (undefined = no worktree). */
+  gitWorktreeBranch?: string;
+  /** Git worktree path (the working tree checkout directory). */
+  gitWorktreePath?: string;
+  /** Original main repo path for worktree cleanup. */
+  gitMainRepoPath?: string;
 }
 
 // ===== Custom Endpoints =====
@@ -254,6 +260,10 @@ export interface AppSettings {
   goalMaxTurns?: number;
   /** Goal mode: max wall-clock time in milliseconds. Default 600000 (10 min). */
   goalMaxWallTimeMs?: number;
+  /** When to show a native notification after a task completes. Default 'never'. */
+  taskCompleteNotification?: 'never' | 'always' | 'unfocused';
+  /** Whether to auto-create a Git worktree for each new session. Default false. */
+  createGitWorktree?: boolean;
 }
 
 /** MCP server configuration */

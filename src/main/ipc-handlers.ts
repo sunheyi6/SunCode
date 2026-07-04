@@ -31,6 +31,13 @@ import {
   skipVersion,
 } from './auto-updater';
 import { checkoutGitBranch, getGitInfo, listGitBranches } from './git-info';
+import {
+  createWorktreeForSession,
+  isGitRepo,
+  isInsideWorktree,
+  removeWorktreeForSession,
+  validateWorktreePath,
+} from './git-worktree';
 import { getLogPath } from './logger';
 import { getAppDataDir } from './paths';
 import { appendEvent, getEvents, getTokenUsageAggregate, listRuns, startRun } from './run-store';
@@ -484,6 +491,28 @@ export function registerIpcHandlers(wm: WindowManager): void {
         messageCount: 0,
         workingDirectory: workingDirectory || process.cwd(),
       };
+
+      // Auto-create a Git worktree when:
+      // 1. The user enabled `createGitWorktree` in settings
+      // 2. The working directory is a Git repository
+      // 3. The cwd is NOT already inside a linked worktree (nested worktrees
+      //    are confusing and error-prone)
+      if (currentSettings.createGitWorktree) {
+        const worktreeDir = workingDirectory || process.cwd();
+        if (isGitRepo(worktreeDir) && !isInsideWorktree(worktreeDir)) {
+          const result = createWorktreeForSession(worktreeDir, id);
+          if (result) {
+            meta.workingDirectory = result.worktreePath;
+            meta.gitWorktreeBranch = result.branch;
+            meta.gitWorktreePath = result.worktreePath;
+            meta.gitMainRepoPath = result.mainRepoPath;
+            console.log(
+              `[Main] Created worktree for session ${id.slice(-8)}: ${result.branch} @ ${result.worktreePath}`,
+            );
+          }
+        }
+      }
+
       sessions.set(id, meta);
       sessionMessages.set(id, []);
       await saveSession(meta, []);
@@ -516,6 +545,19 @@ export function registerIpcHandlers(wm: WindowManager): void {
           messages = disk.messages;
         }
         meta = disk.meta;
+        // Validate Git worktree path: if the worktree directory was removed
+        // externally (e.g. manual cleanup), fall back to the main repo path so
+        // the session doesn't point at a dangling directory.
+        if (meta.gitWorktreePath) {
+          const validated = validateWorktreePath(meta.gitWorktreePath, meta.gitMainRepoPath);
+          meta.workingDirectory = validated.workingDirectory;
+          if (!validated.isValid) {
+            // Clear worktree fields since the link is broken.
+            meta.gitWorktreePath = undefined;
+            meta.gitWorktreeBranch = undefined;
+            meta.gitMainRepoPath = undefined;
+          }
+        }
         sessions.set(id, meta);
         sessionMessages.set(id, messages);
       }
@@ -581,6 +623,15 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.handle('session:delete', async (_event, id: string) => {
     try {
+      const meta = sessions.get(id);
+      // Clean up Git worktree before tearing down session state.
+      if (meta?.gitMainRepoPath && meta?.gitWorktreeBranch) {
+        removeWorktreeForSession(
+          meta.gitMainRepoPath,
+          meta.gitWorktreeBranch,
+          meta.gitWorktreePath,
+        );
+      }
       sessions.delete(id);
       sessionMessages.delete(id);
       await deleteSession(id);
@@ -597,6 +648,15 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.handle('session:deleteMany', async (_event, ids: string[]) => {
     try {
       for (const id of ids) {
+        const meta = sessions.get(id);
+        // Clean up Git worktree for each session before removing it.
+        if (meta?.gitMainRepoPath && meta?.gitWorktreeBranch) {
+          removeWorktreeForSession(
+            meta.gitMainRepoPath,
+            meta.gitWorktreeBranch,
+            meta.gitWorktreePath,
+          );
+        }
         sessions.delete(id);
         sessionMessages.delete(id);
       }

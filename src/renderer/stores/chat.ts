@@ -282,6 +282,12 @@ export const useChatStore = defineStore('chat', () => {
         lastTextLength = 0;
         lastToolCallCount = 0;
         currentTurnBlockStartIndex = msg?.blocks?.length ?? 0;
+        console.debug(
+          '[RenderStream] turn_start',
+          `turn=${event.turnCount ?? 0}`,
+          `blockStartIndex=${currentTurnBlockStartIndex}`,
+          `sessionId=${sessionId.slice(-8)}`,
+        );
         break;
 
       case 'turn_end':
@@ -317,6 +323,12 @@ export const useChatStore = defineStore('chat', () => {
         if (!data) {
           if (event.type === 'message_end' && event.message) {
             applyFinalMessageToUi(target, event.message);
+            console.debug(
+              '[RenderStream] message_end (no-data path)',
+              `finalTextLen=${target.content.length}`,
+              `finalBlocks=${target.blocks?.length ?? 0}`,
+              `sess=${sessionId.slice(-8)}`,
+            );
             target.isStreaming = false;
             streamingSessionIds.delete(sessionId);
             if (sessionId === activeSessionId) {
@@ -361,6 +373,31 @@ export const useChatStore = defineStore('chat', () => {
           lastTextLength = currentTextLen;
         }
         target.content = textFromBlocks(target.blocks) || data.text || '';
+
+        // Debug aid for streaming-render diagnostics: record the diff decision
+        // (replace / append / no-op) and the accumulator snapshot so that
+        // "text jump / repeat / lost" issues can be localized to either the
+        // worker snapshot or the renderer diff logic. View via DevTools with
+        // Verbose level; Default level hides console.debug.
+        const textAction =
+          currentTextLen < lastTextLength
+            ? 'replace'
+            : currentTextLen > lastTextLength
+              ? 'append'
+              : 'no-op';
+        console.debug(
+          '[RenderStream] message_update',
+          `text=${textAction}`,
+          `inLen=${currentTextLen}`,
+          `lastLen=${lastTextLength}`,
+          `blocks=${target.blocks?.length ?? 0}`,
+          `blockStart=${currentTurnBlockStartIndex}`,
+          `thinkLen=${data.thinking?.length ?? 0}`,
+          `lastThinkLen=${lastThinkingLength}`,
+          `tools=${data.toolCalls?.length ?? 0}`,
+          `lastTools=${lastToolCallCount}`,
+          `sess=${sessionId.slice(-8)}`,
+        );
 
         // Check if thinking has NEW content (length increased)
         const currentThinkingLen = data.thinking?.length ?? 0;
@@ -429,6 +466,16 @@ export const useChatStore = defineStore('chat', () => {
           if (event.message) {
             applyFinalMessageToUi(target, event.message);
           }
+
+          console.debug(
+            '[RenderStream] message_end',
+            `finalTextLen=${target.content.length}`,
+            `finalThinkLen=${target.thinking?.length ?? 0}`,
+            `finalBlocks=${target.blocks?.length ?? 0}`,
+            `finalTools=${target.toolCalls?.length ?? 0}`,
+            `hasFinalMsg=${Boolean(event.message)}`,
+            `sess=${sessionId.slice(-8)}`,
+          );
 
           target.isStreaming = false;
           streamingSessionIds.delete(sessionId);

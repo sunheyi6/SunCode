@@ -20,6 +20,8 @@ export const useSettingsStore = defineStore('settings', () => {
     envApiKeys: {},
     customEndpoints: [],
     maxLessons: 200,
+    taskCompleteNotification: 'never',
+    createGitWorktree: false,
   });
 
   const isLoaded = ref(false);

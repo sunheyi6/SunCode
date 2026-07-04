@@ -46,7 +46,7 @@ function togglePerm(): void {
 }
 
 // ── model list ──
-const availableModels = computed(() => modelsStore.recommendedModels);
+const availableModels = computed(() => modelsStore.switchableModelOptions);
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const currentModelLabel = computed(() => {

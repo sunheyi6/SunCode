@@ -102,6 +102,14 @@ export interface AgentLoopResult {
   decision: { decision: string; reason: string; taxonomy?: string };
 }
 
+function getModelApiKey(model: unknown): string | undefined {
+  if (typeof model !== 'object' || model === null || !('apiKey' in model)) {
+    return undefined;
+  }
+  const apiKey = (model as { apiKey?: unknown }).apiKey;
+  return typeof apiKey === 'string' && apiKey.trim() ? apiKey : undefined;
+}
+
 /**
  * Core agent loop: prompt → LLM stream → tool execution → repeat.
  *
@@ -296,6 +304,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         signal: abortSignal,
         cacheRetention: 'long',
         sessionId,
+        apiKey: getModelApiKey(model),
       });
 
       const streamResult = await handleStream({

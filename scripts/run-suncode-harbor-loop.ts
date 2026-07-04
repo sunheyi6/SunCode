@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DEFAULT_SETTINGS } from '@shared/constants';
 import type {
   AppSettings,
+  CustomEndpoint,
   Message,
   ToolCallContent,
   ToolResult,
@@ -354,6 +356,63 @@ function stripProvider(model: string, provider: string): string {
   return model.startsWith(prefix) ? model.slice(prefix.length) : model;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isCustomEndpoint(value: unknown): value is CustomEndpoint {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.baseUrl === 'string' &&
+    typeof value.apiKey === 'string' &&
+    (value.apiFormat === 'openai-completions' ||
+      value.apiFormat === 'openai-responses' ||
+      value.apiFormat === 'anthropic-messages') &&
+    Array.isArray(value.models)
+  );
+}
+
+function parseCustomEndpoints(value: string): CustomEndpoint[] {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(isCustomEndpoint);
+}
+
+function loadCustomEndpointsFromConfig(configPath: string): CustomEndpoint[] {
+  if (!existsSync(configPath)) return [];
+  const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as { customEndpoints?: unknown };
+  if (!Array.isArray(parsed.customEndpoints)) return [];
+  return parsed.customEndpoints.filter(isCustomEndpoint);
+}
+
+function loadCustomEndpoints(): CustomEndpoint[] {
+  if (process.env.SUNCODE_CUSTOM_ENDPOINTS_B64) {
+    const decoded = Buffer.from(process.env.SUNCODE_CUSTOM_ENDPOINTS_B64, 'base64').toString('utf8');
+    return parseCustomEndpoints(decoded);
+  }
+
+  if (process.env.SUNCODE_CUSTOM_ENDPOINTS) {
+    return parseCustomEndpoints(process.env.SUNCODE_CUSTOM_ENDPOINTS);
+  }
+
+  const paths = [
+    join(process.cwd(), '.suncode', 'config.json'),
+    process.env.APPDATA
+      ? join(process.env.APPDATA, 'SunCode', '.suncode', 'config.json')
+      : join(homedir(), 'AppData', 'Roaming', 'SunCode', '.suncode', 'config.json'),
+    join(homedir(), '.suncode', 'config.json'),
+  ];
+
+  for (const configPath of paths) {
+    const endpoints = loadCustomEndpointsFromConfig(configPath);
+    if (endpoints.length > 0) return endpoints;
+  }
+
+  return [];
+}
+
 function positiveInt(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
   const value = Number(raw);
@@ -460,7 +519,8 @@ async function main(): Promise<void> {
   const rawModel = process.env.SUNCODE_MODEL || 'deepseek-v4-flash';
   const provider = process.env.SUNCODE_PROVIDER || providerFromModel(rawModel);
   const modelId = stripProvider(rawModel, provider);
-  const registry = createModelRegistry();
+  const customEndpoints = loadCustomEndpoints();
+  const registry = createModelRegistry(customEndpoints);
   const model = await registry.getModel(provider, modelId);
   if (!model) throw new Error(`Model not available: ${provider}/${modelId}`);
 
@@ -472,6 +532,7 @@ async function main(): Promise<void> {
     permissionMode: 'full_access',
     autoCompact: true,
     envApiKeys: {},
+    customEndpoints,
   };
 
   const executor = new RemoteExecutor(executorUrl, executorToken);

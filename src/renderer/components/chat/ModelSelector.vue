@@ -25,7 +25,7 @@ const dropdown = computed<DropdownState>(() => props.dropdown ?? ownDropdown);
 const isOpen = computed(() => getDropdownOpenState(dropdown.value));
 
 const availableModels = computed(() =>
-  modelsStore.recommendedModels.filter((m) => modelsStore.hasKey(m.provider)),
+  modelsStore.switchableModelOptions.filter((m) => modelsStore.hasKey(m.provider)),
 );
 
 const currentModelLabel = computed(() => {
@@ -103,6 +103,9 @@ defineExpose({
         <span class="item-label">{{ model.label }}</span>
         <span class="item-provider">{{ model.provider }}</span>
       </button>
+      <div v-if="availableModels.length === 0" class="empty-models">
+        请先在设置中配置供应商 Key
+      </div>
     </div>
   </div>
 </template>
@@ -178,6 +181,13 @@ defineExpose({
 .model-menu .item-provider {
   font-size: 10px;
   color: var(--color-text-muted);
+}
+
+.empty-models {
+  padding: 10px 12px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .dropdown-item {

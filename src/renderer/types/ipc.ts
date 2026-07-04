@@ -132,6 +132,7 @@ declare global {
       getSettings(): Promise<AppSettings>;
       updateSettings(partial: Partial<AppSettings>): Promise<AppSettings>;
       onSettingsChanged(callback: (settings: AppSettings) => void): () => void;
+      showTaskCompleteNotification(title: string, body: string): void;
 
       // Model Discovery
       getProviders(): Promise<string[]>;

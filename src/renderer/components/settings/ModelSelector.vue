@@ -67,6 +67,17 @@ const otherModels = computed(() =>
   ),
 );
 
+const enabledProviders = computed(() =>
+  modelsStore.enabledProviders.map((provider) => {
+    const endpoint = customEndpoints.value.find((ep) => ep.id === provider);
+    return {
+      id: provider,
+      label: endpoint?.name ?? providerLabel(provider),
+      modelCount: modelsStore.allModels.filter((model) => model.provider === provider).length,
+    };
+  }),
+);
+
 async function selectProvider(provider: string): Promise<void> {
   selectedProvider.value = provider;
   await modelsStore.loadModels(provider);
@@ -234,8 +245,26 @@ function providerLabel(id: string): string {
 
     <div class="list-heading">
       <div>
-        <h4>其他模型</h4>
-        <p>选择后立即设为当前模型；缺少密钥时会先引导配置。</p>
+        <h4>启用的供应商</h4>
+        <p>配置过 Key 的供应商会启用，其下所有模型都可在输入框切换。</p>
+      </div>
+    </div>
+
+    <div class="enabled-provider-list">
+      <div v-for="provider in enabledProviders" :key="provider.id" class="enabled-provider">
+        <div>
+          <strong>{{ provider.label }}</strong>
+          <span>{{ provider.id }} · {{ provider.modelCount }} 个模型</span>
+        </div>
+        <span class="model-key-badge has">✓ Key</span>
+      </div>
+      <div v-if="enabledProviders.length === 0" class="empty-hint">尚未启用供应商。</div>
+    </div>
+
+    <div class="list-heading available-heading">
+      <div>
+        <h4>可用模型</h4>
+        <p>同一供应商只需配置一次 Key，点击任意模型即可切换。</p>
       </div>
     </div>
 
@@ -272,11 +301,13 @@ function providerLabel(id: string): string {
 
       <!-- 模型列表 -->
       <div class="model-list">
-        <button
+        <div
           v-for="opt in otherModels"
           :key="`${opt.provider}/${opt.model}`"
           class="model-option"
           :class="{ active: isActive(opt.provider, opt.model) }"
+          role="button"
+          tabindex="0"
           @click="selectModel(opt.provider, opt.model)"
         >
           <div class="model-main">
@@ -289,17 +320,17 @@ function providerLabel(id: string): string {
             </div>
           </div>
           <span v-if="isActive(opt.provider, opt.model)" class="check-icon">✓</span>
-        </button>
+        </div>
 
         <div v-if="otherModels.length === 0" class="empty-hint">暂无其他模型</div>
       </div>
     </template>
     <!-- 自定义模型 -->
     <template v-else>
-      <p class="custom-source-desc">接入 OpenAI / Anthropic 兼容端点。选择模型立即启用；在下方管理端点。</p>
+      <p class="custom-source-desc">接入 OpenAI / Anthropic 兼容端点。供应商配置 Key 后，其模型会进入输入框切换列表。</p>
 
       <div v-if="customEndpoints.length === 0" class="empty-hint">
-        尚未配置自定义端点。在下方“+ 添加端点”开始。
+        尚未配置自定义端点。填写下方表单即可添加。
       </div>
 
       <div v-for="ep in customEndpoints" :key="ep.id" class="custom-group">
@@ -308,11 +339,13 @@ function providerLabel(id: string): string {
           <span class="custom-group-url">{{ ep.baseUrl }}</span>
         </div>
         <div class="model-list">
-          <button
+          <div
             v-for="m in ep.models"
             :key="`${ep.id}/${m.id}`"
             class="model-option"
             :class="{ active: isActive(ep.id, m.id) }"
+            role="button"
+            tabindex="0"
             @click="selectModel(ep.id, m.id)"
           >
             <div class="model-main">
@@ -323,7 +356,7 @@ function providerLabel(id: string): string {
               </div>
             </div>
             <span v-if="isActive(ep.id, m.id)" class="check-icon">✓</span>
-          </button>
+          </div>
         </div>
       </div>
 
@@ -421,6 +454,9 @@ function providerLabel(id: string): string {
   justify-content: space-between;
   margin-bottom: 10px;
 }
+.available-heading {
+  margin-top: 16px;
+}
 .list-heading h4 {
   margin: 0 0 2px;
   color: var(--color-text);
@@ -479,6 +515,34 @@ function providerLabel(id: string): string {
 .model-list {
   display: flex; flex-direction: column; gap: 3px;
   max-height: 280px; overflow-y: auto; padding-right: 2px;
+}
+.enabled-provider-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.enabled-provider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-surface);
+}
+.enabled-provider div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.enabled-provider strong {
+  color: var(--color-text);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.enabled-provider span {
+  color: var(--color-text-muted);
+  font-size: 10px;
 }
 
 .model-option {

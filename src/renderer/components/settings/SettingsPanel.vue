@@ -97,6 +97,16 @@ function updateMaxTurns(event: Event): void {
   }
 }
 
+function updateTaskCompleteNotification(event: Event): void {
+  const mode = (event.target as HTMLSelectElement).value as AppSettings['taskCompleteNotification'];
+  settingsStore.update({ taskCompleteNotification: mode });
+}
+
+function updateCreateGitWorktree(event: Event): void {
+  const checked = (event.target as HTMLInputElement).checked;
+  settingsStore.update({ createGitWorktree: checked });
+}
+
 function updateGoalMaxTurns(event: Event): void {
   const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
   if (Number.isFinite(value) && value > 0 && value <= 50) {
@@ -369,6 +379,41 @@ function themeLabel(theme: AppSettings['theme']): string {
                     @change="updateGoalMaxTurns"
                   />
                 </span>
+              </label>
+            </div>
+
+            <div class="settings-card">
+              <label class="setting-row">
+                <span class="setting-copy">
+                  <strong>任务完成通知</strong>
+                  <small>Agent 完成任务时的通知方式。</small>
+                </span>
+                <select
+                  class="setting-select"
+                  :value="settingsStore.settings.taskCompleteNotification ?? 'never'"
+                  @change="updateTaskCompleteNotification"
+                >
+                  <option value="never">不通知</option>
+                  <option value="always">始终通知</option>
+                  <option value="unfocused">应用失焦时通知</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="settings-card">
+              <label class="setting-row toggle-row">
+                <span class="setting-copy">
+                  <strong>新建对话创建 Git Worktree</strong>
+                  <small>开启后，每次新建对话自动创建独立的 Git 工作目录，避免分支污染。</small>
+                </span>
+                <label class="toggle-switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.settings.createGitWorktree ?? false"
+                    @change="updateCreateGitWorktree"
+                  />
+                  <span class="toggle-slider" />
+                </label>
               </label>
             </div>
           </section>
@@ -1005,5 +1050,54 @@ function themeLabel(theme: AppSettings['theme']): string {
   .range-control {
     width: 100%;
   }
+}
+
+/* ── Toggle Switch ── */
+
+.toggle-row {
+  cursor: default;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  background: var(--color-text-muted);
+  transition: background 0.2s;
+}
+
+.toggle-slider::before {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  content: '';
+  transition: transform 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--color-accent);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(20px);
 }
 </style>

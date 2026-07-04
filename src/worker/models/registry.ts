@@ -1,3 +1,4 @@
+import { normalizeCustomEndpointBaseUrl } from '@shared/custom-endpoints';
 import type { CustomEndpoint, CustomModelEntry } from '@shared/types';
 
 /**
@@ -36,6 +37,7 @@ export interface CustomModelSpec {
   contextWindow: number;
   maxTokens: number;
   headers: Record<string, string>;
+  apiKey: string;
 }
 
 /** 纯函数：根据 endpoint 与模型条目构造 Model 兼容对象（含鉴权 header）。 */
@@ -52,13 +54,14 @@ export function buildCustomModel(
     name: entry.name || entry.id,
     api: endpoint.apiFormat,
     provider: endpoint.id,
-    baseUrl: endpoint.baseUrl,
+    baseUrl: normalizeCustomEndpointBaseUrl(endpoint.baseUrl, endpoint.apiFormat),
     reasoning: false,
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: entry.contextWindow || 128000,
     maxTokens: 4096,
     headers,
+    apiKey: endpoint.apiKey,
   };
 }
 

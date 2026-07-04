@@ -140,6 +140,11 @@ export const bridge = {
     return api().onSettingsChanged(callback);
   },
 
+  /** Show native task completion notification */
+  showTaskCompleteNotification(title: string, body: string): void {
+    api().showTaskCompleteNotification(title, body);
+  },
+
   // ===== Model Discovery =====
   async getProviders(): Promise<string[]> {
     return api().getProviders();

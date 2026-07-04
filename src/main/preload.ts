@@ -238,6 +238,11 @@ const suncodeAPI = {
     return () => ipcRenderer.removeListener('settings:changed', handler);
   },
 
+  /** Show native task completion notification */
+  showTaskCompleteNotification(title: string, body: string): void {
+    ipcRenderer.send('notify:task-complete', title, body);
+  },
+
   // ===== Model Discovery =====
 
   /** Get all available AI providers */

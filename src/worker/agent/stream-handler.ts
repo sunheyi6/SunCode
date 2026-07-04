@@ -1,4 +1,5 @@
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
+import { sanitizeStructuredMessageLeakStreaming } from '@shared/finalization';
 import type {
   AppSettings,
   RequestMessageTrace,
@@ -77,7 +78,7 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
         onStream({
           type: 'message_update',
           data: {
-            text: assistantText,
+            text: sanitizeStructuredMessageLeakStreaming(assistantText),
             thinking: thinkingText,
             toolCalls: [...toolCalls],
           },
@@ -98,7 +99,7 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
         onStream({
           type: 'message_update',
           data: {
-            text: assistantText,
+            text: sanitizeStructuredMessageLeakStreaming(assistantText),
             thinking: thinkingText,
             toolCalls: [...toolCalls],
           },
@@ -123,7 +124,7 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
         onStream({
           type: 'message_update',
           data: {
-            text: assistantText,
+            text: sanitizeStructuredMessageLeakStreaming(assistantText),
             thinking: thinkingText,
             toolCalls: [...toolCalls],
           },

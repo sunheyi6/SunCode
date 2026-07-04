@@ -2,7 +2,11 @@ import type { AppSettings, CustomEndpoint } from '@shared/types';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { bridge } from '../api/bridge';
-import { computeCustomEndpointState } from './custom-endpoints-helpers';
+import {
+  computeCustomEndpointState,
+  computeProviderKeyStatus,
+  mergeProvidersWithCustom,
+} from './custom-endpoints-helpers';
 import { useSettingsStore } from './settings';
 
 export interface ModelOption {
@@ -99,10 +103,20 @@ export const useModelsStore = defineStore('models', () => {
   }
 
   const allModels = computed<ModelOption[]>(() => {
-    const result: ModelOption[] = [];
+    const result: ModelOption[] = [...recommendedModels.value];
     for (const models of providerModels.value.values()) result.push(...models);
     return result;
   });
+
+  const switchableModelOptions = computed<ModelOption[]>(() =>
+    allModels.value.filter((model) => hasKey(model.provider)),
+  );
+
+  const enabledProviders = computed<string[]>(() =>
+    mergeProvidersWithCustom(providers.value, [...providerModels.value.keys()]).filter((provider) =>
+      hasKey(provider),
+    ),
+  );
 
   function hasKey(provider: string): boolean {
     return keyStatus.value[provider] === true;
@@ -111,10 +125,11 @@ export const useModelsStore = defineStore('models', () => {
   /** 从 settingsStore 读取 Key 状态（不依赖 IPC） */
   function syncKeyStatusFromSettings(): void {
     const settingsStore = useSettingsStore();
-    const keys = settingsStore.settings.envApiKeys || {};
-    const status: Record<string, boolean> = {};
-    for (const p of providers.value) status[p] = Boolean(keys[p]);
-    keyStatus.value = status;
+    keyStatus.value = computeProviderKeyStatus({
+      providers: providers.value,
+      envApiKeys: settingsStore.settings.envApiKeys || {},
+      customEndpoints: settingsStore.settings.customEndpoints ?? [],
+    });
   }
 
   async function refreshKeyStatus(): Promise<void> {
@@ -122,9 +137,11 @@ export const useModelsStore = defineStore('models', () => {
     try {
       const s = await bridge.getSettings();
       if (s.envApiKeys) {
-        const status: Record<string, boolean> = {};
-        for (const p of providers.value) status[p] = Boolean(s.envApiKeys[p]);
-        keyStatus.value = status;
+        keyStatus.value = computeProviderKeyStatus({
+          providers: providers.value,
+          envApiKeys: s.envApiKeys,
+          customEndpoints: s.customEndpoints ?? [],
+        });
       }
     } catch {
       /* keep local */
@@ -170,7 +187,12 @@ export const useModelsStore = defineStore('models', () => {
   async function loadProviders(): Promise<void> {
     try {
       const p = await bridge.getProviders();
-      if (p?.length) providers.value = p;
+      if (p?.length) {
+        const customIds = [...providerModels.value.keys()].filter(
+          (id) => !builtinProviderSet.has(id),
+        );
+        providers.value = mergeProvidersWithCustom(p, customIds);
+      }
     } catch {
       /* keep builtin */
     }
@@ -223,6 +245,8 @@ export const useModelsStore = defineStore('models', () => {
     activeModel,
     providers,
     providerModels,
+    enabledProviders,
+    switchableModelOptions,
     loadingProviders,
     recommendedModels,
     allModels,

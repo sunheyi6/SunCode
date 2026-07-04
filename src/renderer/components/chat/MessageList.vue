@@ -109,6 +109,27 @@ watch(
   },
 );
 
+// When the user sends a new message, always re-anchor to the bottom — even if
+// they had scrolled up to read history. `addUserMessage` and the follow-up
+// `startAssistantMessage` are batched into one flush, so the length watcher
+// above would otherwise see the new last message as an (empty) assistant and
+// bail out under the `userScrolledUp` guard. Tracking the most recent user
+// message id gives us an unambiguous "user just sent" signal.
+watch(
+  () => {
+    for (let i = chatStore.messages.length - 1; i >= 0; i--) {
+      if (chatStore.messages[i].role === 'user') return chatStore.messages[i].id;
+    }
+    return '';
+  },
+  (id, prev) => {
+    if (!id || id === prev) return;
+    userScrolledUp.value = false;
+    userScrollIntent = false;
+    void nextTick().then(() => scrollToBottom());
+  },
+);
+
 // Auto-scroll when the last message content changes, unless user manually scrolled up.
 // This covers streaming text, tool execution results, and subagent progress — all of
 // which can change content height without changing messages.length.

@@ -3,6 +3,7 @@ import { bridge } from '../api/bridge';
 import { useAgentStore } from '../stores/agent';
 import { useChatStore } from '../stores/chat';
 import { useSessionsStore } from '../stores/sessions';
+import { useSettingsStore } from '../stores/settings';
 import { detectUiLanguage } from '../utils/ui-language';
 
 /**
@@ -16,6 +17,23 @@ export function useAgent() {
 
   const cleanups: Array<() => void> = [];
   let nextPromptTimer: ReturnType<typeof setTimeout> | null = null;
+  let windowFocused = document.hasFocus();
+
+  // Track window focus changes
+  function setupFocusTracking(): void {
+    const onFocus = () => {
+      windowFocused = true;
+    };
+    const onBlur = () => {
+      windowFocused = false;
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    cleanups.push(() => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    });
+  }
 
   const isBusy = computed(() => chatStore.isStreaming);
 
@@ -44,6 +62,7 @@ export function useAgent() {
   }
 
   function setupListeners(): void {
+    setupFocusTracking();
     cleanups.push(
       bridge.onStreamEvent((data) => {
         chatStore.handleStreamEvent(data.event, data.sessionId);
@@ -115,6 +134,14 @@ export function useAgent() {
           tokenUsage: agentStore.status.tokenUsage,
           modelName: agentStore.status.modelName,
         });
+
+        // Task completion notification
+        const ntSettings = useSettingsStore().settings;
+        const mode = ntSettings.taskCompleteNotification ?? 'never';
+        if (mode === 'always' || (mode === 'unfocused' && !windowFocused)) {
+          bridge.showTaskCompleteNotification('SunCode', '任务已完成');
+        }
+
         scheduleNextPrompt();
       }),
     );

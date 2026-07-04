@@ -23,6 +23,7 @@ describe('buildCustomModel', () => {
     expect(m.maxTokens).toBe(4096);
     expect(m.reasoning).toBe(false);
     expect(m.input).toEqual(['text']);
+    expect(m.apiKey).toBe('sk-test');
     expect(m.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isIncompleteProgressText,
   sanitizeStructuredMessageLeak,
+  sanitizeStructuredMessageLeakStreaming,
 } from '../../src/shared/finalization';
 
 describe('agent loop finalization guards', () => {
@@ -59,5 +60,62 @@ describe('agent loop finalization guards', () => {
 }`;
 
     expect(sanitizeStructuredMessageLeak(leaked)).toBe('完成，输出 hello world。');
+  });
+});
+
+describe('sanitizeStructuredMessageLeakStreaming', () => {
+  const ENVELOPE_HEAD =
+    '{\n  "type": "suncode.message",\n  "version": 1,\n  "role": "assistant",\n  "content": {\n    "text": "';
+
+  it('hides the envelope prefix before the text value arrives', () => {
+    const partial =
+      '{\n  "type": "suncode.message",\n  "version": 1,\n  "role": "assistant",\n  "content": {';
+    expect(sanitizeStructuredMessageLeakStreaming(partial)).toBe('');
+  });
+
+  it('extracts the inner text once the text value closes (no closing braces yet)', () => {
+    const partial =
+      ENVELOPE_HEAD +
+      '找到了 workspace 数据目录：`%APPDATA%/<app>/workspaces/default`。让我找到实际路径并查看最新的会话。"';
+    expect(sanitizeStructuredMessageLeakStreaming(partial)).toBe(
+      '找到了 workspace 数据目录：`%APPDATA%/<app>/workspaces/default`。让我找到实际路径并查看最新的会话。',
+    );
+  });
+
+  it('extracts partial text while the text value is still being emitted', () => {
+    const partial = ENVELOPE_HEAD + '找到了 workspace 数据目录';
+    expect(sanitizeStructuredMessageLeakStreaming(partial)).toBe('找到了 workspace 数据目录');
+  });
+
+  it('ignores trailing braces after the text value closes', () => {
+    const partial = ENVELOPE_HEAD + '完成了。"\n  }\n}';
+    expect(sanitizeStructuredMessageLeakStreaming(partial)).toBe('完成了。');
+  });
+
+  it('passes through plain text without an envelope unchanged', () => {
+    const plain = '这是一段普通的助手回复，没有信封。';
+    expect(sanitizeStructuredMessageLeakStreaming(plain)).toBe(plain);
+  });
+
+  it('decodes escape sequences inside the streamed text value', () => {
+    // JSON text value contains escapes: \n (newline), \" (quote), \\ (backslash).
+    const partial = ENVELOPE_HEAD + '第一行\\n第二行\\"引号\\\\end';
+    expect(sanitizeStructuredMessageLeakStreaming(partial)).toBe('第一行\n第二行"引号\\end');
+  });
+
+  it('matches the finalize variant once the envelope is complete', () => {
+    const complete = JSON.stringify(
+      {
+        type: 'suncode.message',
+        version: 1,
+        role: 'assistant',
+        content: { text: '完整信封，应与 finalize 结果一致。' },
+      },
+      null,
+      2,
+    );
+    expect(sanitizeStructuredMessageLeakStreaming(complete)).toBe(
+      sanitizeStructuredMessageLeak(complete),
+    );
   });
 });

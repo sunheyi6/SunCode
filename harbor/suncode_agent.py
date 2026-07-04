@@ -187,6 +187,8 @@ class SunCodeAgent(BaseInstalledAgent):
             "no_proxy",
             "SUNCODE_MAX_TURNS",
             "SUNCODE_CELL_TIMEOUT_SEC",
+            "SUNCODE_CUSTOM_ENDPOINTS",
+            "SUNCODE_CUSTOM_ENDPOINTS_B64",
         ):
             value = self._get_env(key)
             if value:

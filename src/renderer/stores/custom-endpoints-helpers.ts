@@ -25,11 +25,40 @@ export function computeCustomEndpointState(endpoints: CustomEndpoint[]): CustomE
   const keyStatus: Record<string, boolean> = {};
   for (const ep of endpoints) {
     providerModels.set(ep.id, buildCustomModelOptions(ep));
-    keyStatus[ep.id] = true;
+    keyStatus[ep.id] = Boolean(ep.apiKey.trim());
   }
   return {
     providerIds: endpoints.map((e) => e.id),
     providerModels,
     keyStatus,
   };
+}
+
+export function computeProviderKeyStatus(input: {
+  providers: string[];
+  envApiKeys: Record<string, string>;
+  customEndpoints: CustomEndpoint[];
+}): Record<string, boolean> {
+  const status: Record<string, boolean> = {};
+  for (const provider of input.providers) {
+    status[provider] = Boolean(input.envApiKeys[provider]);
+  }
+  for (const endpoint of input.customEndpoints) {
+    status[endpoint.id] = Boolean(endpoint.apiKey.trim());
+  }
+  return status;
+}
+
+export function mergeProvidersWithCustom(
+  providers: string[],
+  customProviderIds: string[],
+): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const provider of [...providers, ...customProviderIds]) {
+    if (seen.has(provider)) continue;
+    seen.add(provider);
+    result.push(provider);
+  }
+  return result;
 }

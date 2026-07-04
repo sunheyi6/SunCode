@@ -12,7 +12,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, resolve } from 'node:path';
 
-type Provider = 'anthropic' | 'deepseek' | 'google' | 'openai';
+type BuiltinProvider = 'anthropic' | 'deepseek' | 'google' | 'openai';
+type Provider = BuiltinProvider | string;
 
 interface RunnerOptions {
   agent: string;
@@ -37,7 +38,7 @@ interface RunnerOptions {
 const defaultModel = process.env.HARBOR_MODEL || process.env.SUNCODE_MODEL || 'deepseek/deepseek-v4-flash';
 const defaultProxy = process.env.SUNCODE_PROXY || process.env.HTTP_PROXY || 'http://127.0.0.1:7897';
 
-const providerApiKeys: Record<Provider, string> = {
+const providerApiKeys: Record<BuiltinProvider, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
   deepseek: 'DEEPSEEK_API_KEY',
   google: 'GEMINI_API_KEY',
@@ -65,10 +66,9 @@ const defaultOptions: RunnerOptions = {
 };
 
 function parseProvider(value: string): Provider {
-  if (value === 'anthropic' || value === 'deepseek' || value === 'google' || value === 'openai') {
-    return value;
-  }
-  throw new Error(`Unsupported provider: ${value}`);
+  const trimmed = value.trim();
+  if (trimmed) return trimmed;
+  throw new Error('Provider is required');
 }
 
 function providerFromModel(model: string): Provider {
@@ -186,9 +186,19 @@ function buildHarborArgs(options: RunnerOptions, proxyOverlayPath?: string): str
     args.push('--agent-env', `SUNCODE_REPO_ROOT=${process.cwd()}`);
     args.push('--agent-env', `SUNCODE_PROVIDER=${options.provider}`);
     args.push('--agent-env', `SUNCODE_MODEL=${modelForSunCode(options.model, options.provider)}`);
-    const apiKey = loadApiKey(providerApiKeys[options.provider], options.provider);
-    if (apiKey) {
-      args.push('--agent-env', `${providerApiKeys[options.provider]}=${apiKey}`);
+    const customEndpoints = loadCustomEndpoints();
+    if (customEndpoints) {
+      args.push(
+        '--agent-env',
+        `SUNCODE_CUSTOM_ENDPOINTS_B64=${Buffer.from(customEndpoints, 'utf8').toString('base64')}`,
+      );
+    }
+    const apiKeyName = providerApiKeys[options.provider as BuiltinProvider];
+    if (apiKeyName) {
+      const apiKey = loadApiKey(apiKeyName, options.provider);
+      if (apiKey) {
+        args.push('--agent-env', `${apiKeyName}=${apiKey}`);
+      }
     }
     if (options.proxy) {
       args.push('--agent-env', `HTTP_PROXY=${options.proxy}`);
@@ -309,20 +319,53 @@ function readConfigApiKey(configPath: string, provider: Provider): string | unde
   return apiKey && !apiKey.includes('在此输入') ? apiKey : undefined;
 }
 
+function readConfigCustomEndpoints(configPath: string): unknown[] | undefined {
+  if (!existsSync(configPath)) {
+    return undefined;
+  }
+
+  const parsed = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+    customEndpoints?: unknown;
+  };
+  return Array.isArray(parsed.customEndpoints) ? parsed.customEndpoints : undefined;
+}
+
+function configPaths(): string[] {
+  return [
+    resolve('.suncode', 'config.json'),
+    process.env.APPDATA
+      ? resolve(process.env.APPDATA, 'SunCode', '.suncode', 'config.json')
+      : resolve(homedir(), 'AppData', 'Roaming', 'SunCode', '.suncode', 'config.json'),
+    resolve(homedir(), '.suncode', 'config.json'),
+  ];
+}
+
+function loadCustomEndpoints(): string | undefined {
+  if (process.env.SUNCODE_CUSTOM_ENDPOINTS_B64) {
+    return Buffer.from(process.env.SUNCODE_CUSTOM_ENDPOINTS_B64, 'base64').toString('utf8');
+  }
+
+  if (process.env.SUNCODE_CUSTOM_ENDPOINTS) {
+    return process.env.SUNCODE_CUSTOM_ENDPOINTS;
+  }
+
+  for (const configPath of configPaths()) {
+    const endpoints = readConfigCustomEndpoints(configPath);
+    if (endpoints && endpoints.length > 0) {
+      return JSON.stringify(endpoints);
+    }
+  }
+
+  return undefined;
+}
+
 function loadApiKey(apiKeyName: string, provider: Provider): string | undefined {
   const envApiKey = process.env[apiKeyName];
   if (envApiKey) {
     return envApiKey;
   }
 
-  const configPaths = [
-    resolve('.suncode', 'config.json'),
-    process.env.APPDATA
-      ? resolve(process.env.APPDATA, 'SunCode', '.suncode', 'config.json')
-      : resolve(homedir(), 'AppData', 'Roaming', 'SunCode', '.suncode', 'config.json'),
-  ];
-
-  for (const configPath of configPaths) {
+  for (const configPath of configPaths()) {
     const apiKey = readConfigApiKey(configPath, provider);
     if (apiKey) {
       return apiKey;
@@ -340,7 +383,7 @@ function quoteArg(arg: string): string {
 }
 
 function maskSensitiveArg(arg: string): string {
-  return arg.replace(/((?:API_KEY|TOKEN|SECRET)=).+/i, '$1***');
+  return arg.replace(/((?:API_KEY|TOKEN|SECRET|CUSTOM_ENDPOINTS(?:_B64)?)=).+/i, '$1***');
 }
 
 function printUsage(): void {

@@ -44,6 +44,43 @@ export function sanitizeStructuredMessageLeak(text: string): string {
   return `${prefix}${parsedText}`.trim();
 }
 
+/**
+ * Streaming-aware variant of {@link sanitizeStructuredMessageLeak}.
+ *
+ * While the model is still emitting tokens, the `suncode.message` JSON envelope
+ * may be incomplete (missing closing braces/quotes). This function extracts the
+ * inner `content.text` value as soon as it starts streaming and hides the
+ * surrounding JSON scaffolding, so the chat body only shows the human-readable
+ * text instead of raw structured logs.
+ *
+ * - Complete envelope → same result as {@link sanitizeStructuredMessageLeak}.
+ * - Partial envelope, text value already streaming → decoded text so far.
+ * - Partial envelope, text value not yet started → envelope prefix is hidden.
+ * - No envelope detected → returned unchanged.
+ */
+export function sanitizeStructuredMessageLeakStreaming(text: string): string {
+  if (!text.includes('"suncode.message"')) return text;
+
+  const leakStart = findStructuredMessageStart(text);
+  if (leakStart < 0) return text;
+
+  const prefix = text.slice(0, leakStart);
+  const candidate = text.slice(leakStart).trimStart();
+
+  // Complete (or near-complete) JSON — reuse the strict path.
+  const parsedText = parseStructuredMessageText(candidate);
+  if (parsedText !== undefined) return `${prefix}${parsedText}`.trim();
+
+  // Loose recovery for malformed-but-closed envelopes.
+  const recovered = extractStructuredMessageText(candidate);
+  if (recovered !== undefined) return `${prefix}${recovered}`.trim();
+
+  // Partial envelope still streaming: pull out the text value as it arrives.
+  const streamed = extractStreamingTextValue(candidate);
+  if (streamed === undefined) return prefix.trim();
+  return `${prefix}${streamed}`.trim();
+}
+
 function findStructuredMessageStart(text: string): number {
   const typeIndex = text.indexOf('"suncode.message"');
   if (typeIndex < 0) return -1;
@@ -100,6 +137,89 @@ function extractLooseStructuredMessageText(candidate: string): string | undefine
     .replace(/\\r/g, '\r')
     .replace(/\\t/g, '\t')
     .replace(/\\\\/g, '\\');
+}
+
+function extractStreamingTextValue(candidate: string): string | undefined {
+  const marker = /"content"\s*:\s*\{[\s\S]*?"text"\s*:\s*"/.exec(candidate);
+  if (!marker || marker.index === undefined) return undefined;
+
+  const start = marker.index + marker[0].length;
+  return decodeJsonStringPrefix(candidate, start);
+}
+
+/**
+ * Decode a JSON string body starting just after the opening quote at `start`,
+ * stopping at the first unescaped `"` (end of value) or at end-of-input (still
+ * streaming). Returns the decoded text visible so far.
+ */
+function decodeJsonStringPrefix(src: string, start: number): string {
+  let out = '';
+  let i = start;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === '\\') {
+      const next = src[i + 1];
+      if (next === undefined) {
+        // Dangling escape at the very end of the buffer — drop it.
+        break;
+      }
+      switch (next) {
+        case '"':
+          out += '"';
+          i += 2;
+          break;
+        case '\\':
+          out += '\\';
+          i += 2;
+          break;
+        case 'n':
+          out += '\n';
+          i += 2;
+          break;
+        case 'r':
+          out += '\r';
+          i += 2;
+          break;
+        case 't':
+          out += '\t';
+          i += 2;
+          break;
+        case 'b':
+          out += '\b';
+          i += 2;
+          break;
+        case 'f':
+          out += '\f';
+          i += 2;
+          break;
+        case '/':
+          out += '/';
+          i += 2;
+          break;
+        case 'u': {
+          const hex = src.slice(i + 2, i + 6);
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            out += String.fromCharCode(Number.parseInt(hex, 16));
+            i += 6;
+          } else {
+            // Incomplete unicode escape — keep the backslash for next delta.
+            return out;
+          }
+          break;
+        }
+        default:
+          out += next;
+          i += 2;
+      }
+    } else if (ch === '"') {
+      // Closing quote of the text value — stop, ignore trailing braces.
+      return out;
+    } else {
+      out += ch;
+      i += 1;
+    }
+  }
+  return out;
 }
 
 function findLooseStructuredMessageTextEnd(candidate: string, start: number): number {

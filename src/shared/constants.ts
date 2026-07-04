@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS = {
   customEndpoints: [],
   goalMaxTurns: 5,
   goalMaxWallTimeMs: 600000, // 10 minutes
+  taskCompleteNotification: 'never' as const,
+  createGitWorktree: false,
 };
 
 /** Curated list of recommended models for coding tasks. */

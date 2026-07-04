@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@shared/constants';
+import { normalizeCustomEndpointBaseUrl } from '@shared/custom-endpoints';
 import type { AppSettings, CustomApiFormat, CustomEndpoint, CustomModelEntry } from '@shared/types';
 
 describe('customEndpoints data model', () => {
@@ -24,5 +25,25 @@ describe('customEndpoints data model', () => {
     };
     expect(e.models).toHaveLength(2);
     expect(e.apiFormat satisfies CustomApiFormat).toBe('openai-completions');
+  });
+});
+
+describe('normalizeCustomEndpointBaseUrl', () => {
+  it('OpenAI Chat Completions 完整接口路径会归一化为 base URL', () => {
+    expect(
+      normalizeCustomEndpointBaseUrl(
+        'http://localhost:11434/v1/chat/completions',
+        'openai-completions',
+      ),
+    ).toBe('http://localhost:11434/v1');
+  });
+
+  it('OpenAI Responses 和 Anthropic Messages 完整接口路径会归一化为 base URL', () => {
+    expect(
+      normalizeCustomEndpointBaseUrl('https://gw.example/v1/responses', 'openai-responses'),
+    ).toBe('https://gw.example/v1');
+    expect(
+      normalizeCustomEndpointBaseUrl('https://gw.example/v1/messages', 'anthropic-messages'),
+    ).toBe('https://gw.example/v1');
   });
 });
