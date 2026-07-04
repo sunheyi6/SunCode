@@ -1,14 +1,19 @@
 <script setup lang="ts">
+import type { CustomEndpoint } from '@shared/types';
 import { computed, onMounted, ref } from 'vue';
-import { useModelsStore } from '../../stores/models';
+import { BUILTIN_PROVIDERS, useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
+import CustomEndpoints from './CustomEndpoints.vue';
 
 const modelsStore = useModelsStore();
 const settingsStore = useSettingsStore();
 
+const activeSource = ref<'builtin' | 'custom'>('builtin');
 const activeTab = ref<'recommended' | 'all'>('recommended');
 const selectedProvider = ref('');
 const searchQuery = ref('');
+
+const builtinProviderSet = new Set(BUILTIN_PROVIDERS);
 
 // 内联 Key 输入状态
 const keyInputProvider = ref('');
@@ -31,7 +36,8 @@ const displayModels = computed(() => {
   } else if (selectedProvider.value) {
     source = modelsStore.providerModels.get(selectedProvider.value) || [];
   } else {
-    source = modelsStore.allModels;
+    // 全部模型：仅内置 provider，自定义端点走单独的「自定义模型」tab
+    source = modelsStore.allModels.filter((m) => builtinProviderSet.has(m.provider));
   }
 
   if (!q) return source;
@@ -42,6 +48,14 @@ const displayModels = computed(() => {
       m.model.toLowerCase().includes(q),
   );
 });
+
+const builtinProviders = computed(() =>
+  modelsStore.providers.filter((p) => builtinProviderSet.has(p)),
+);
+
+const customEndpoints = computed<CustomEndpoint[]>(
+  () => settingsStore.settings.customEndpoints ?? [],
+);
 
 const currentModel = computed(() => ({
   provider: modelsStore.activeProvider,
@@ -228,15 +242,27 @@ function providerLabel(id: string): string {
       </div>
     </div>
 
-    <!-- 标签切换 -->
-    <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'recommended' }" @click="activeTab = 'recommended'">
-        ⭐ 推荐模型
+    <!-- 来源切换：内置 / 自定义 -->
+    <div class="tab-bar source-tabs">
+      <button class="tab-btn" :class="{ active: activeSource === 'builtin' }" @click="activeSource = 'builtin'">
+        内置模型
       </button>
-      <button class="tab-btn" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
-        🌐 全部模型
+      <button class="tab-btn" :class="{ active: activeSource === 'custom' }" @click="activeSource = 'custom'">
+        自定义模型
       </button>
     </div>
+
+    <!-- ====== 内置模型 ====== -->
+    <template v-if="activeSource === 'builtin'">
+      <!-- 子标签：推荐 / 全部 -->
+      <div class="tab-bar sub-tabs">
+        <button class="tab-btn" :class="{ active: activeTab === 'recommended' }" @click="activeTab = 'recommended'">
+          ⭐ 推荐模型
+        </button>
+        <button class="tab-btn" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
+          🌐 全部模型
+        </button>
+      </div>
 
     <!-- 搜索 -->
     <div class="search-bar">
@@ -246,7 +272,7 @@ function providerLabel(id: string): string {
     <!-- Provider 筛选 -->
     <div v-if="activeTab === 'all'" class="provider-chips">
       <button
-        v-for="provider in modelsStore.providers"
+        v-for="provider in builtinProviders"
         :key="provider"
         class="provider-chip"
         :class="{ active: selectedProvider === provider, loading: isLoading(provider) }"
@@ -280,6 +306,43 @@ function providerLabel(id: string): string {
 
       <div v-if="otherModels.length === 0" class="empty-hint">暂无其他模型</div>
     </div>
+    </template>
+
+    <!-- ====== 自定义模型 ====== -->
+    <template v-else>
+      <p class="custom-source-desc">接入 OpenAI / Anthropic 兼容端点。选择模型立即启用；在下方管理端点。</p>
+
+      <div v-if="customEndpoints.length === 0" class="empty-hint">
+        尚未配置自定义端点。在下方“+ 添加端点”开始。
+      </div>
+
+      <div v-for="ep in customEndpoints" :key="ep.id" class="custom-group">
+        <div class="custom-group-header">
+          <span>{{ ep.name }}</span>
+          <span class="custom-group-url">{{ ep.baseUrl }}</span>
+        </div>
+        <div class="model-list">
+          <button
+            v-for="m in ep.models"
+            :key="`${ep.id}/${m.id}`"
+            class="model-option"
+            :class="{ active: isActive(ep.id, m.id) }"
+            @click="selectModel(ep.id, m.id)"
+          >
+            <div class="model-main">
+              <span class="model-name">{{ m.name || m.id }}</span>
+              <div class="model-meta">
+                <span class="model-provider">{{ ep.id }} · {{ m.id }}</span>
+                <span class="model-key-badge has">✓</span>
+              </div>
+            </div>
+            <span v-if="isActive(ep.id, m.id)" class="check-icon">✓</span>
+          </button>
+        </div>
+      </div>
+
+      <CustomEndpoints />
+    </template>
 
   </div>
 </template>
@@ -395,6 +458,14 @@ function providerLabel(id: string): string {
 }
 .tab-btn:hover { color: var(--color-text); background: var(--color-surface); }
 .tab-btn.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+
+.source-tabs { margin-bottom: 12px; }
+.sub-tabs { margin-bottom: 8px; }
+.custom-source-desc { font-size: 12px; color: var(--color-text-muted); margin: 0 0 10px; }
+.custom-group { margin-bottom: 14px; }
+.custom-group-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.custom-group-header span:first-child { font-size: 13px; font-weight: 600; color: var(--color-text); }
+.custom-group-url { font-size: 10px; color: var(--color-text-muted); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .search-bar { margin-bottom: 8px; }
 .search-input {

@@ -5,7 +5,6 @@ import { bridge } from '../../api/bridge';
 import { useSettingsStore } from '../../stores/settings';
 import { useStatsStore } from '../../stores/stats';
 import { useUpdateStore } from '../../stores/update';
-import CustomEndpoints from './CustomEndpoints.vue';
 import ModelSelector from './ModelSelector.vue';
 import TokenUsage from './TokenUsage.vue';
 
@@ -272,7 +271,6 @@ function themeLabel(theme: AppSettings['theme']): string {
 
           <section v-else-if="activeSection === 'models'" class="settings-stack">
             <ModelSelector />
-            <CustomEndpoints />
           </section>
 
           <section v-else-if="activeSection === 'behavior'" class="settings-stack">
