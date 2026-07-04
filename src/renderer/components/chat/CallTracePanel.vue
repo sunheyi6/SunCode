@@ -122,12 +122,12 @@ function turnSummary(entry: CallTraceTurnEntry): string {
   parts.push(`out ${formatTokens(entry.summary.outputTokens)}`);
   if (entry.summary.toolCount > 0) {
     const failed =
-      entry.summary.failedToolCount > 0 ? `锛屽け璐?${entry.summary.failedToolCount}` : '';
-    parts.push(`宸ュ叿 ${entry.summary.completedToolCount}/${entry.summary.toolCount}${failed}`);
+      entry.summary.failedToolCount > 0 ? `，失败${entry.summary.failedToolCount}` : '';
+    parts.push(`工具 ${entry.summary.completedToolCount}/${entry.summary.toolCount}${failed}`);
   }
   if (entry.summary.stopReason) parts.push(entry.summary.stopReason);
   if (entry.isStreaming) parts.push('进行中');
-  return parts.join(' 路 ');
+  return parts.join(' · ');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
@@ -228,20 +228,20 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
 <template>
   <aside class="call-trace-panel">
     <div class="trace-header">
-      <span class="trace-title">璋冪敤杞ㄨ抗</span>
+      <span class="trace-title">调用轨迹</span>
       <div class="trace-header-actions">
         <button
           class="trace-folder-btn"
-          title="鍦ㄦ枃浠剁鐞嗗櫒涓墦寮€浼氳瘽鏂囦欢"
+          title="在文件管理器中打开会话文件"
           @click="openTraceFolder"
         >
-          鎵撳紑鏂囦欢澶?        </button>
-        <button class="trace-close" title="鍏抽棴" @click="$emit('close')">脳</button>
+          打开文件夹        </button>
+        <button class="trace-close" title="关闭" @click="$emit('close')">×</button>
       </div>
     </div>
 
     <div class="trace-path-bar">
-      <span class="trace-path-label">浼氳瘽鏂囦欢</span>
+      <span class="trace-path-label">会话文件</span>
       <span class="trace-path-value">{{ traceFilePath || '-' }}</span>
     </div>
 
@@ -249,7 +249,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
       <details v-if="outline.systemPrompt" class="trace-section">
         <summary class="trace-section-header">
           <span>系统提示词</span>
-          <span class="trace-section-meta">{{ outline.systemPrompt.charCount }} 瀛楃</span>
+          <span class="trace-section-meta">{{ outline.systemPrompt.charCount }} 字符</span>
         </summary>
         <pre class="trace-pre">{{ systemPromptPreview }}</pre>
         <button
@@ -257,17 +257,17 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
           class="trace-expand-btn"
           @click="showFullSystemPrompt = !showFullSystemPrompt"
         >
-          {{ showFullSystemPrompt ? '鏀惰捣' : `灞曞紑鍏ㄦ枃 (${systemPromptText.length} 瀛楃)` }}
+          {{ showFullSystemPrompt ? '收起' : `展开全文 (${systemPromptText.length} 字符)` }}
         </button>
       </details>
 
-      <div v-if="outline.entries.length === 0" class="trace-empty">鏆傛棤璋冪敤璁板綍</div>
+      <div v-if="outline.entries.length === 0" class="trace-empty">暂无调用记录</div>
 
       <template v-for="entry in outline.entries" :key="entry.id">
         <details v-if="entry.kind === 'user'" class="outline-row outline-user">
           <summary class="outline-summary">
             <span class="outline-caret">&gt;</span>
-            <span class="outline-title">鐢ㄦ埛璇锋眰</span>
+            <span class="outline-title">用户请求</span>
             <span class="outline-preview">{{ entry.content }}</span>
             <span class="outline-meta">{{ formatTime(entry.timestamp) }}</span>
           </summary>
@@ -309,7 +309,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
                       class="trace-request-message"
                     >
                       <div class="trace-request-role">
-                        {{ rm.role.toUpperCase() }} 路 {{ rm.length }} 瀛楃
+                        {{ rm.role.toUpperCase() }} · {{ rm.length }} 字符
                       </div>
                       <pre class="trace-request-preview">{{ rm.content || rm.preview }}</pre>
                     </div>
@@ -348,10 +348,10 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
                           </span>
                         </summary>
                         <div class="trace-generic-body">
-                          <span class="trace-field-label">鍙傛暟</span>
+                          <span class="trace-field-label">参数</span>
                           <ToolMarkdownOutput :output="tc.arguments" />
                           <template v-if="tc.result">
-                            <span class="trace-field-label">宸ュ叿杩斿洖</span>
+                            <span class="trace-field-label">工具返回</span>
                             <ToolMarkdownOutput
                               :class="{ 'trace-error-text': tc.result.success === false }"
                               :output="toolResultOutput(tc)"
