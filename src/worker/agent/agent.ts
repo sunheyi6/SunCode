@@ -444,7 +444,7 @@ export class Agent {
   }
 
   private async runLoop(runId: string, summaryMode = false): Promise<void> {
-    const modelRegistry = createModelRegistry();
+    const modelRegistry = createModelRegistry(this.settings.customEndpoints ?? []);
     const model = await modelRegistry.getModel(
       this.settings.activeProvider,
       this.settings.activeModel,
@@ -616,7 +616,7 @@ export class Agent {
     runId: string,
     goalDef: import('@shared/types').GoalDefinition,
   ): Promise<void> {
-    const modelRegistry = createModelRegistry();
+    const modelRegistry = createModelRegistry(this.settings.customEndpoints ?? []);
     const model = await modelRegistry.getModel(
       this.settings.activeProvider,
       this.settings.activeModel,

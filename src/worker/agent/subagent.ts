@@ -281,7 +281,7 @@ export class SubagentDispatcher {
     );
 
     // Get model: definition model > parent model
-    const modelRegistry = createModelRegistry();
+    const modelRegistry = createModelRegistry(this.opts.settings.customEndpoints ?? []);
     const modelProvider = call.model
       ? call.model.split('/')[0]!
       : this.opts.settings.activeProvider;
