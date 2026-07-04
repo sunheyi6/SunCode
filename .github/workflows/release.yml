@@ -182,8 +182,13 @@ jobs:
           cd release-assets
 
           # ── Windows NSIS: latest.yml ──
-          # Match the NSIS installer (not portable)
-          NSIS_EXE=$(ls *.exe 2>/dev/null | grep -v -i portable | head -1 || echo "")
+          # Match the NSIS installer specifically (artifactName: SunCode-Setup-${version}.${ext}).
+          # Do NOT pick the portable build — its filename has a space that GitHub mangles to a dot,
+          # and portable builds are not used for auto-update anyway.
+          NSIS_EXE=$(ls *-Setup-*.exe 2>/dev/null | head -1 || echo "")
+          if [ -z "$NSIS_EXE" ]; then
+            echo "::warning::No NSIS installer found (expected *-Setup-*.exe); skipping latest.yml"
+          fi
           if [ -n "$NSIS_EXE" ]; then
             SIZE=$(stat -c%s "$NSIS_EXE" 2>/dev/null || stat -f%z "$NSIS_EXE")
             SHA512=$(sha512sum "$NSIS_EXE" | awk '{print $1}')
