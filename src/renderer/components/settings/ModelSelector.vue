@@ -9,7 +9,6 @@ const modelsStore = useModelsStore();
 const settingsStore = useSettingsStore();
 
 const activeSource = ref<'builtin' | 'custom'>('builtin');
-const activeTab = ref<'recommended' | 'all'>('recommended');
 const selectedProvider = ref('');
 const searchQuery = ref('');
 
@@ -31,12 +30,10 @@ const displayModels = computed(() => {
   const q = searchQuery.value.toLowerCase();
   let source: Array<{ provider: string; model: string; label: string }>;
 
-  if (activeTab.value === 'recommended') {
-    source = modelsStore.recommendedModels;
-  } else if (selectedProvider.value) {
+  if (selectedProvider.value) {
     source = modelsStore.providerModels.get(selectedProvider.value) || [];
   } else {
-    // 全部模型：仅内置 provider，自定义端点走单独的「自定义模型」tab
+    // 全部内置模型（自定义端点走单独的「自定义模型」tab）
     source = modelsStore.allModels.filter((m) => builtinProviderSet.has(m.provider));
   }
 
@@ -252,63 +249,52 @@ function providerLabel(id: string): string {
       </button>
     </div>
 
-    <!-- ====== 内置模型 ====== -->
+    <!-- 内置模型 -->
     <template v-if="activeSource === 'builtin'">
-      <!-- 子标签：推荐 / 全部 -->
-      <div class="tab-bar sub-tabs">
-        <button class="tab-btn" :class="{ active: activeTab === 'recommended' }" @click="activeTab = 'recommended'">
-          ⭐ 推荐模型
-        </button>
-        <button class="tab-btn" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
-          🌐 全部模型
+      <!-- 搜索 -->
+      <div class="search-bar">
+        <input v-model="searchQuery" class="search-input" placeholder="搜索模型..." />
+      </div>
+
+      <!-- Provider 筛选 -->
+      <div class="provider-chips">
+        <button
+          v-for="provider in builtinProviders"
+          :key="provider"
+          class="provider-chip"
+          :class="{ active: selectedProvider === provider, loading: isLoading(provider) }"
+          @click="selectProvider(provider)"
+        >
+          <span class="chip-key-dot" :class="{ has: modelsStore.hasKey(provider) }" />
+          {{ providerLabel(provider) }}
         </button>
       </div>
 
-    <!-- 搜索 -->
-    <div class="search-bar">
-      <input v-model="searchQuery" class="search-input" placeholder="搜索模型..." />
-    </div>
-
-    <!-- Provider 筛选 -->
-    <div v-if="activeTab === 'all'" class="provider-chips">
-      <button
-        v-for="provider in builtinProviders"
-        :key="provider"
-        class="provider-chip"
-        :class="{ active: selectedProvider === provider, loading: isLoading(provider) }"
-        @click="selectProvider(provider)"
-      >
-        <span class="chip-key-dot" :class="{ has: modelsStore.hasKey(provider) }" />
-        {{ providerLabel(provider) }}
-      </button>
-    </div>
-
-    <!-- 模型列表 -->
-    <div class="model-list">
-      <button
-        v-for="opt in otherModels"
-        :key="`${opt.provider}/${opt.model}`"
-        class="model-option"
-        :class="{ active: isActive(opt.provider, opt.model) }"
-        @click="selectModel(opt.provider, opt.model)"
-      >
-        <div class="model-main">
-          <span class="model-name">{{ opt.label }}</span>
-          <div class="model-meta">
-            <span class="model-provider">{{ providerLabel(opt.provider) }}</span>
-            <span class="model-key-badge" :class="{ has: modelsStore.hasKey(opt.provider) }">
-              {{ modelsStore.hasKey(opt.provider) ? '✓' : '⚠ 需 Key' }}
-            </span>
+      <!-- 模型列表 -->
+      <div class="model-list">
+        <button
+          v-for="opt in otherModels"
+          :key="`${opt.provider}/${opt.model}`"
+          class="model-option"
+          :class="{ active: isActive(opt.provider, opt.model) }"
+          @click="selectModel(opt.provider, opt.model)"
+        >
+          <div class="model-main">
+            <span class="model-name">{{ opt.label }}</span>
+            <div class="model-meta">
+              <span class="model-provider">{{ providerLabel(opt.provider) }}</span>
+              <span class="model-key-badge" :class="{ has: modelsStore.hasKey(opt.provider) }">
+                {{ modelsStore.hasKey(opt.provider) ? '✓' : '⚠ 需 Key' }}
+              </span>
+            </div>
           </div>
-        </div>
-        <span v-if="isActive(opt.provider, opt.model)" class="check-icon">✓</span>
-      </button>
+          <span v-if="isActive(opt.provider, opt.model)" class="check-icon">✓</span>
+        </button>
 
-      <div v-if="otherModels.length === 0" class="empty-hint">暂无其他模型</div>
-    </div>
+        <div v-if="otherModels.length === 0" class="empty-hint">暂无其他模型</div>
+      </div>
     </template>
-
-    <!-- ====== 自定义模型 ====== -->
+    <!-- 自定义模型 -->
     <template v-else>
       <p class="custom-source-desc">接入 OpenAI / Anthropic 兼容端点。选择模型立即启用；在下方管理端点。</p>
 
