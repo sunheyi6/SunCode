@@ -5,8 +5,9 @@ import { bridge } from '../../api/bridge';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
 import { useSettingsStore } from '../../stores/settings';
-import { useUpdateStore } from '../../stores/update';
 import { getVisibleSessionGroups } from './session-list';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import UpdateNotification from './UpdateNotification.vue';
 
 const props = defineProps<{
   collapsed: boolean;
@@ -19,7 +20,6 @@ const emit = defineEmits<{
 
 const sessionsStore = useSessionsStore();
 const chatStore = useChatStore();
-const updateStore = useUpdateStore();
 const settingsStore = useSettingsStore();
 const searchQuery = ref('');
 const searchOpen = ref(false);
@@ -235,26 +235,8 @@ function formatTime(value: string): string {
 
     <!-- Expanded state: full sidebar -->
     <template v-else>
-    <!-- Update button: shows at top when update available or downloading -->
-    <div
-      v-if="updateStore.status.state === 'update-available' || updateStore.status.state === 'downloading'"
-      class="update-bar"
-    >
-      <button
-        class="update-btn"
-        :disabled="updateStore.status.state === 'downloading'"
-        @click="updateStore.startUpdate()"
-      >
-        <template v-if="updateStore.status.state === 'downloading'">
-          <span class="update-spinner" />
-          <span>正在更新 {{ Math.round(updateStore.status.downloadProgress ?? 0) }}%</span>
-        </template>
-        <template v-else>
-          <span class="update-icon">⬇</span>
-          <span>更新到 {{ updateStore.status.version }}</span>
-        </template>
-      </button>
-    </div>
+    <!-- Update prompt: background auto-check shows new-version / progress / ready / error states at top of sidebar -->
+    <UpdateNotification />
 
     <div class="sidebar-actions">
         <div class="sidebar-nav">
@@ -433,55 +415,7 @@ function formatTime(value: string): string {
   padding-top: 6px;
 }
 
-/* ── Update bar ── */
-.update-bar {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border-color);
-  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-secondary));
-}
-
-.update-btn {
-  width: 100%;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--color-accent);
-  border-radius: var(--border-radius-sm);
-  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
-  color: var(--color-accent);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.update-btn:hover:not(:disabled) {
-  background: var(--color-accent);
-  color: var(--color-bg);
-}
-
-.update-btn:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-
-.update-icon {
-  font-size: 14px;
-}
-
-.update-spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: update-spin 0.8s linear infinite;
-}
-@keyframes update-spin {
-  to { transform: rotate(360deg); }
-}
+/* ── Update prompt: see UpdateNotification.vue ── */
 
 .sidebar-actions {
   display: flex;
