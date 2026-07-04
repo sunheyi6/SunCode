@@ -1,3 +1,5 @@
+import type { CustomEndpoint, CustomModelEntry } from '@shared/types';
+
 /**
  * Model Registry - Wraps @earendil-works/pi-ai for model discovery and selection.
  * Provides a simpler API on top of pi-ai's comprehensive model database.
@@ -21,10 +23,49 @@ export interface ModelInfo {
   supportsImages: boolean;
 }
 
+/** 由自定义 endpoint + 模型条目构造的 pi-ai Model 兼容对象。 */
+export interface CustomModelSpec {
+  id: string;
+  name: string;
+  api: string;
+  provider: string;
+  baseUrl: string;
+  reasoning: boolean;
+  input: string[];
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  contextWindow: number;
+  maxTokens: number;
+  headers: Record<string, string>;
+}
+
+/** 纯函数：根据 endpoint 与模型条目构造 Model 兼容对象（含鉴权 header）。 */
+export function buildCustomModel(
+  endpoint: CustomEndpoint,
+  entry: CustomModelEntry,
+): CustomModelSpec {
+  const headers: Record<string, string> =
+    endpoint.apiFormat === 'anthropic-messages'
+      ? { 'x-api-key': endpoint.apiKey, 'anthropic-version': '2023-06-01' }
+      : { Authorization: `Bearer ${endpoint.apiKey}` };
+  return {
+    id: entry.id,
+    name: entry.name || entry.id,
+    api: endpoint.apiFormat,
+    provider: endpoint.id,
+    baseUrl: endpoint.baseUrl,
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: entry.contextWindow || 128000,
+    maxTokens: 4096,
+    headers,
+  };
+}
+
 /**
  * Create a model registry that wraps pi-ai.
  */
-export function createModelRegistry() {
+export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
   const _modelsCache: ModelInfo[] | null = null;
   let providersCache: string[] | null = null;
 
@@ -33,6 +74,11 @@ export function createModelRegistry() {
      * Get a specific model by provider and model ID.
      */
     async getModel(provider: string, modelId: string): Promise<unknown> {
+      const ep = customEndpoints.find((e) => e.id === provider);
+      if (ep) {
+        const entry = ep.models.find((m) => m.id === modelId);
+        return entry ? buildCustomModel(ep, entry) : null;
+      }
       try {
         const { getModel } = await import('@earendil-works/pi-ai');
         return getModel(provider as any, modelId);
