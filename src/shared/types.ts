@@ -196,6 +196,35 @@ export interface SessionMeta {
   workingDirectory: string;
 }
 
+// ===== Custom Endpoints =====
+
+/** 自定义端点的 API 协议格式，与 pi-ai 的 KnownApi 对齐。 */
+export type CustomApiFormat = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+
+/** 自定义端点下的单个模型条目。 */
+export interface CustomModelEntry {
+  /** 必填，模型 id，发送给端点。 */
+  id: string;
+  /** 可选显示名，留空则用 id。 */
+  name?: string;
+  /** 可选上下文窗口（token），默认 128000。 */
+  contextWindow?: number;
+}
+
+/** 自定义端点（一个 URL + Key + API 格式下挂多个模型）。 */
+export interface CustomEndpoint {
+  /** 系统 provider id，由显示名 slugify 生成，确保唯一。 */
+  id: string;
+  /** 显示名。 */
+  name: string;
+  /** Base URL。 */
+  baseUrl: string;
+  /** API Key（独立存储，不复用 envApiKeys）。 */
+  apiKey: string;
+  apiFormat: CustomApiFormat;
+  models: CustomModelEntry[];
+}
+
 // ===== Settings Types =====
 
 /** Application settings */
@@ -217,6 +246,8 @@ export interface AppSettings {
   mcpServers: McpServerConfig[];
   skills: string[]; // paths to skill directories
   envApiKeys: Record<string, string>;
+  /** 自定义端点列表（仅全局存储）。 */
+  customEndpoints: CustomEndpoint[];
   /** Max lessons to retain. Default 200. */
   maxLessons?: number;
   /** Goal mode: max goal-level turns (each turn = one full agent run). Default 5. */

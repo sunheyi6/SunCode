@@ -18,6 +18,7 @@ export const useSettingsStore = defineStore('settings', () => {
     mcpServers: [],
     skills: [],
     envApiKeys: {},
+    customEndpoints: [],
     maxLessons: 200,
   });
 

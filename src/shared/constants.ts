@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
   mcpServers: [],
   skills: [],
   envApiKeys: {},
+  customEndpoints: [],
   goalMaxTurns: 5,
   goalMaxWallTimeMs: 600000, // 10 minutes
 };
