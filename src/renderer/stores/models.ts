@@ -1,7 +1,8 @@
-import type { AppSettings } from '@shared/types';
+import type { AppSettings, CustomEndpoint } from '@shared/types';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { bridge } from '../api/bridge';
+import { computeCustomEndpointState } from './custom-endpoints-helpers';
 import { useSettingsStore } from './settings';
 
 export interface ModelOption {
@@ -45,7 +46,7 @@ const BUILTIN_RECOMMENDED: ModelOption[] = [
   },
 ];
 
-const BUILTIN_PROVIDERS = [
+export const BUILTIN_PROVIDERS = [
   'anthropic',
   'openai',
   'google',
@@ -71,6 +72,31 @@ export const useModelsStore = defineStore('models', () => {
   const recommendedModels = ref<ModelOption[]>([...BUILTIN_RECOMMENDED]);
   const isLoaded = ref(false);
   const keyStatus = ref<Record<string, boolean>>({});
+
+  const builtinProviderSet = new Set(BUILTIN_PROVIDERS);
+
+  /** 把自定义 endpoint 注入 providers / providerModels / keyStatus，并清理旧的自定义条目。 */
+  function syncCustomEndpoints(endpoints: CustomEndpoint[]): void {
+    const state = computeCustomEndpointState(endpoints);
+
+    // providers = 内置 + 自定义（去重）
+    const customIds = state.providerIds.filter((id) => !builtinProviderSet.has(id));
+    providers.value = [...BUILTIN_PROVIDERS, ...customIds];
+
+    // 清理旧的自定义 providerModels，再写入新的
+    for (const id of [...providerModels.value.keys()]) {
+      if (!builtinProviderSet.has(id)) providerModels.value.delete(id);
+    }
+    for (const [id, opts] of state.providerModels) providerModels.value.set(id, opts);
+
+    // 清理旧的自定义 keyStatus，再写入新的
+    const nextKeyStatus: Record<string, boolean> = {};
+    for (const [id, has] of Object.entries(keyStatus.value)) {
+      if (builtinProviderSet.has(id)) nextKeyStatus[id] = has;
+    }
+    for (const [id, has] of Object.entries(state.keyStatus)) nextKeyStatus[id] = has;
+    keyStatus.value = nextKeyStatus;
+  }
 
   const allModels = computed<ModelOption[]>(() => {
     const result: ModelOption[] = [];
@@ -117,11 +143,13 @@ export const useModelsStore = defineStore('models', () => {
     if (initialSettings) {
       activeProvider.value = initialSettings.activeProvider;
       activeModel.value = initialSettings.activeModel;
+      syncCustomEndpoints(initialSettings.customEndpoints ?? []);
     } else {
       try {
         const s = await bridge.getSettings();
         if (s.activeProvider) activeProvider.value = s.activeProvider;
         if (s.activeModel) activeModel.value = s.activeModel;
+        syncCustomEndpoints(s.customEndpoints ?? []);
       } catch {
         /* use defaults */
       }
@@ -204,6 +232,7 @@ export const useModelsStore = defineStore('models', () => {
     refreshKeyStatus,
     setApiKey,
     syncKeyStatusFromSettings,
+    syncCustomEndpoints,
     loadRecommended,
     loadProviders,
     loadModels,
