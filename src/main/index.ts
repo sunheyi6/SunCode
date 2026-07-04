@@ -179,6 +179,14 @@ function schedulePostStartupRecovery(win: BrowserWindow): void {
 }
 
 async function initApp(): Promise<void> {
+  // Set AppUserModelId for Windows toast notifications.
+  // Without this, Electron's Notification.show() silently fails on Windows
+  // because the underlying WinRT ToastNotificationManager requires a valid
+  // AppUserModelID.
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.suncode.app');
+  }
+
   // Migrate legacy data from install directory to standard user data dir
   migrateLegacyDataDir();
 

@@ -22,7 +22,7 @@ import type {
   WorkerInMessage,
   WorkerOutMessage,
 } from '@shared/types';
-import { app, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { app, dialog, ipcMain, nativeTheme, Notification, shell } from 'electron';
 import {
   checkForUpdates,
   downloadUpdate,
@@ -737,6 +737,16 @@ export function registerIpcHandlers(wm: WindowManager): void {
     } catch (err) {
       console.error('[Main] settings:update failed:', (err as Error).message);
       return currentSettings;
+    }
+  });
+
+  // Task completion native notification
+  ipcMain.on('notify:task-complete', (_event, title: string, body: string) => {
+    try {
+      const notification = new Notification({ title, body });
+      notification.show();
+    } catch (err) {
+      console.error('[Main] Failed to show task completion notification:', (err as Error).message);
     }
   });
 
