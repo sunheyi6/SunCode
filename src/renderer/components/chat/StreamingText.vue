@@ -3,6 +3,7 @@
 import MarkdownRender from 'markstream-vue';
 import 'markstream-vue/index.css';
 import { computed } from 'vue';
+import { useSettingsStore } from '../../stores/settings';
 import { buildStreamingTextRenderOptions } from './streaming-text-renderer';
 
 const props = defineProps<{
@@ -12,6 +13,15 @@ const props = defineProps<{
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const renderOptions = computed(() => buildStreamingTextRenderOptions(props.isStreaming));
+
+const settingsStore = useSettingsStore();
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const isDark = computed(() => {
+  const theme = settingsStore.settings.theme;
+  if (theme === 'dark') return true;
+  if (theme === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+});
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const containerClass = computed(() => ({
@@ -31,6 +41,9 @@ const containerClass = computed(() => ({
       :fade="renderOptions.fade"
       :typewriter="renderOptions.typewriter"
       :max-live-nodes="renderOptions.maxLiveNodes"
+      code-renderer="shiki"
+      :is-dark="isDark"
+      :code-block-props="{ showLineNumbers: true, theme: { light: 'material-theme-lighter', dark: 'material-theme' } }"
     />
   </div>
 </template>

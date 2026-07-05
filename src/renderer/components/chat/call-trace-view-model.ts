@@ -88,12 +88,14 @@ export type InlineCallTraceEntry =
       id: string;
       text: string;
       isCurrent: boolean;
+      isActive: boolean;
     }
   | {
       kind: 'text';
       id: string;
       text: string;
       isCurrent: boolean;
+      isActive: boolean;
     }
   | {
       kind: 'tools';
@@ -103,7 +105,22 @@ export type InlineCallTraceEntry =
       isCurrent: boolean;
       hasRunning: boolean;
       hasFailed: boolean;
+      isActive: boolean;
     };
+
+/**
+ * 排序 entries：活跃 entry（运行中的工具组 / 正在追加的思考或文本）排到最后，
+ * 其余按原序保留（即 blocks 数组顺序 = delta 到达时间顺序）。
+ * 稳定排序：用 index 做 tiebreaker，保证多个活跃 entry 之间相对顺序不变。
+ */
+function sortEntriesByActiveLast(entries: InlineCallTraceEntry[]): InlineCallTraceEntry[] {
+  const indexed = entries.map((entry, index) => ({ entry, index }));
+  indexed.sort((a, b) => {
+    if (a.entry.isActive !== b.entry.isActive) return a.entry.isActive ? 1 : -1;
+    return a.index - b.index;
+  });
+  return indexed.map(({ entry }) => entry);
+}
 
 export function buildCallTraceOutline(input: {
   messages: ChatMessage[];
@@ -259,9 +276,25 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
   const uiLanguage = message.uiLanguage ?? 'zh';
   const entries: InlineCallTraceEntry[] = [];
   const representedToolIds = new Set<string>();
-  const hasBlocks = (message.blocks?.length ?? 0) > 0;
+  const blocks = message.blocks ?? [];
+  const hasBlocks = blocks.length > 0;
 
-  for (const block of message.blocks ?? []) {
+  // 流式态下，末尾连续同类型的 block 视为"活跃"（正在追加 delta）。
+  // 例如 blocks=[text, tool, thinking, thinking] 末尾的 thinking 活跃；
+  // blocks=[text, tool] 末尾的 tool 活跃（若是 running）。
+  const activeBlockIds = new Set<string>();
+  if (message.isStreaming && blocks.length > 0) {
+    let lastType = blocks[blocks.length - 1]?.type;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (!b) break;
+      if (b.type !== lastType) break;
+      activeBlockIds.add(b.id);
+      lastType = b.type;
+    }
+  }
+
+  for (const block of blocks) {
     if (block.type === 'thinking' && block.thinking) {
       const thinkingText = displayThinkingText(block.thinking, uiLanguage);
       if (thinkingText) {
@@ -270,6 +303,7 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
           id: block.id,
           text: thinkingText,
           isCurrent: false,
+          isActive: activeBlockIds.has(block.id),
         });
       }
       continue;
@@ -281,6 +315,7 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
         id: block.id,
         text: block.text,
         isCurrent: false,
+        isActive: activeBlockIds.has(block.id),
       });
       continue;
     }
@@ -301,6 +336,7 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
         id: `${message.id}:thinking`,
         text: thinkingText,
         isCurrent: false,
+        isActive: message.isStreaming,
       });
     }
   }
@@ -316,8 +352,11 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
     message.isStreaming,
   );
 
-  const lastIndex = entries.length - 1;
-  const markedEntries = entries.map((entry, index) => ({
+  // tools entry 的 isActive 由 hasRunning 决定（pushToolGroup/buildToolEntry 设置）
+  const orderedEntries = sortEntriesByActiveLast(entries);
+
+  const lastIndex = orderedEntries.length - 1;
+  const markedEntries = orderedEntries.map((entry, index) => ({
     ...entry,
     isCurrent: message.isStreaming && index === lastIndex,
   }));
@@ -342,9 +381,23 @@ export function buildSubagentInlineTrace(
 ): InlineCallTrace {
   const entries: InlineCallTraceEntry[] = [];
   const representedToolIds = new Set<string>();
-  const hasBlocks = (result.internalBlocks?.length ?? 0) > 0;
+  const blocks = result.internalBlocks ?? [];
+  const hasBlocks = blocks.length > 0;
 
-  for (const block of result.internalBlocks ?? []) {
+  // 流式态下，末尾连续同类型的 block 视为"活跃"。
+  const activeBlockIds = new Set<string>();
+  if (isStreaming && blocks.length > 0) {
+    let lastType = blocks[blocks.length - 1]?.type;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (!b) break;
+      if (b.type !== lastType) break;
+      activeBlockIds.add(b.id);
+      lastType = b.type;
+    }
+  }
+
+  for (const block of blocks) {
     if (block.type === 'thinking' && block.thinking) {
       const thinkingText = displayThinkingText(block.thinking, uiLanguage);
       if (thinkingText) {
@@ -353,6 +406,7 @@ export function buildSubagentInlineTrace(
           id: block.id,
           text: thinkingText,
           isCurrent: false,
+          isActive: activeBlockIds.has(block.id),
         });
       }
       continue;
@@ -375,6 +429,7 @@ export function buildSubagentInlineTrace(
         id: `${result.agent}:thinking`,
         text: thinkingText,
         isCurrent: false,
+        isActive: isStreaming,
       });
     }
   }
@@ -384,8 +439,10 @@ export function buildSubagentInlineTrace(
   );
   pushToolGroups(entries, unrepresentedToolCalls, `${result.agent}:tools`, uiLanguage, isStreaming);
 
-  const lastIndex = entries.length - 1;
-  const markedEntries = entries.map((entry, index) => ({
+  const orderedEntries = sortEntriesByActiveLast(entries);
+
+  const lastIndex = orderedEntries.length - 1;
+  const markedEntries = orderedEntries.map((entry, index) => ({
     ...entry,
     isCurrent: isStreaming && index === lastIndex,
   }));
@@ -470,6 +527,7 @@ function buildToolEntry(
     isCurrent: false,
     hasRunning,
     hasFailed,
+    isActive: hasRunning,
   };
 }
 

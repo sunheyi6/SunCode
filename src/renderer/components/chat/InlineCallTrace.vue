@@ -204,8 +204,9 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
       <div
         v-if="entry.kind === 'thinking'"
         class="streaming-process-text streaming-thinking-text"
+        :class="{ active: entry.isActive }"
       >
-        {{ entry.text }}
+        <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isActive" />
       </div>
 
       <!-- Previous text entries: display plain text without streaming -->

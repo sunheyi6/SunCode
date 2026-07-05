@@ -219,8 +219,8 @@ onBeforeUnmount(() => {
   gap: 12px;
   height: 44px;
   padding: 5px 14px 5px 16px;
-  border-bottom: 1px solid #d7d7dc;
-  background: #e9e9ec;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--color-bg-secondary);
   flex-shrink: 0;
   /* The entire header is a drag region for the frameless window.
      Only interactive elements (buttons, links) are excluded. */
@@ -269,8 +269,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
   padding: 3px 8px;
   border-radius: 999px;
-  background: #dedee1;
-  color: #77777d;
+  background: var(--color-surface-hover);
+  color: var(--color-text-secondary);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -291,8 +291,8 @@ onBeforeUnmount(() => {
   gap: 3px;
   padding: 2px 8px;
   border-radius: var(--border-radius-sm);
-  background: #dedee1;
-  color: #252528;
+  background: var(--color-surface-hover);
+  color: var(--color-text);
   font-weight: 550;
   font-size: 11px;
 }
@@ -312,14 +312,14 @@ onBeforeUnmount(() => {
   background: transparent;
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: #77777d;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
 .header-git:hover:not(:disabled) {
-  background: #dedee1;
-  color: #252528;
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
 .header-git:disabled {
@@ -442,14 +442,14 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: var(--border-radius-sm, 4px);
   background: transparent;
-  color: #77777d;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease;
 }
 
 .more-btn:hover {
-  background: #dedee1;
-  color: #252528;
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
 .more-btn svg {

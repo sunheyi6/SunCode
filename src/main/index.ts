@@ -45,8 +45,8 @@ const isMac = process.platform === 'darwin';
 
 function getWindowChromeColors(): { background: string; foreground: string } {
   return nativeTheme.shouldUseDarkColors
-    ? { background: '#1e1e2e', foreground: '#6c7086' }
-    : { background: '#e9e9ec', foreground: '#a0a0a7' };
+    ? { background: '#1c1c1e', foreground: '#98989d' }
+    : { background: '#ececf0', foreground: '#aeaeb2' };
 }
 
 function createMainWindow(): BrowserWindow {
