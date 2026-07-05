@@ -1,5 +1,6 @@
 const MIN_TEXTAREA_HEIGHT = 64;
 const MAX_TEXTAREA_HEIGHT = 200;
+const DROPDOWN_OPEN_BODY_CLASS = 'chat-input-dropdown-open';
 
 export function getComposerTextareaHeight(scrollHeight: number): number {
   return Math.min(Math.max(scrollHeight, MIN_TEXTAREA_HEIGHT), MAX_TEXTAREA_HEIGHT);
@@ -7,4 +8,32 @@ export function getComposerTextareaHeight(scrollHeight: number): number {
 
 export function getChatInputClasses(isEmptyConversation: boolean): string[] {
   return ['chat-input', isEmptyConversation ? 'chat-input-empty' : ''].filter(Boolean);
+}
+
+type ClosestCapableTarget = EventTarget & {
+  closest: (selector: string) => unknown;
+};
+
+interface ToggleClassList {
+  toggle: (token: string, force: boolean) => boolean;
+}
+
+function hasClosest(target: EventTarget | null): target is ClosestCapableTarget {
+  return typeof (target as Partial<ClosestCapableTarget> | null)?.closest === 'function';
+}
+
+export function isInsideControlDropdown(target: EventTarget | null): boolean {
+  if (hasClosest(target)) {
+    return target.closest('.control-dropdown') !== null;
+  }
+
+  if (typeof Node !== 'undefined' && target instanceof Node) {
+    return target.parentElement?.closest('.control-dropdown') !== null;
+  }
+
+  return false;
+}
+
+export function syncChatInputDropdownBodyClass(isOpen: boolean, classList: ToggleClassList): void {
+  classList.toggle(DROPDOWN_OPEN_BODY_CLASS, isOpen);
 }

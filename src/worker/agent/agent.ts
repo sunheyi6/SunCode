@@ -29,7 +29,13 @@ import { applyContextBudget } from './context-budget';
 import { extractGoalDefinition, runGoalLoop } from './goal-loop';
 import { parseInitCommand } from './init-handler';
 import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
-import { loadMemories, type MemoryEntry, saveMemory } from './memory';
+import {
+  buildSessionSnapshot,
+  loadMemories,
+  type MemoryEntry,
+  saveMemory,
+  saveSessionSnapshot,
+} from './memory';
 
 import { createSkillsLoader } from './skills';
 import { createDefaultStopHookRegistry } from './stop-hooks';
@@ -580,6 +586,7 @@ export class Agent {
     // Emit done
     this.onDone(result.finalMessage);
     this.emitStatus('done');
+    this.saveCurrentSessionSnapshot('completed');
 
     // Persist a memory entry so future sessions recall what we did
     await this.saveSessionMemory();
@@ -770,6 +777,9 @@ export class Agent {
     // Emit done
     this.onDone(goalResult.finalMessage);
     this.emitStatus('done');
+    this.saveCurrentSessionSnapshot(
+      goalResult.state.status === 'verification_passed' ? 'completed' : 'paused',
+    );
 
     // Extract failure lessons from goal loop (fire-and-forget)
     const goalFailed = goalResult.state.status !== 'verification_passed';
@@ -847,6 +857,22 @@ export class Agent {
       );
     } catch {
       // Best-effort — never let memory failures break the agent
+    }
+  }
+
+  private saveCurrentSessionSnapshot(status: import('./memory').SessionSnapshot['status']): void {
+    try {
+      saveSessionSnapshot(
+        this.workingDir,
+        buildSessionSnapshot({
+          sessionId: this.sessionId,
+          workingDir: this.workingDir,
+          status,
+          messages: this.messages,
+        }),
+      );
+    } catch {
+      // Best-effort — never let sleep snapshot persistence break the agent.
     }
   }
 

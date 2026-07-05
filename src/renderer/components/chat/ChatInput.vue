@@ -8,7 +8,12 @@ import { useDropdownGroup } from '../../composables/useDropdown';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
 import CommandDropdown from './CommandDropdown.vue';
-import { getChatInputClasses, getComposerTextareaHeight } from './chat-input';
+import {
+  getChatInputClasses,
+  getComposerTextareaHeight,
+  isInsideControlDropdown,
+  syncChatInputDropdownBodyClass,
+} from './chat-input';
 import ModelSelector from './ModelSelector.vue';
 import PermissionSelector from './PermissionSelector.vue';
 import ThinkingSelector from './ThinkingSelector.vue';
@@ -199,20 +204,12 @@ const placeholderText = computed(() =>
     : '提出后续修改要求',
 );
 
-function onDocumentClick(event: MouseEvent): void {
+function onDocumentPointerDown(event: PointerEvent): void {
   // Only relevant when at least one dropdown is open
   if (!dropdowns.isAnyOpen.value) return;
 
-  const target = event.target as Node;
-  // Walk up ancestors to find if the click landed inside any .control-dropdown
-  let el: Node | null = target;
-  while (el && el !== document.body) {
-    if (el instanceof HTMLElement && el.classList.contains('control-dropdown')) {
-      return; // Clicked inside an open dropdown — let it handle itself
-    }
-    el = el.parentNode;
-  }
-  // Click was outside all dropdowns — close them
+  if (isInsideControlDropdown(event.target)) return;
+
   dropdowns.closeAll();
 }
 
@@ -373,11 +370,22 @@ function focusInput(): void {
 }
 
 onMounted(() => {
-  document.addEventListener('click', onDocumentClick);
+  document.addEventListener('pointerdown', onDocumentPointerDown, true);
   void refreshGitInfo();
   focusInput();
 });
-onUnmounted(() => document.removeEventListener('click', onDocumentClick));
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+  syncChatInputDropdownBodyClass(false, document.body.classList);
+});
+
+watch(
+  dropdowns.isAnyOpen,
+  (isOpen) => {
+    syncChatInputDropdownBodyClass(isOpen, document.body.classList);
+  },
+  { immediate: true },
+);
 
 // Refocus after the assistant finishes streaming so the user can keep typing.
 watch(
@@ -738,6 +746,11 @@ watch(
 .control-dropdown {
   position: relative;
   min-width: 0;
+}
+
+:global(body.chat-input-dropdown-open .welcome-empty) {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .icon-btn,
