@@ -1,3 +1,4 @@
+import { sanitizeStructuredMessageLeak } from '@shared/finalization';
 import type {
   Message,
   RunEvent,
@@ -111,11 +112,12 @@ function textFromBlocks(blocks: ChatMessageBlock[] | undefined): string {
 }
 
 function textFromMessageContent(content: Message['content']): string {
-  if (typeof content === 'string') return content;
-  return content
+  if (typeof content === 'string') return sanitizeStructuredMessageLeak(content);
+  const text = content
     .filter((block) => block.type === 'text')
     .map((block) => ('text' in block ? block.text : ''))
     .join('');
+  return sanitizeStructuredMessageLeak(text);
 }
 
 function thinkingFromMessageContent(content: Message['content']): string {
@@ -315,6 +317,18 @@ export const useChatStore = defineStore('chat', () => {
             createPendingAssistant(sessionId);
           }
           streamingSessionIds.add(sessionId);
+        }
+        // A stop-summary (or other terminal) run may emit message_end with a
+        // finalMessage but no preceding message_start/message_update — e.g.
+        // when the main run was aborted and finishCurrentResponse() already
+        // cleared currentAssistantMsg. Without a target the finalMessage
+        // would be dropped and never persisted, so lazily create one here.
+        if (!msg && event.type === 'message_end' && event.message) {
+          if (sessionId === activeSessionId) {
+            startAssistantMessage();
+          } else {
+            createPendingAssistant(sessionId);
+          }
         }
         const target = activeAssistantMessage(sessionId);
         if (!target) break;

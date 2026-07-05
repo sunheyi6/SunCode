@@ -1,3 +1,4 @@
+import { sanitizeStructuredMessageLeak } from '@shared/finalization';
 import type { Message, ToolCallContent, TurnDetail } from '@shared/types';
 import type { UiLanguage } from '../utils/ui-language';
 
@@ -15,7 +16,7 @@ export function buildPersistedAssistantMessage(input: PersistedAssistantInput): 
   const finalContent = input.finalMessage?.content;
   const content =
     finalContent && (typeof finalContent === 'string' || finalContent.length > 0)
-      ? finalContent
+      ? sanitizeMessageContent(finalContent)
       : buildContentBlocks(input.visibleContent, input.thinking);
 
   const message: Message = {
@@ -40,6 +41,14 @@ export function buildPersistedAssistantMessage(input: PersistedAssistantInput): 
   // Vue reactive objects contain internal Proxies and Symbol metadata
   // that Electron's structured clone cannot serialize.
   return JSON.parse(JSON.stringify(message)) as Message;
+}
+
+function sanitizeMessageContent(content: Message['content']): Message['content'] {
+  if (typeof content === 'string') return sanitizeStructuredMessageLeak(content);
+  return content.map((block) => {
+    if (block.type !== 'text') return block;
+    return { ...block, text: sanitizeStructuredMessageLeak(block.text) };
+  });
 }
 
 function buildContentBlocks(visibleContent: string, thinking?: string): Message['content'] {

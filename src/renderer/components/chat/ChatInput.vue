@@ -924,12 +924,12 @@ watch(
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, var(--color-red) 0%, color-mix(in srgb, var(--color-red) 80%, #000) 100%);
+    background: linear-gradient(135deg, #1a1a1a 0%, #000 100%);
     color: #fff;
     border: 0;
     border-radius: 10px;
     cursor: pointer;
-    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-red) 25%, transparent);
+    box-shadow: 0 2px 10px color-mix(in srgb, #000 25%, transparent);
     transition:
       background 0.2s ease,
       transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
@@ -940,7 +940,7 @@ watch(
   .stop-btn:hover {
     opacity: 0.9;
     transform: scale(1.06);
-    box-shadow: 0 4px 18px color-mix(in srgb, var(--color-red) 35%, transparent);
+    box-shadow: 0 4px 18px color-mix(in srgb, #000 35%, transparent);
   }
 
   .stop-btn:active {

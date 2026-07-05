@@ -419,6 +419,13 @@ export class Agent {
   private async runStopSummary(): Promise<void> {
     this.isRunning = true;
     this.abortController = new AbortController();
+    // Reset per-run counters: the summary turn is a fresh run and must not
+    // inherit the main run's turnCount, otherwise AgentLoop's
+    // `while (turnCount < maxTurns)` exits immediately and the summary
+    // becomes an empty "max turns reached" placeholder with no streaming
+    // events — which the renderer then fails to persist.
+    this.turnCount = 0;
+    this.activeRunTokens = { input: 0, output: 0, total: 0 };
     this.emitStatus('thinking');
 
     // Append the summary request as a user message

@@ -242,6 +242,31 @@ describe('chat store stream blocks', () => {
     });
   });
 
+  test('unwraps structured final content before displaying and persisting it', () => {
+    const store = useChatStore();
+    store.setActiveSessionId('session-1');
+
+    const leaked = JSON.stringify({
+      type: 'suncode.message',
+      version: 1,
+      role: 'assistant',
+      content: { text: '## Done\n\n- formatted item' },
+    });
+    const finalMessage: Message = {
+      role: 'assistant',
+      content: [{ type: 'text', text: leaked }],
+    };
+
+    store.handleStreamEvent({ type: 'message_end', message: finalMessage }, 'session-1');
+
+    expect(store.messages[0]?.content).toBe('## Done\n\n- formatted item');
+    expect(saveMessageMock).toHaveBeenCalledOnce();
+    expect(saveMessageMock.mock.calls[0]?.[0]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: '## Done\n\n- formatted item' }],
+    });
+  });
+
   test('creates a tool block even if tool execution starts before the stream snapshot arrives', () => {
     const store = useChatStore();
     store.setActiveSessionId('session-1');

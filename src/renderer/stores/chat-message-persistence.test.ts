@@ -23,6 +23,26 @@ describe('chat message persistence', () => {
     expect(persisted.content).toEqual(finalMessage.content);
   });
 
+  test('unwraps structured final done content before persisting', () => {
+    const leaked = JSON.stringify({
+      type: 'suncode.message',
+      version: 1,
+      role: 'assistant',
+      content: { text: '## Done\n\n- formatted item' },
+    });
+    const finalMessage: Message = {
+      role: 'assistant',
+      content: [{ type: 'text', text: leaked }],
+    };
+
+    const persisted = buildPersistedAssistantMessage({
+      visibleContent: '## Done\n\n- formatted item',
+      finalMessage,
+    });
+
+    expect(persisted.content).toEqual([{ type: 'text', text: '## Done\n\n- formatted item' }]);
+  });
+
   test('persists completed tool calls with the final assistant message', () => {
     const toolCalls: ToolCallContent[] = [
       {
