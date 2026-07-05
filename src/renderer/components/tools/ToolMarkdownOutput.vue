@@ -3,6 +3,7 @@
 import MarkdownRender from 'markstream-vue';
 import 'markstream-vue/index.css';
 import { computed } from 'vue';
+import { useSettingsStore } from '../../stores/settings';
 import { formatToolOutputAsMarkdown } from '../../utils/tool-presentation';
 
 const props = withDefaults(
@@ -19,6 +20,15 @@ const props = withDefaults(
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const markdown = computed(() => formatToolOutputAsMarkdown(props.command, props.output));
+
+const settingsStore = useSettingsStore();
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const isDark = computed(() => {
+  const theme = settingsStore.settings.theme;
+  if (theme === 'dark') return true;
+  if (theme === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+});
 </script>
 
 <template>
@@ -32,7 +42,9 @@ const markdown = computed(() => formatToolOutputAsMarkdown(props.command, props.
       :fade="false"
       :typewriter="false"
       :max-live-nodes="0"
-      render-code-blocks-as-pre
+      code-renderer="shiki"
+      :is-dark="isDark"
+      :code-block-props="{ showLineNumbers: true, theme: { light: 'material-theme-lighter', dark: 'material-theme' } }"
     />
   </div>
 </template>

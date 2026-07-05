@@ -22,7 +22,7 @@ import type {
   WorkerInMessage,
   WorkerOutMessage,
 } from '@shared/types';
-import { app, dialog, ipcMain, nativeTheme, Notification, shell } from 'electron';
+import { app, dialog, ipcMain, Notification, nativeTheme, shell } from 'electron';
 import {
   checkForUpdates,
   downloadUpdate,

@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS = {
   customEndpoints: [],
   goalMaxTurns: 5,
   goalMaxWallTimeMs: 600000, // 10 minutes
+  maxLessons: 200,
   taskCompleteNotification: 'never' as const,
   createGitWorktree: false,
 };

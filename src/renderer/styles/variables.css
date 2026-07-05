@@ -46,6 +46,26 @@
   --density-message-gap: 8px;
   --density-card-padding: 8px 10px;
   --density-section-gap: 6px;
+
+  /* Sidebar — dark palette (default) */
+  --sidebar-bg: #1c1c1e;
+  --sidebar-surface: #2c2c2e;
+  --sidebar-hover: #3a3a3c;
+  --sidebar-active: #3a3a3c;
+  --sidebar-text: #ffffff;
+  --sidebar-text-secondary: #98989d;
+  --sidebar-text-muted: #636366;
+  --sidebar-line: rgba(84, 84, 88, 0.36);
+
+  /* ConversationSidebar panel tokens — dark (default) */
+  --sidebar-panel-bg: #1c1c1e;
+  --sidebar-panel-surface: #2c2c2e;
+  --sidebar-panel-hover: #3a3a3c;
+  --sidebar-panel-active: #3a3a3c;
+  --sidebar-panel-text: #ffffff;
+  --sidebar-panel-secondary: #98989d;
+  --sidebar-panel-muted: #636366;
+  --sidebar-panel-line: rgba(84, 84, 88, 0.36);
 }
 
 /* Light theme — Apple white */
@@ -69,4 +89,24 @@
   --color-teal: #5ac8fa;
   --border-color: rgba(60, 60, 67, 0.08);
   --border-color-strong: rgba(60, 60, 67, 0.14);
+
+  /* Sidebar — light palette */
+  --sidebar-bg: #e9e9ec;
+  --sidebar-surface: #f7f7f8;
+  --sidebar-hover: #dedee1;
+  --sidebar-active: #d9d9dc;
+  --sidebar-text: #252528;
+  --sidebar-text-secondary: #77777d;
+  --sidebar-text-muted: #a0a0a7;
+  --sidebar-line: #cfcfd4;
+
+  /* ConversationSidebar panel tokens — light */
+  --sidebar-panel-bg: #e9e9ec;
+  --sidebar-panel-surface: #f7f7f8;
+  --sidebar-panel-hover: #dedee1;
+  --sidebar-panel-active: #d9d9dc;
+  --sidebar-panel-text: #252528;
+  --sidebar-panel-secondary: #77777d;
+  --sidebar-panel-muted: #a0a0a7;
+  --sidebar-panel-line: #cfcfd4;
 }

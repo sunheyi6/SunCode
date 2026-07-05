@@ -831,7 +831,7 @@ function formatTime(value: string): string {
 
 .batch-delete-btn:hover:not(:disabled) {
   background: var(--color-red);
-  color: #fff;
+  color: var(--color-bg);
 }
 
 .batch-delete-btn:disabled {
@@ -841,14 +841,6 @@ function formatTime(value: string): string {
 /* Codex-style project sidebar */
 .conversation-sidebar {
   padding-top: 0;
-  --sidebar-panel-bg: #e9e9ec;
-  --sidebar-panel-surface: #f7f7f8;
-  --sidebar-panel-hover: #dedee1;
-  --sidebar-panel-active: #d9d9dc;
-  --sidebar-panel-text: #252528;
-  --sidebar-panel-secondary: #77777d;
-  --sidebar-panel-muted: #a0a0a7;
-  --sidebar-panel-line: #cfcfd4;
   background: var(--sidebar-panel-bg);
   color: var(--sidebar-panel-text);
 }
@@ -875,8 +867,8 @@ function formatTime(value: string): string {
   align-items: center;
   justify-content: center;
   border-radius: 5px;
-  background: #111114;
-  color: #ffffff;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 800;
   line-height: 1;

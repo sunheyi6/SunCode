@@ -21,6 +21,7 @@ import { DiagLogger } from '../utils/diag-logger';
 
 // ===== Helpers =====
 import { getAgentDataSubdir } from './agent-data-dir';
+import { quickMatchLesson } from './lessons';
 import { buildStructuredTextMessage } from './model-structured-content';
 import { handleStream } from './stream-handler';
 import { StreamingToolExecutor } from './streaming-executor';
@@ -560,9 +561,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       contextMessages.push(assistantMsg2);
 
       for (const tr of toolResults) {
+        let content = formatToolResultForModel(tr);
+
+        // Tool result lesson enhancement: if the tool failed, check
+        // for a matching lesson and append a brief hint.
+        if (!tr.success && tr.error) {
+          const match = quickMatchLesson(workingDir, tr.name, tr.error, sessionId);
+          if (match) {
+            const full = match.entry;
+            content += `\n\n📌 提示：之前出现过类似失败（${full.title}）。根因：${full.rootCause}。正确做法：${full.solution}`;
+          }
+        }
+
         contextMessages.push({
           role: 'tool',
-          content: formatToolResultForModel(tr),
+          content,
           toolCallId: tr.toolCallId,
         });
       }

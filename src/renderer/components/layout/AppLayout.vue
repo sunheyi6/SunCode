@@ -189,13 +189,13 @@ const traceSystemPrompt = computed(() => {
 
 /* Sidebar */
 .sidebar {
-  background: #e9e9ec;
+  background: var(--sidebar-bg);
   overflow: hidden;
   flex-shrink: 0;
   user-select: none;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #d7d7dc;
+  border-right: 1px solid var(--sidebar-line);
   transition: width 0.2s ease;
 }
 
@@ -206,8 +206,8 @@ const traceSystemPrompt = computed(() => {
 /* Settings button at sidebar bottom */
 .sidebar-footer {
   padding: 8px 10px 10px;
-  border-top: 1px solid #d7d7dc;
-  background: #e9e9ec;
+  border-top: 1px solid var(--sidebar-line);
+  background: var(--sidebar-bg);
   flex-shrink: 0;
 }
 
@@ -220,15 +220,15 @@ const traceSystemPrompt = computed(() => {
   background: transparent;
   border: none;
   border-radius: var(--border-radius-sm);
-  color: #77777d;
+  color: var(--sidebar-text-secondary);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.12s;
 }
 
 .settings-btn:hover {
-  background: #dedee1;
-  color: #252528;
+  background: var(--sidebar-hover);
+  color: var(--sidebar-text);
 }
 
 .settings-icon {

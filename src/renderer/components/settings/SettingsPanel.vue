@@ -572,8 +572,8 @@ function themeLabel(theme: AppSettings['theme']): string {
   justify-content: center;
   margin: 0 0 42px 6px;
   border-radius: 5px;
-  background: #0f1115;
-  color: #fff;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
   font-size: 16px;
   font-weight: 800;
   line-height: 1;
@@ -904,7 +904,7 @@ function themeLabel(theme: AppSettings['theme']): string {
 }
 
 .switch input:checked + span {
-  background: #050505;
+  background: var(--color-text);
 }
 
 .switch input:checked + span::after {
@@ -1019,13 +1019,13 @@ function themeLabel(theme: AppSettings['theme']): string {
   flex: 0 0 auto;
   padding: 0 16px;
   border-radius: 10px;
-  background: #737373;
-  color: #fff;
+  background: var(--color-overlay);
+  color: var(--color-text);
   font-weight: 600;
 }
 
 .save-button:hover:not(:disabled) {
-  background: #5f5f5f;
+  background: var(--color-bg-tertiary);
 }
 
 .save-button:disabled {
@@ -1088,7 +1088,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-bg);
   content: '';
   transition: transform 0.2s;
 }
