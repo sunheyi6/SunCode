@@ -537,7 +537,7 @@ function formatTime(value: string): string {
   border: 0;
   background: transparent;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
 }
 
@@ -922,9 +922,9 @@ function formatTime(value: string): string {
 
 .command-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 38px;
+  min-height: 34px;
   padding: 0 0 0 7px;
   border: 0;
   background: transparent;
@@ -940,26 +940,24 @@ function formatTime(value: string): string {
 
 .command-icon {
   display: inline-flex;
-  width: 19px;
-  height: 19px;
+  width: 22px;
+  height: 22px;
   align-items: center;
   justify-content: center;
   color: var(--sidebar-panel-text);
-  font-size: 21px;
+  font-size: 14px;
   line-height: 1;
 }
 
 .command-plus {
-  border: 1.5px solid currentColor;
-  border-radius: 50%;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .command-label {
   min-width: 0;
   overflow: hidden;
   color: var(--sidebar-panel-text);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 450;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -967,7 +965,7 @@ function formatTime(value: string): string {
 
 .command-shortcut {
   color: var(--sidebar-panel-muted);
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .search-row {
@@ -988,7 +986,7 @@ function formatTime(value: string): string {
 
 .scope-chip {
   display: inline-flex;
-  height: 32px;
+  height: 34px;
   align-items: center;
   gap: 5px;
   padding: 0 10px;
@@ -1012,8 +1010,8 @@ function formatTime(value: string): string {
 .scope-icon,
 .scope-text {
   display: inline-flex;
-  min-width: 28px;
-  height: 28px;
+  min-width: 34px;
+  height: 34px;
   align-items: center;
   justify-content: center;
   padding: 0 6px;
@@ -1021,11 +1019,11 @@ function formatTime(value: string): string {
   border-radius: 7px;
   background: transparent;
   color: var(--sidebar-panel-secondary);
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .scope-text {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .scope-icon:hover,
@@ -1055,13 +1053,13 @@ function formatTime(value: string): string {
 
 .project-heading {
   display: grid;
-  grid-template-columns: 25px minmax(0, auto) 14px minmax(24px, auto) 24px;
+  grid-template-columns: 18px minmax(0, auto) 14px minmax(22px, auto) 18px;
   align-items: center;
   gap: 8px;
-  min-height: 31px;
+  min-height: 34px;
   padding: 0 7px 0 2px;
   color: var(--sidebar-panel-text);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 450;
   text-transform: none;
 }
@@ -1073,15 +1071,15 @@ function formatTime(value: string): string {
 
 .project-icon {
   display: inline-flex;
-  width: 25px;
-  height: 25px;
+  width: 18px;
+  height: 18px;
   align-items: center;
   justify-content: center;
   align-self: center;
   border-radius: 50%;
   background: var(--project-color);
   color: color-mix(in srgb, #000 65%, var(--project-color));
-  font-size: 17px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1;
 }
@@ -1090,13 +1088,14 @@ function formatTime(value: string): string {
   flex: 0 1 auto;
   min-width: 0;
   color: var(--sidebar-panel-text);
-  line-height: 25px;
+  font-size: 14px;
+  line-height: 18px;
 }
 
 .project-chevron {
   display: inline-flex;
   width: 14px;
-  height: 25px;
+  height: 18px;
   align-items: center;
   justify-content: center;
   color: var(--sidebar-panel-muted);
@@ -1119,19 +1118,19 @@ function formatTime(value: string): string {
 
 .project-count {
   justify-self: end;
-  min-width: 24px;
-  padding: 1px 7px 2px;
+  min-width: 22px;
+  padding: 1px 6px 2px;
   border-radius: 999px;
   background: var(--sidebar-panel-hover);
   color: var(--sidebar-panel-secondary);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 450;
 }
 
 .project-add {
   display: inline-flex;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   align-items: center;
   justify-content: center;
   justify-self: end;
@@ -1140,7 +1139,7 @@ function formatTime(value: string): string {
   border-radius: 50%;
   background: transparent;
   color: var(--sidebar-panel-secondary);
-  font-size: 17px;
+  font-size: 12px;
 }
 
 .project-add:hover {
@@ -1186,7 +1185,7 @@ function formatTime(value: string): string {
   display: grid;
   grid-template-columns: 6px minmax(0, 1fr) auto;
   gap: 8px;
-  min-height: 35px;
+  min-height: 34px;
   padding: 0 10px 0 8px;
   border: 0;
   border-radius: 7px;
@@ -1222,7 +1221,7 @@ function formatTime(value: string): string {
   min-width: 0;
   overflow: hidden;
   color: var(--sidebar-panel-text);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 400;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -1232,7 +1231,7 @@ function formatTime(value: string): string {
 .conversation-time {
   align-self: center;
   color: var(--sidebar-panel-secondary);
-  font-size: 16px;
+  font-size: 12px;
   line-height: 1;
   transition: opacity 0.12s ease;
 }
@@ -1246,12 +1245,12 @@ function formatTime(value: string): string {
 .conversation-row .delete-btn {
   top: 50%;
   right: 10px;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   transform: translateY(-50%);
   border-radius: 50%;
   background: var(--sidebar-panel-surface);
-  font-size: 16px;
+  font-size: 13px;
 }
 
 .select-all-row {

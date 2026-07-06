@@ -490,8 +490,8 @@ watch(
             @click="handleSend"
           >
             <svg
-                width="18"
-                height="18"
+                width="16"
+                height="16"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -786,11 +786,11 @@ watch(
 }
 
 .icon-btn {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   color: var(--color-text-secondary);
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 300;
 }
 
@@ -801,11 +801,11 @@ watch(
 
 .toolbar-btn {
   min-width: 0;
-  height: 32px;
+  height: 34px;
   gap: 6px;
   padding: 0 7px;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   white-space: nowrap;
   transition:
     color 0.12s ease,
@@ -826,7 +826,7 @@ watch(
 
 .permission-icon,
 .thinking-icon {
-  font-size: 18px;
+  font-size: 14px;
   line-height: 1;
 }
 
@@ -857,7 +857,7 @@ watch(
 
 .chevron {
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 12px;
   transform: translateY(-1px);
 }
 
@@ -877,8 +877,8 @@ watch(
 }
 
 .send-btn {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     margin-left: 2px;
     padding: 0;
     flex-shrink: 0;
@@ -919,8 +919,8 @@ watch(
   }
 
   .stop-btn {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;

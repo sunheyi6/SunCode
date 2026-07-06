@@ -594,7 +594,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   border-radius: 5px;
   background: var(--color-bg-tertiary);
   color: var(--color-text);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 800;
   line-height: 1;
 }
@@ -611,7 +611,7 @@ function themeLabel(theme: AppSettings['theme']): string {
 .back-button {
   display: flex;
   width: 100%;
-  height: 38px;
+  height: 34px;
   align-items: center;
   justify-content: flex-start;
   gap: 9px;
@@ -627,7 +627,7 @@ function themeLabel(theme: AppSettings['theme']): string {
 }
 
 .back-button span:first-child {
-  font-size: 24px;
+  font-size: 16px;
   line-height: 1;
 }
 
@@ -641,14 +641,14 @@ function themeLabel(theme: AppSettings['theme']): string {
 .nav-item {
   display: flex;
   width: 100%;
-  height: 40px;
+  height: 34px;
   align-items: center;
   justify-content: flex-start;
   gap: 12px;
   padding: 0 14px;
   background: transparent;
   color: var(--color-text);
-  font-size: 15px;
+  font-size: 14px;
   text-align: left;
 }
 
@@ -662,8 +662,9 @@ function themeLabel(theme: AppSettings['theme']): string {
 }
 
 .nav-icon {
-  width: 18px;
+  width: 22px;
   color: var(--color-text-secondary);
+  font-size: 14px;
   text-align: center;
 }
 
@@ -692,14 +693,14 @@ function themeLabel(theme: AppSettings['theme']): string {
   padding: 0;
   background: transparent;
   color: var(--color-text);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .account-avatar {
   display: flex;
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
@@ -710,11 +711,12 @@ function themeLabel(theme: AppSettings['theme']): string {
 }
 
 .footer-gear {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   background: transparent;
   color: var(--color-text-secondary);
+  font-size: 14px;
 }
 
 .footer-gear:hover {
@@ -853,7 +855,7 @@ function themeLabel(theme: AppSettings['theme']): string {
 .setting-select,
 .number-control input {
   width: 240px;
-  height: 40px;
+  height: 34px;
   border: 1px solid var(--border-color-strong);
   border-radius: 10px;
   background: var(--color-surface);
@@ -1035,7 +1037,7 @@ function themeLabel(theme: AppSettings['theme']): string {
 }
 
 .save-button {
-  height: 38px;
+  height: 34px;
   flex: 0 0 auto;
   padding: 0 16px;
   border-radius: 10px;

@@ -97,12 +97,14 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 9px;
+  height: 34px;
+  padding: 0 9px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1;
   cursor: pointer;
   transition: background 0.08s ease, color 0.08s ease;
 }
@@ -118,7 +120,7 @@ defineExpose({
 }
 
 .chevron {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 
@@ -127,7 +129,7 @@ defineExpose({
 }
 
 .thinking-icon {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .dropdown-menu {
