@@ -230,7 +230,7 @@ async function copyContent() {
 }
 .thinking-summary::-webkit-details-marker { display: none; }
 .thinking-summary::before {
-  content: '>'; display: inline-block; margin-right: 6px;
+  content: '▸'; display: inline-block; margin-right: 6px;
   font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted);
   transition: transform 0.15s;
 }
@@ -242,7 +242,7 @@ details[open] > .thinking-summary::before { transform: rotate(90deg); }
   opacity: 0.6;
 }
 .thinking-summary-done::before {
-  content: '>';
+  content: '▸';
   display: inline-block;
   margin-right: 6px;
   font-size: 10px;
@@ -250,7 +250,7 @@ details[open] > .thinking-summary::before { transform: rotate(90deg); }
   transition: transform 0.15s;
 }
 details[open] > .thinking-summary-done::before {
-  content: '>'; transform: rotate(90deg);
+  content: '▸'; transform: rotate(90deg);
   color: var(--color-text-muted);
 }
 

@@ -266,7 +266,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
       <template v-for="entry in outline.entries" :key="entry.id">
         <details v-if="entry.kind === 'user'" class="outline-row outline-user">
           <summary class="outline-summary">
-            <span class="outline-caret">&gt;</span>
+            <span class="outline-caret">▸</span>
             <span class="outline-title">用户请求</span>
             <span class="outline-preview">{{ entry.content }}</span>
             <span class="outline-meta">{{ formatTime(entry.timestamp) }}</span>
@@ -286,7 +286,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
           :open="entry.isStreaming"
         >
           <summary class="outline-summary">
-            <span class="outline-caret">&gt;</span>
+            <span class="outline-caret">▸</span>
             <span class="outline-title">第 {{ entry.turnNumber }} 轮模型调用</span>
             <span v-if="entry.modelLabel" class="outline-chip">{{ entry.modelLabel }}</span>
             <span class="outline-meta">{{ turnSummary(entry) }}</span>
@@ -296,7 +296,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
             <template v-for="section in entry.sections" :key="`${entry.id}:${section.kind}`">
               <details class="outline-section" :open="section.defaultOpen">
                 <summary class="outline-section-summary">
-                  <span class="outline-caret">&gt;</span>
+                  <span class="outline-caret">▸</span>
                   <span class="outline-section-title">{{ section.title }}</span>
                   <span class="outline-section-meta">{{ sectionMeta(section) }}</span>
                 </summary>
@@ -533,7 +533,7 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
 }
 
 .trace-section-header::before {
-  content: '>';
+  content: '▸';
   display: inline-block;
   width: 12px;
   color: var(--color-text-muted);

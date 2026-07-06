@@ -67,4 +67,31 @@ describe('buildInlineCallTrace', () => {
       toolCalls: [first, second],
     });
   });
+
+  test('streamed thinking is not filtered by UI language mismatch (blank-frame regression)', () => {
+    // 用户用中文提问 → uiLanguage='zh'；模型常用英文思考。
+    // 流式态下按语言过滤会让聊天框完全空白，必须保留原文。
+    const message: ChatMessage = {
+      id: 'msg-en-thinking',
+      role: 'assistant',
+      content: '',
+      blocks: [
+        {
+          id: 'block-en-thinking',
+          type: 'thinking',
+          thinking: 'Now I have a comprehensive understanding of the codebase.',
+        },
+      ],
+      timestamp: 1,
+      isStreaming: true,
+      uiLanguage: 'zh',
+    };
+
+    const trace = buildInlineCallTrace(message);
+
+    expect(trace.entries[0]).toMatchObject({
+      kind: 'thinking',
+      text: 'Now I have a comprehensive understanding of the codebase.',
+    });
+  });
 });

@@ -296,7 +296,7 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
 
   for (const block of blocks) {
     if (block.type === 'thinking' && block.thinking) {
-      const thinkingText = displayThinkingText(block.thinking, uiLanguage);
+      const thinkingText = displayThinkingText(block.thinking, uiLanguage, message.isStreaming);
       if (thinkingText) {
         entries.push({
           kind: 'thinking',
@@ -329,7 +329,7 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
   }
 
   if (!hasBlocks && message.thinking) {
-    const thinkingText = displayThinkingText(message.thinking, uiLanguage);
+    const thinkingText = displayThinkingText(message.thinking, uiLanguage, message.isStreaming);
     if (thinkingText) {
       entries.push({
         kind: 'thinking',
@@ -399,7 +399,7 @@ export function buildSubagentInlineTrace(
 
   for (const block of blocks) {
     if (block.type === 'thinking' && block.thinking) {
-      const thinkingText = displayThinkingText(block.thinking, uiLanguage);
+      const thinkingText = displayThinkingText(block.thinking, uiLanguage, isStreaming);
       if (thinkingText) {
         entries.push({
           kind: 'thinking',
@@ -422,7 +422,7 @@ export function buildSubagentInlineTrace(
   }
 
   if (!hasBlocks && result.thinking) {
-    const thinkingText = displayThinkingText(result.thinking, uiLanguage);
+    const thinkingText = displayThinkingText(result.thinking, uiLanguage, isStreaming);
     if (thinkingText) {
       entries.push({
         kind: 'thinking',
@@ -614,7 +614,15 @@ function formatCount(
   return `${status} ${count} ${unit}`;
 }
 
-function displayThinkingText(text: string, language: UiLanguage): string | undefined {
+function displayThinkingText(
+  text: string,
+  language: UiLanguage,
+  isStreaming = false,
+): string | undefined {
+  // 流式态下不按 UI 语言过滤：模型常用英文思考、用 UI 语言回复，
+  // 过滤会让用户在等待响应时看到完全空白的聊天框。
+  // 语言过滤只用于最终态调用追踪的整洁展示。
+  if (isStreaming) return text;
   if (textMatchesUiLanguage(text, language)) return text;
   return undefined;
 }

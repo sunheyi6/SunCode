@@ -577,7 +577,7 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 }
 
 .streaming-tool-call-summary::after {
-  content: '>';
+  content: '▸';
   display: inline-block;
   margin-left: 2px;
   flex: 0 0 auto;
@@ -708,7 +708,7 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 }
 
 .tree-details > summary::after {
-  content: '>';
+  content: '▸';
   display: inline-block;
   margin-left: 6px;
   font-family: var(--font-mono);
@@ -996,7 +996,7 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 }
 
 .trace-output-summary::after {
-  content: '>';
+  content: '▸';
   display: inline-block;
   margin-left: 8px;
   font-family: var(--font-mono);
@@ -1054,7 +1054,7 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 
 .trace-tool-group-summary::after,
 .trace-tool-item-summary::after {
-  content: '>';
+  content: '▸';
   display: inline-block;
   margin-left: 2px;
   font-family: var(--font-mono);
