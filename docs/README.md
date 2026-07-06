@@ -12,6 +12,7 @@
 | [子智能体架构](subagent-architecture-comparison.md) | 子 Agent 委托系统：三框架对比 (pi-subagent/maka-agent/Codex CLI)、Dispatcher 调度、流式进度 |
 | [运行事件日志](run-event-logging-design.md) | JSONL 持久化：run_started/run_completed/model_request/turn_detail、CallTracePanel 回溯、Token 用量统计 |
 | [会话标题生成](session-title-generation.md) | AI 自动生成会话标题：轻量模型选取、TITLE_GENERATION_PROMPT、fallback 规则 |
+| [流式输出渲染](streaming-output-design.md) | 聊天流式时间轴：blocks/InlineCallTraceEntry 模型、中间文本一行预览、showThinking 开关、流式期间不标“最终回答” |
 
 ## 2026-06～07 架构变更摘要
 
@@ -73,6 +74,8 @@
 | 输入框 | `src/renderer/components/chat/ChatInput.vue` |
 | 前端工具卡片 | `src/renderer/components/tools/*.vue` |
 | 思考区组件 | `src/renderer/components/chat/AssistantMessage.vue` |
+| 流式时间轴组件 | `src/renderer/components/chat/InlineCallTrace.vue` |
+| 调用轨迹视图模型 | `src/renderer/components/chat/call-trace-view-model.ts` |
 | 运行事件日志 | `src/main/run-store.ts` |
 | 会话持久化 | `src/main/session-store.ts` |
 | IPC 桥接 | `src/main/ipc-handlers.ts` / `src/main/preload.ts` |

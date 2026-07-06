@@ -235,18 +235,13 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
         </div>
       </details>
 
-      <details
+      <div
         v-else-if="entry.kind === 'text' && entry.isCurrent"
-        class="trace-output-details streaming-final-answer"
-        :open="true"
+        class="streaming-process-text streaming-live-text"
+        :class="{ active: entry.isActive }"
       >
-        <summary class="trace-output-summary">
-          {{ uiLanguage === 'en' ? 'Final Answer' : '最终回答' }}
-        </summary>
-        <div class="streaming-final-output">
-          <StreamingText :text="entry.text" :is-streaming="isStreaming" />
-        </div>
-      </details>
+        <StreamingText :text="entry.text" :is-streaming="isStreaming" />
+      </div>
 
       <details
         v-else

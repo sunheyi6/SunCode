@@ -366,18 +366,18 @@ for (const key of required) {
 
 ---
 
-## 7. 前端工具卡片
+## 7. 前端工具展示
 
-每个工具调用在前端渲染为专用的操作卡片，嵌套在思考区（`<details>` 折叠块）内：
+工具调用在两个独立的面板中渲染，职责不同：
 
-| 工具 | 卡片组件 | 展示内容 |
-|------|---------|---------|
-| `edit` / `write` | `FileOperationCard` | 文件路径、状态（编辑中/已编辑/失败）、+N/-N 行变更 |
-| `bash` | `CommandOperationCard` | 命令、工作目录、退出码、stdout/stderr |
-| `read` / `glob` / `grep` | `FileInspectCard` | 操作类型标签、路径/模式、输出预览（≤300 字符）|
-| 其他/generic | inline generic | 工具名 + 状态 |
+| 渲染位置 | 组件 | 职责 |
+|---------|------|------|
+| 聊天内联轨迹 | `InlineCallTrace.vue` + `ToolMarkdownOutput.vue` | 流式时间轴：模型输出 → 工具 → … → 最终输出。工具输出以纯文本/命令块呈现，详见 [流式输出渲染设计](streaming-output-design.md) |
+| 右侧 CallTracePanel | `FileOperationCard` / `CommandOperationCard` / `FileInspectCard` | 按调用批次回溯查看：文件编辑 +N/-M diff、命令 stdout/stderr/exit、读取/搜索输出预览 |
 
 所有卡片内容来源于 `ToolCallContent.result`（通过 `startToolExecution` / `endToolExecution` 在 chat store 中注入）。
+
+> 注：`CompactToolBar.vue` / `ToolOperationList.vue` / `ToolCard.vue` 为历史遗留的死文件，已无任何引用，工具展示统一走 `InlineCallTrace`（内联）与 `CallTracePanel`（右侧面板）。
 
 ### 前端数据流
 
@@ -396,7 +396,7 @@ useAgent.ts: onToolEnd(data)
     → chatStore.endToolExecution(data.toolResult, data.sessionId)
     ↓ (注入 result.output / result.details)
 
-ToolOperationList → FileOperationCard / CommandOperationCard / FileInspectCard
+InlineCallTrace (内联轨迹) / CallTracePanel (右侧面板)
 ```
 
 **会话路由关键点**：
@@ -446,40 +446,29 @@ ToolOperationList → FileOperationCard / CommandOperationCard / FileInspectCard
 
 ## 9. 聊天框渲染策略
 
+> 流式时间轴的完整设计（blocks 模型、中间文本一行预览、`showThinking` 开关、流式期间不标"最终回答"的根因）见 [流式输出渲染设计](streaming-output-design.md)。本节只补充工具调用相关的渲染约束。
+
 ### 9.1 流式阶段与完成阶段
 
-| 阶段 | 思考区域 | 正文区域 | 说明 |
-|------|---------|---------|------|
-| 流式中 | `CompactToolBar` — 工具调用紧凑摘要 | `StreamingText` — 纯文本（不解析 Markdown） | Markdown 解析在流式阶段做 O(n²)，卡死 UI |
-| 完成后（有工具） | `<details>` 折叠 → `ToolOperationList` — 完整工具卡片 | `StreamingText` — 完整 Markdown 渲染 | 不展示原始思考文本，思考内容走 CallTracePanel |
-| 完成后（无工具） | 无 | `StreamingText` — 完整 Markdown 渲染 | |
+| 阶段 | 内联轨迹区 | 主回复区 | 说明 |
+|------|-----------|---------|------|
+| 流式中 | `InlineCallTrace` 时间轴：中间文本一行预览、工具行、实时输出 | 隐藏（由轨迹代劳） | `StreamingText` 基于 `markstream-vue` 增量渲染 Markdown，不再是纯文本 |
+| 完成后（有工具） | `<details>` 折叠 → `InlineCallTrace`（仅工具/思考条目） | `.message-content` 完整 Markdown 回复 | `processEntries` 排除 text 块，避免与主回复重复 |
+| 完成后（无工具） | 无 | `.message-content` 完整 Markdown 回复 | |
 
-### 9.2 CompactToolBar 紧凑工具条
+### 9.2 工具调用跨轮累积
 
-流式阶段每个工具一行，完成后 bash 显示 stdout 尾 3 行、文件编辑显示 `+N -M` diff 统计。
-
-```
-> 运行  npm run build  完成
-  Build successful in 2.3s
-+ 编辑  utils.ts  完成
-  +12 -5
-$ 读取  utils.ts, config.ts  3 完成
-```
-
-### 9.3 工具调用跨轮累积
-
-`chat.ts` `handleStreamEvent` 中工具调用**按 ID 合并**而非覆盖：
+`chat.ts` `handleStreamEvent` 中工具调用**按 ID 合并**而非覆盖（`mergeStreamedToolCalls`）：
 - `data.toolCalls` 只含当前轮的工具调用
 - 跨轮时合并到 `target.toolCalls`，已存在的更新状态
 - 避免最后一轮空 toolCalls 覆盖全部记录
 
-### 9.4 思考文本不进入聊天框
+### 9.3 思考文本不进入聊天框正文
 
 - `mergeThinkingIntoAnswer()` 简化为直接返回 `assistantText`，不再合并思考内容
-- 思考过程统一走右侧 `CallTracePanel` 查看
-- 聊天框只展示工具调用摘要（流式中）和完整工具卡片（折叠展开）
+- 思考过程走内联轨迹（受 `showThinking` 开关控制）与右侧 `CallTracePanel`，不进主回复正文
 
-### 9.5 CallTracePanel 调用轨迹面板
+### 9.4 CallTracePanel 调用轨迹面板
 
 按时间线平铺展示，每条标注身份：
 
@@ -503,7 +492,7 @@ $ 读取  utils.ts, config.ts  3 完成
 - 纯文本标签，无 emoji（解析友好）
 - 可展开区域有 `>` 旋转箭头 + 悬停高亮
 - 输入消息、思考过程、工具调用均可独立折叠
-- 专用工具卡片复用 `CommandOperationCard` / `FileOperationCard` 等
+- 专用工具卡片复用 `CommandOperationCard` / `FileOperationCard` / `FileInspectCard`
 
 ---
 
