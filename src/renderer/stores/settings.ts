@@ -26,14 +26,19 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const isLoaded = ref(false);
 
+  /** Tracks the currently resolved theme ('light' | 'dark') for reactive use by components. */
+  const resolvedTheme = ref<'light' | 'dark'>(
+    window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+  );
+
   async function load(): Promise<AppSettings> {
     try {
       const s = await bridge.getSettings();
       settings.value = { ...settings.value, ...s };
-      applyTheme(settings.value.theme);
+      const resolved = await syncNativeTheme(settings.value.theme);
+      applyTheme(settings.value.theme, resolved);
       applyFontSize(settings.value.fontSize);
       isLoaded.value = true;
-      bridge.setTheme(resolveTheme(settings.value.theme));
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -54,14 +59,25 @@ export const useSettingsStore = defineStore('settings', () => {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
 
-  function applyTheme(theme: AppSettings['theme']): void {
-    document.documentElement.setAttribute('data-theme', resolveTheme(theme));
+  async function syncNativeTheme(theme: AppSettings['theme']): Promise<'light' | 'dark'> {
+    try {
+      return await bridge.setTheme(theme);
+    } catch (error) {
+      console.error('Failed to sync native theme:', error);
+      return resolveTheme(theme);
+    }
+  }
+
+  function applyTheme(theme: AppSettings['theme'], resolved = resolveTheme(theme)): void {
+    document.documentElement.setAttribute('data-theme', resolved);
+    resolvedTheme.value = resolved;
   }
 
   function setTheme(theme: AppSettings['theme']): void {
-    applyTheme(theme);
-    update({ theme });
-    bridge.setTheme(resolveTheme(theme));
+    settings.value = { ...settings.value, theme };
+    if (theme !== 'system') applyTheme(theme);
+    void update({ theme });
+    void syncNativeTheme(theme).then((resolved) => applyTheme(theme, resolved));
   }
 
   function applyFontSize(size: number): void {
@@ -79,12 +95,15 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
   systemTheme.addEventListener('change', () => {
-    if (settings.value.theme === 'system') applyTheme('system');
+    if (settings.value.theme === 'system') {
+      void syncNativeTheme('system').then((resolved) => applyTheme('system', resolved));
+    }
   });
 
   return {
     settings,
     isLoaded,
+    resolvedTheme,
     load,
     update,
     applyTheme,

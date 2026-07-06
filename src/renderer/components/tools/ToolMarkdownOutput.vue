@@ -23,12 +23,7 @@ const markdown = computed(() => formatToolOutputAsMarkdown(props.command, props.
 
 const settingsStore = useSettingsStore();
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-const isDark = computed(() => {
-  const theme = settingsStore.settings.theme;
-  if (theme === 'dark') return true;
-  if (theme === 'light') return false;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-});
+const isDark = computed(() => settingsStore.resolvedTheme === 'dark');
 </script>
 
 <template>

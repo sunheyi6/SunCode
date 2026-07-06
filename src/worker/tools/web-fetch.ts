@@ -11,6 +11,7 @@ import { execSync } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ToolDefinition, ToolResult } from '@shared/types';
 import type { Tool } from './types';
@@ -181,7 +182,6 @@ function isGithubBlobUrl(
 
 async function cloneGithubRepo(
   url: string,
-  workingDir: string,
 ): Promise<{ text: string; isClone: boolean; error?: string }> {
   // Check git availability
   try {
@@ -190,8 +190,9 @@ async function cloneGithubRepo(
     return { text: 'Git 不可用，无法克隆仓库', isClone: false, error: 'git not found' };
   }
 
-  // Clone into .suncode/github-repos/ inside working dir so `read` tool can access files
-  const cloneBase = join(workingDir, '.suncode', 'github-repos');
+  // Clone into user home dir's .suncode/github-repos/ so cloned files persist
+  // across sessions and don't pollute project working directories.
+  const cloneBase = join(homedir(), '.suncode', 'github-repos');
   const cloneDir = join(cloneBase, Date.now().toString(36));
   const blobMatch = isGithubBlobUrl(url);
   const cloneMatch = isGithubUrl(url) || blobMatch;
@@ -312,7 +313,7 @@ export function createWebFetchTool(workingDir: string): Tool {
       // 2. GitHub special handling — clone locally, fall back to HTTP on failure
       const ghInfo = isGithubUrl(url) || isGithubBlobUrl(url);
       if (ghInfo) {
-        const result = await cloneGithubRepo(url, workingDir);
+        const result = await cloneGithubRepo(url);
         if (result.isClone) {
           return {
             toolCallId: '',

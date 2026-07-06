@@ -110,9 +110,16 @@ function getAgentWorker(): Worker {
   if (!agentWorker) {
     const workerPath = join(__dirname, '../worker/agent-worker.js');
     console.log('[Main] Creating worker at:', workerPath);
-    // Pass app data directory to worker via env so diagnostics land in user dir
+    // Pass app data directory to worker via env so diagnostics and memories
+    // land in the user directory, not the project directory.
+    // Explicitly pass env via Worker constructor option rather than relying on
+    // process.env inheritance — Vite's Worker bundling in dev mode can bypass
+    // the default env propagation, causing SUNCODE_APP_DATA to be undefined
+    // inside the Worker and all data to fall back to the project working dir.
     process.env.SUNCODE_APP_DATA = getAppDataDir();
-    agentWorker = new Worker(workerPath);
+    agentWorker = new Worker(workerPath, {
+      env: { ...process.env },
+    });
 
     agentWorker.on('message', async (msg: WorkerOutMessage) => {
       console.log('[Main] Worker message:', msg.type);
@@ -794,9 +801,10 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
-  // Sync window chrome colors with the app's resolved theme (light / dark / system)
-  ipcMain.on('window:setTheme', (_event, theme: string) => {
-    nativeTheme.themeSource = theme as 'system' | 'light' | 'dark';
+  // Sync window chrome colors and return the actual resolved theme.
+  ipcMain.handle('window:setTheme', (_event, theme: AppSettings['theme']) => {
+    nativeTheme.themeSource = theme;
+    return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   });
 
   // ===== Git Info =====

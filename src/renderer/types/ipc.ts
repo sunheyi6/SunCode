@@ -184,7 +184,7 @@ declare global {
 
       // Window
       setTitleBarOverlayText(text: string): void;
-      setTheme(theme: string): void;
+      setTheme(theme: AppSettings['theme']): Promise<'light' | 'dark'>;
       // Subagent
       onSubagentProgress(callback: (data: SessionSubagentProgressEvent) => void): () => void;
       // Goal

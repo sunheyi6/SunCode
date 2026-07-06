@@ -282,8 +282,8 @@ export const bridge = {
     api().setTitleBarOverlayText(text);
   },
 
-  setTheme(theme: string): void {
-    api().setTheme(theme);
+  setTheme(theme: AppSettings['theme']): Promise<'light' | 'dark'> {
+    return api().setTheme(theme);
   },
 
   // ===== Auto Update =====
