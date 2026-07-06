@@ -53,7 +53,7 @@
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9",
     "markstream-vue": "^1.0.5",
-    "pinia": "^2.2.0",
+    "pinia": "^3.0.4",
     "shiki": "^4.3.1",
     "stream-markdown": "^0.0.16",
     "vue": "^3.5.0",

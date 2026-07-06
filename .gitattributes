@@ -1,0 +1,5 @@
+# Normalize line endings to LF for all text files.
+# Git autocrlf=true on Windows would otherwise check out CRLF, which desyncs
+# biome's formatter (default lineEnding "lf") and produces spurious format
+# errors across the whole tree.
+* text=auto eol=lf
