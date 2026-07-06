@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
+import { useSettingsStore } from '../../stores/settings';
 import { buildInlineCallTrace } from './call-trace-view-model';
 import InlineCallTrace from './InlineCallTrace.vue';
 import StreamingText from './StreamingText.vue';
@@ -8,6 +9,9 @@ import StreamingText from './StreamingText.vue';
 const props = defineProps<{
   message: ChatMessage;
 }>();
+
+const settingsStore = useSettingsStore();
+const showThinking = computed(() => settingsStore.settings.showThinking !== false);
 
 const hasContent = computed(() => props.message.content.length > 0);
 const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0);
@@ -17,10 +21,18 @@ const hasThinking = computed(
 
 const thinkingText = computed(() => props.message.thinking || '');
 const inlineTrace = computed(() => buildInlineCallTrace(props.message));
-const hasInlineTrace = computed(() => inlineTrace.value.entries.length > 0);
+// Drop pure-thinking entries when the user opted out of showing the
+// reasoning process. Tool/command entries are always kept — they are the
+// "运行逻辑" the UI exists to surface.
+const visibleEntries = computed(() =>
+  showThinking.value
+    ? inlineTrace.value.entries
+    : inlineTrace.value.entries.filter((entry) => entry.kind !== 'thinking'),
+);
+const hasInlineTrace = computed(() => visibleEntries.value.length > 0);
 const hasOrderedBlocks = computed(() => (props.message.blocks?.length ?? 0) > 0);
 const processEntries = computed(() =>
-  inlineTrace.value.entries.filter((entry) => entry.kind !== 'text'),
+  visibleEntries.value.filter((entry) => entry.kind !== 'text'),
 );
 const hasProcessEntries = computed(() => processEntries.value.length > 0);
 const uiLanguage = computed(() => props.message.uiLanguage ?? 'zh');
@@ -138,9 +150,10 @@ async function copyContent() {
         </div>
         <InlineCallTrace
           v-if="hasInlineTrace"
-          :entries="inlineTrace.entries"
+          :entries="visibleEntries"
           :ui-language="uiLanguage"
           :is-streaming="message.isStreaming"
+          :show-thinking="showThinking"
         />
       </div>
 
@@ -152,6 +165,7 @@ async function copyContent() {
             :entries="processEntries"
             :ui-language="uiLanguage"
             :is-streaming="false"
+            :show-thinking="showThinking"
           />
         </div>
       </details>

@@ -107,6 +107,11 @@ function updateCreateGitWorktree(event: Event): void {
   settingsStore.update({ createGitWorktree: checked });
 }
 
+function updateShowThinking(event: Event): void {
+  const checked = (event.target as HTMLInputElement).checked;
+  settingsStore.update({ showThinking: checked });
+}
+
 function updateGoalMaxTurns(event: Event): void {
   const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
   if (Number.isFinite(value) && value > 0 && value <= 50) {
@@ -314,6 +319,21 @@ function themeLabel(theme: AppSettings['theme']): string {
                   <span>{{ level.desc }}</span>
                 </button>
               </div>
+
+              <label class="setting-row toggle-row">
+                <span class="setting-copy">
+                  <strong>显示思考过程</strong>
+                  <small>关闭后聊天界面不展示模型的推理/思考文字，仅保留工具与命令执行轨迹。</small>
+                </span>
+                <label class="toggle-switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.settings.showThinking ?? true"
+                    @change="updateShowThinking"
+                  />
+                  <span class="toggle-slider" />
+                </label>
+              </label>
             </div>
 
             <div class="settings-card">

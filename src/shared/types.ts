@@ -264,6 +264,8 @@ export interface AppSettings {
   taskCompleteNotification?: 'never' | 'always' | 'unfocused';
   /** Whether to auto-create a Git worktree for each new session. Default false. */
   createGitWorktree?: boolean;
+  /** Whether to show the model's thinking/reasoning process in the UI. Default true. */
+  showThinking?: boolean;
 }
 
 /** MCP server configuration */

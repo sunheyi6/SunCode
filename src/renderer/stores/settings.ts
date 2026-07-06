@@ -22,6 +22,7 @@ export const useSettingsStore = defineStore('settings', () => {
     maxLessons: 200,
     taskCompleteNotification: 'never',
     createGitWorktree: false,
+    showThinking: true,
   });
 
   const isLoaded = ref(false);
