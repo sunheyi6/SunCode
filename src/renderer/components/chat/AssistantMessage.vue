@@ -3,7 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 import { useSettingsStore } from '../../stores/settings';
 import { buildInlineCallTrace } from './call-trace-view-model';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import InlineCallTrace from './InlineCallTrace.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import StreamingText from './StreamingText.vue';
 
 const props = defineProps<{
@@ -13,6 +15,7 @@ const props = defineProps<{
 const settingsStore = useSettingsStore();
 const showThinking = computed(() => settingsStore.settings.showThinking !== false);
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const hasContent = computed(() => props.message.content.length > 0);
 const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0);
 const hasThinking = computed(
@@ -30,7 +33,6 @@ const visibleEntries = computed(() =>
     : inlineTrace.value.entries.filter((entry) => entry.kind !== 'thinking'),
 );
 const hasInlineTrace = computed(() => visibleEntries.value.length > 0);
-const hasOrderedBlocks = computed(() => (props.message.blocks?.length ?? 0) > 0);
 const processEntries = computed(() =>
   visibleEntries.value.filter((entry) => entry.kind !== 'text'),
 );
@@ -111,10 +113,6 @@ const thinkingSummary = computed(() => {
   return parts.join('  ');
 });
 
-const hasAnyThinkingContent = computed(() => {
-  return hasInlineTrace.value || thinkingText.value.length > 0 || hasToolCalls.value;
-});
-
 async function copyContent() {
   try {
     await navigator.clipboard.writeText(fullTextForCopy.value);
@@ -170,9 +168,11 @@ async function copyContent() {
         </div>
       </details>
 
-      <!-- Visible reply text -->
+      <!-- Visible reply text: during streaming, show only when InlineCallTrace
+           is empty (avoid double-rendering the current text block);
+           after streaming, always show. -->
       <div
-        v-if="hasContent && (!message.isStreaming || !hasOrderedBlocks)"
+        v-if="hasContent && (!message.isStreaming || !hasInlineTrace)"
         class="message-content"
         :class="{ streaming: message.isStreaming }"
       >
