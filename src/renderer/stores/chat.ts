@@ -22,7 +22,7 @@ import { mergeStreamedToolCalls } from './tool-call-state';
 
 export interface ChatMessageBlock {
   id: string;
-  type: 'thinking' | 'text' | 'tool_call';
+  type: 'thinking' | 'text' | 'tool_call' | 'guidance';
   thinking?: string;
   text?: string;
   toolCall?: ToolCallContent;
@@ -299,6 +299,36 @@ export const useChatStore = defineStore('chat', () => {
       case 'turn_end':
         // Intermediate tool turns belong to the current assistant response.
         break;
+
+      case 'guidance_injected': {
+        // Mid-run guidance: append a guidance block to the current assistant
+        // message's inline trace (D1=B: no standalone user bubble while the
+        // task is streaming — avoids reordering the in-progress message) and
+        // persist the guidance as a user message now (D4: inject-time persist
+        // = history continuity, survives run crash). On next session load it
+        // renders as a normal user turn between the prior and next answers.
+        const guidanceText = event.text || '';
+        if (msg && guidanceText) {
+          if (!msg.blocks) msg.blocks = [];
+          msg.blocks.push({
+            id: nextBlockId(),
+            type: 'guidance',
+            text: guidanceText,
+          });
+        }
+        if (guidanceText) {
+          const uiLanguage = detectUiLanguage(guidanceText);
+          void bridge.saveMessage(
+            {
+              role: 'user',
+              content: [{ type: 'text', text: guidanceText }],
+              uiLanguage,
+            },
+            sessionId,
+          );
+        }
+        break;
+      }
 
       case 'message_start':
         // Create streaming message context if not already present

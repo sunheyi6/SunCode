@@ -243,8 +243,19 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
         <StreamingText :text="entry.text" :is-streaming="isStreaming" />
       </div>
 
+      <!-- Mid-run guidance: shown inline (no standalone user bubble) -->
+      <div
+        v-else-if="entry.kind === 'guidance'"
+        class="streaming-guidance"
+        :class="{ active: entry.isActive }"
+      >
+        <span class="streaming-guidance-mark">↳</span>
+        <span class="streaming-guidance-label">{{ uiLanguage === 'en' ? 'Guidance' : '引导' }}</span>
+        <span class="streaming-guidance-text">{{ entry.text }}</span>
+      </div>
+
       <details
-        v-else
+        v-else-if="entry.kind === 'tools'"
         class="streaming-tool-details"
         :class="[streamingToolClass(entry), { current: entry.isCurrent }]"
       >
@@ -362,8 +373,18 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
         </div>
       </details>
 
+      <div
+        v-else-if="entry.kind === 'guidance'"
+        class="trace-guidance"
+        :class="{ current: entry.isCurrent }"
+      >
+        <span class="trace-guidance-mark">↳</span>
+        <span class="trace-guidance-label">{{ uiLanguage === 'en' ? 'Guidance' : '引导' }}</span>
+        <span class="trace-guidance-text">{{ entry.text }}</span>
+      </div>
+
       <details
-        v-else
+        v-else-if="entry.kind === 'tools'"
         class="trace-tool-group"
         :class="{ running: entry.hasRunning, failed: entry.hasFailed, current: entry.isCurrent }"
         :open="entry.isCurrent || entry.hasRunning"
@@ -514,6 +535,46 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 .streaming-tool-details {
   min-width: 0;
   color: var(--color-text-muted);
+}
+
+/* Mid-run guidance chip (streaming) */
+.streaming-guidance {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 2px 0;
+  padding: 4px 8px;
+  border-left: 2px solid var(--color-accent);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.streaming-guidance.active {
+  color: var(--color-text);
+}
+
+.streaming-guidance-mark {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+}
+
+.streaming-guidance-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.streaming-guidance-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .streaming-tool-row {
@@ -1093,6 +1154,41 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 
 .trace-tool-group {
   color: var(--color-text-muted);
+}
+
+/* Mid-run guidance chip (completed view) */
+.trace-guidance {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--color-accent);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.trace-guidance-mark {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+}
+
+.trace-guidance-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.trace-guidance-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .trace-tool-group.running {

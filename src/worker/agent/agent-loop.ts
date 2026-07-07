@@ -80,6 +80,18 @@ export interface AgentLoopInput {
   stopHooks?: StopHookRegistry;
   /** Whether there is pending user input that was queued while the agent was running. */
   hasPendingInput?: boolean;
+  /** Drain mid-run guidance prompts queued via Agent.injectGuidance(). Returns
+   *  user messages to append to contextMessages so the next model turn sees
+   *  them. Called at each turn boundary; never aborts the run. */
+  drainGuidance?: () => Message[];
+  /** Optional test seam: inject a custom stream function instead of
+   *  dynamically importing pi-ai's streamSimple. Production code leaves this
+   *  unset so the real pi-ai path is used. */
+  streamImpl?: (
+    model: unknown,
+    context: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ) => AsyncIterable<AssistantMessageEvent>;
   /** Callback to request user confirmation before executing a destructive tool.
    *  Only called when permissionMode is 'confirm_changes'. */
   requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>;
@@ -160,21 +172,23 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     model: unknown,
     context: Record<string, unknown>,
     options?: Record<string, unknown>,
-  ) => AsyncIterable<AssistantMessageEvent> = await (async () => {
-    try {
-      const pi = await import('@earendil-works/pi-ai');
-      const fn = pi.streamSimple as unknown as typeof streamSimpleFn;
-      if (!fn) {
-        throw new Error('streamSimple not found in pi-ai exports');
+  ) => AsyncIterable<AssistantMessageEvent> =
+    input.streamImpl ??
+    (await (async () => {
+      try {
+        const pi = await import('@earendil-works/pi-ai');
+        const fn = pi.streamSimple as unknown as typeof streamSimpleFn;
+        if (!fn) {
+          throw new Error('streamSimple not found in pi-ai exports');
+        }
+        return fn;
+      } catch (importErr) {
+        console.error('[AgentLoop] Failed to import pi-ai:', importErr);
+        throw new Error(
+          `无法加载 AI 库：${(importErr as Error).message}。请确保已安装 @earendil-works/pi-ai。`,
+        );
       }
-      return fn;
-    } catch (importErr) {
-      console.error('[AgentLoop] Failed to import pi-ai:', importErr);
-      throw new Error(
-        `无法加载 AI 库：${(importErr as Error).message}。请确保已安装 @earendil-works/pi-ai。`,
-      );
-    }
-  })();
+    })());
 
   const contextMessages: Message[] = [...initialMessages];
   let turnCount = initialTurnCount;
@@ -217,6 +231,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     onStream({ type: 'turn_start', turnCount, maxTurns: settings.maxTurns || MAX_TURNS });
     onRunEvent({ type: 'turn_started', runId, turnNumber: turnCount, timestamp: '' });
     input.onTurnStart?.(turnCount, settings.maxTurns || MAX_TURNS, { ...tokenUsage });
+
+    // Drain mid-run guidance: each queued guidance becomes a user message in
+    // contextMessages so this turn's model request sees it. The agent also
+    // appends it to this.messages (cross-run history + persistence source).
+    // Draining here means guidance injected during the previous turn (or
+    // before the run started) takes effect on this turn — immediately, with
+    // no abort/restart. (See the second drain point at the stop decision for
+    // guidance arriving during a would-be final turn.)
+    const drainedGuidance = input.drainGuidance?.() ?? [];
+    for (const g of drainedGuidance) {
+      contextMessages.push(g);
+      const gText = getMessageTextContent(g);
+      onStream({ type: 'guidance_injected', text: gText });
+      onRunEvent({ type: 'guidance_injected', runId, text: gText, timestamp: '' });
+    }
 
     try {
       const effectivePermissionMode = settings.permissionMode;
@@ -406,6 +435,29 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         if (assistantText) interimBlocks.push({ type: 'text', text: assistantText });
         else interimBlocks.push({ type: 'text', text: '处理中...' });
         contextMessages.push({ role: 'assistant', content: interimBlocks, toolCalls });
+
+        // Guidance injected during this would-be final turn: don't finalize —
+        // drain it, append to context, and continue for another turn so the
+        // model addresses the guidance. The just-streamed assistant turn above
+        // stays in history (不篡改历史); only subsequent output follows it.
+        const edgeGuidance = input.drainGuidance?.() ?? [];
+        if (edgeGuidance.length > 0) {
+          for (const g of edgeGuidance) {
+            contextMessages.push(g);
+            const gText = getMessageTextContent(g);
+            onStream({ type: 'guidance_injected', text: gText });
+            onRunEvent({ type: 'guidance_injected', runId, text: gText, timestamp: '' });
+          }
+          onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
+          onRunEvent({
+            type: 'turn_completed',
+            runId,
+            turnNumber: turnCount,
+            hasToolCalls: false,
+            timestamp: '',
+          });
+          continue;
+        }
 
         // Run stop hooks before finalizing (safety checks)
         if (stopHooks) {

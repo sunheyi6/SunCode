@@ -591,6 +591,7 @@ export type WorkerInMessage =
   | { type: 'abort'; sessionId: string }
   | { type: 'stop'; sessionId: string }
   | { type: 'continue'; sessionId: string }
+  | { type: 'injectGuidance'; sessionId: string; text: string; uiLanguage?: UiLanguage }
   | { type: 'config'; settings: AppSettings }
   | { type: 'setWorkingDir'; sessionId: string; path: string }
   | { type: 'setMessages'; sessionId: string; messages: Message[] }
@@ -664,7 +665,8 @@ export type StreamEventType =
   | 'turn_start'
   | 'turn_end'
   | 'error'
-  | 'system_prompt';
+  | 'system_prompt'
+  | 'guidance_injected';
 
 /** A streaming event from the LLM */
 export interface StreamEvent {
@@ -681,6 +683,8 @@ export interface StreamEvent {
   message?: Message;
   /** System prompt text (emitted once at the start of each agent run). */
   systemPrompt?: string;
+  /** Guidance text (emitted when a mid-run guidance prompt is injected). */
+  text?: string;
 }
 
 // ===== Run Event Types =====
@@ -786,6 +790,7 @@ export type RunEvent =
     }
   | { type: 'run_failed'; runId: RunId; error: string; timestamp: string }
   | { type: 'run_aborted'; runId: RunId; timestamp: string }
+  | { type: 'guidance_injected'; runId: RunId; text: string; timestamp: string }
   | { type: 'run_recovered'; runId: RunId; reason: string; timestamp: string }
   | {
       type: 'model_request_started';

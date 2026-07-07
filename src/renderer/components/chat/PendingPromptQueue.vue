@@ -4,7 +4,7 @@ import { useAgentStore } from '../../stores/agent';
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const emit = defineEmits<{
-  sendNow: [id: string];
+  inject: [id: string];
   remove: [id: string];
 }>();
 
@@ -79,8 +79,8 @@ function onEditKeydown(e: KeyboardEvent): void {
         <template v-else>
           <button
             class="guide-btn"
-            title="中断当前回答并立即发送本条消息"
-            @click="emit('sendNow', prompt.id)"
+            title="立即引导当前任务（不中断）"
+            @click="emit('inject', prompt.id)"
           >
             引导
           </button>

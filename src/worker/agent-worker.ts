@@ -191,6 +191,18 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
       break;
     }
 
+    case 'injectGuidance': {
+      const sid = msg.sessionId;
+      if (!sid) {
+        console.error('[Worker] injectGuidance: missing sessionId');
+        return;
+      }
+      // Direct call — no lock: injectGuidance() only pushes to a queue,
+      // which is idempotent and must take effect at the next turn boundary.
+      getAgent(sid)?.injectGuidance(msg.text, msg.uiLanguage);
+      break;
+    }
+
     case 'stop': {
       const sid = msg.sessionId;
       if (!sid) {

@@ -37,6 +37,11 @@ const suncodeAPI = {
     ipcRenderer.send('agent:abort');
   },
 
+  /** Inject a guidance prompt into the running agent (no abort/restart). */
+  injectGuidance(text: string, uiLanguage?: UiLanguage): void {
+    ipcRenderer.send('agent:injectGuidance', text, uiLanguage);
+  },
+
   /** Soft-stop the current agent run (model will summarize before ending). */
   stop(): void {
     ipcRenderer.send('agent:stop');

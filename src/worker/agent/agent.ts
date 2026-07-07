@@ -60,6 +60,9 @@ export class Agent {
   private currentResponseLanguage: UiLanguage = 'zh';
   /** Stable session ID for prompt cache affinity (Anthropic). */
   private sessionId: string;
+  /** Mid-run guidance prompts queued via injectGuidance(); drained at each
+   *  turn boundary by the agent loop so the next model turn sees them. */
+  private guidanceQueue: { text: string; uiLanguage: UiLanguage }[] = [];
 
   private onStream: (event: StreamEvent) => void;
   private onStatus: (status: AgentStatus) => void;
@@ -394,6 +397,53 @@ export class Agent {
   }
 
   /**
+   * Inject a guidance prompt into the currently running agent loop.
+   *
+   * Unlike prompt() (which rejects while running) and interruptAndSend()
+   * (which aborts + restarts), this NEVER aborts the run: history, executed
+   * operations and tool results all stay intact. The guidance is queued and
+   * drained at the next turn boundary (see AgentLoopInput.drainGuidance) so
+   * the next model turn sees it as a fresh user message. If it lands during a
+   * would-be final turn, the loop continues for one more turn to address it.
+   *
+   * Satisfies the guidance contract:
+   *  - 上下文连续性：only appends to this.messages, never resets.
+   *  - 即时生效：next turn follows the guidance, no restart.
+   *  - 动态叠加：each call adds one user message; later = higher recency.
+   *  - 不篡改历史：existing assistant output is never edited.
+   */
+  injectGuidance(text: string, uiLanguage?: UiLanguage): void {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    this.guidanceQueue.push({
+      text: trimmed,
+      uiLanguage: uiLanguage ?? this.currentResponseLanguage,
+    });
+  }
+
+  /**
+   * Drain pending guidance into user messages. Called by the agent loop at
+   * each turn boundary. Each drained message is ALSO appended to this.messages
+   * so it survives across runs and is available for persistence. Pure w.r.t.
+   * events — the loop emits guidance_injected stream/run events alongside.
+   */
+  drainGuidance(): Message[] {
+    if (this.guidanceQueue.length === 0) return [];
+    const items = this.guidanceQueue.splice(0);
+    const messages: Message[] = [];
+    for (const item of items) {
+      const msg: Message = {
+        role: 'user',
+        content: [{ type: 'text', text: item.text }],
+        uiLanguage: item.uiLanguage,
+      };
+      this.messages.push(msg);
+      messages.push(msg);
+    }
+    return messages;
+  }
+
+  /**
    * Request a soft stop: abort the current model call, then inject a
    * summary request so the model can wrap up before the run ends.
    */
@@ -539,6 +589,8 @@ export class Agent {
         this.onRunEvent(event);
       },
       initialTurnCount: this.turnCount,
+      // Drain mid-run guidance at each turn boundary (no abort/restart).
+      drainGuidance: () => this.drainGuidance(),
       prepareNextTurn: this.settings.autoCompact
         ? (ctx) => {
             const policy = contextBudgetPolicy;
@@ -700,6 +752,8 @@ export class Agent {
         this.onRunEvent(event);
       },
       initialTurnCount: 0,
+      // Drain mid-run guidance at each turn boundary (no abort/restart).
+      drainGuidance: () => this.drainGuidance(),
       runId: '', // Will be set per-attempt
       prepareNextTurn: this.settings.autoCompact
         ? (ctx: import('./agent-loop').PrepareNextTurnContext) => {

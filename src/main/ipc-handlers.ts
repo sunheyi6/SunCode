@@ -366,6 +366,16 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
+  ipcMain.on('agent:injectGuidance', (_event, text: string, uiLanguage?: UiLanguage) => {
+    try {
+      const sessionId = currentSessionId;
+      if (!sessionId) return;
+      sendToWorker({ type: 'injectGuidance', sessionId, text, uiLanguage });
+    } catch (err) {
+      console.error('[Main] agent:injectGuidance failed:', (err as Error).message);
+    }
+  });
+
   ipcMain.on('agent:stop', () => {
     try {
       if (currentSessionId) sendToWorker({ type: 'stop', sessionId: currentSessionId });

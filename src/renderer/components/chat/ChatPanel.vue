@@ -17,7 +17,7 @@ import MessageList from './MessageList.vue';
 import PendingPromptQueue from './PendingPromptQueue.vue';
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-const { send, stop, interruptAndSend, isStreaming } = useAgent();
+const { send, stop, injectGuidance, isStreaming } = useAgent();
 const chatStore = useChatStore();
 const settingsStore = useSettingsStore();
 const agentStore = useAgentStore();
@@ -103,7 +103,7 @@ onUnmounted(() => {
       </div>
 
       <MessageList />
-      <PendingPromptQueue @send-now="interruptAndSend" @remove="handleRemove" />
+      <PendingPromptQueue @inject="injectGuidance" @remove="handleRemove" />
     </template>
 
     <!-- Empty state: centered welcome content only (input stays at bottom) -->
@@ -130,7 +130,7 @@ onUnmounted(() => {
         </div>
         <div class="welcome-content">
           <h2>{{ welcomeMessage }}</h2>
-          <PendingPromptQueue @send-now="interruptAndSend" @remove="handleRemove" />
+          <PendingPromptQueue @inject="injectGuidance" @remove="handleRemove" />
           <ChatInput
             @send="handleSend"
             @stop="handleStop"

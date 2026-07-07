@@ -13,6 +13,7 @@
 | [运行事件日志](run-event-logging-design.md) | JSONL 持久化：run_started/run_completed/model_request/turn_detail、CallTracePanel 回溯、Token 用量统计 |
 | [会话标题生成](session-title-generation.md) | AI 自动生成会话标题：轻量模型选取、TITLE_GENERATION_PROMPT、fallback 规则 |
 | [流式输出渲染](streaming-output-design.md) | 聊天流式时间轴：blocks/InlineCallTraceEntry 模型、中间文本一行预览、showThinking 开关、流式期间不标“最终回答” |
+| [运行中引导注入](guidance-injection-design.md) | 引导注入通道：guidanceQueue/drainGuidance 模型、两个 drain 点位置策略、IPC 通道与持久化、UI 呈现（流式 chip + 重载时 user 气泡）、双 drain 末轮保护 |
 
 ## 2026-06～07 架构变更摘要
 
@@ -43,6 +44,7 @@
 | 右侧面板统一 | Git + Plan + Process 三合一右侧悬浮面板，计划 5 条默认折叠，显示执行时间 |
 | Goal 自主循环 | `/goal` 前缀触发：自动制定计划 → 执行 → 验证 → 失败重试，最多 N 轮或超时自动终止 |
 | 子智能体调度 | SubagentDispatcher 调度 explor/review/implement 子 Agent，流式输出思考过程和工具调用到主 UI |
+| 运行中引导注入 | 不中断 run 的引导通道：guidanceQueue 队列 + 两个 drain 注入点（turn 顶部 + stop 边缘），引导即时落盘，UI 显示为 inline-trace chip |
 
 ## 相关源码
 

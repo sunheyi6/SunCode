@@ -98,6 +98,13 @@ export type InlineCallTraceEntry =
       isActive: boolean;
     }
   | {
+      kind: 'guidance';
+      id: string;
+      text: string;
+      isCurrent: boolean;
+      isActive: boolean;
+    }
+  | {
       kind: 'tools';
       id: string;
       label: string;
@@ -316,6 +323,17 @@ export function buildInlineCallTrace(message: ChatMessage): InlineCallTrace {
         text: block.text,
         isCurrent: false,
         isActive: activeBlockIds.has(block.id),
+      });
+      continue;
+    }
+
+    if (block.type === 'guidance' && block.text) {
+      entries.push({
+        kind: 'guidance',
+        id: block.id,
+        text: block.text,
+        isCurrent: false,
+        isActive: false,
       });
       continue;
     }

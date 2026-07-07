@@ -224,6 +224,15 @@ export function useAgent() {
     setTimeout(() => dispatch(prompt.text), 40);
   }
 
+  /** Inject a queued prompt as mid-run guidance. Unlike interruptAndSend,
+   *  this does NOT abort the current run: the guidance is appended to the
+   *  running task's context and takes effect at the next turn boundary. */
+  function injectGuidance(id: string): void {
+    const prompt = agentStore.takePrompt(id);
+    if (!prompt) return;
+    bridge.injectGuidance(prompt.text, detectUiLanguage(prompt.text));
+  }
+
   function continueAgent(): void {
     chatStore.setActiveSessionId(sessionsStore.activeSessionId ?? '');
     chatStore.startAssistantMessage();
@@ -246,6 +255,7 @@ export function useAgent() {
     abort,
     stop,
     interruptAndSend,
+    injectGuidance,
     continue: continueAgent,
     isStreaming: isBusy,
   };

@@ -102,6 +102,7 @@ declare global {
       // Agent
       prompt(text: string, uiLanguage?: UiLanguage): void;
       abort(): void;
+      injectGuidance(text: string, uiLanguage?: UiLanguage): void;
       stop(): void;
       continue(): void;
       onStreamEvent(callback: (data: SessionStreamEvent) => void): () => void;

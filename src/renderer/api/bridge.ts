@@ -48,6 +48,10 @@ export const bridge = {
     api().abort();
   },
 
+  injectGuidance(text: string, uiLanguage?: UiLanguage): void {
+    api().injectGuidance(text, uiLanguage);
+  },
+
   stop(): void {
     api().stop();
   },
