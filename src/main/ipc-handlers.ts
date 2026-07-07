@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+﻿import { execFileSync } from 'node:child_process';
 import { existsSync, watch as fsWatch, readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
@@ -44,6 +44,7 @@ import { appendEvent, getEvents, getTokenUsageAggregate, listRuns, startRun } fr
 import {
   deleteSession,
   deleteSessions,
+  getSessionFilePath,
   initSessionStore,
   loadAllSessions,
   loadSession,
@@ -747,11 +748,140 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
-  // Task completion native notification
-  ipcMain.on('notify:task-complete', (_event, title: string, body: string) => {
+  // Skills listing --- scan built-in skill files for display in UI
+  ipcMain.handle('skills:list', async () => {
     try {
+      const { existsSync } = await import('node:fs');
+      const { readdir, readFile } = await import('node:fs/promises');
+      const { extname, join } = await import('node:path');
+
+      // Use app.isPackaged to determine the correct skills directory.
+      // process.resourcesPath exists in Electron main even in dev, but points
+      // to the Electron binary's resources (node_modules/electron/dist/resources),
+      // NOT our project's skills/. Only use it when actually packaged.
+      const builtinSkillsDir = app.isPackaged
+        ? join(process.resourcesPath, 'skills')
+        : join(__dirname, '..', '..', 'skills');
+
+      console.log('[Main] skills:list - app.isPackaged:', app.isPackaged);
+      console.log('[Main] skills:list - builtinSkillsDir:', builtinSkillsDir);
+      console.log('[Main] skills:list - exists:', existsSync(builtinSkillsDir));
+      console.log('[Main] skills:list - __dirname:', __dirname);
+      console.log('[Main] skills:list - process.resourcesPath:', process.resourcesPath);
+
+      if (!existsSync(builtinSkillsDir)) {
+        console.warn('[Main] skills:list - skills directory not found, returning empty');
+        return [];
+      }
+
+      const entries = await readdir(builtinSkillsDir, { withFileTypes: true });
+      const skills: Array<{ name: string; path: string; description: string }> = [];
+
+      for (const entry of entries) {
+        if (entry.isFile() && extname(entry.name).toLowerCase() === '.md') {
+          // Flat .md file
+          const filePath = join(builtinSkillsDir, entry.name);
+          const name = entry.name.replace('.md', '');
+          let description = '';
+          try {
+            const content = await readFile(filePath, 'utf-8');
+            const match = content.match(/^---\n[\s\S]*?description:\s*(.*?)\n/);
+            if (match) {
+              description = match[1]!.replace(/^["']|["']$/g, '').trim();
+            }
+          } catch {}
+          skills.push({ name, path: filePath, description });
+        } else if (entry.isDirectory()) {
+          // Subdirectory with SKILL.md convention
+          const skillFile = join(builtinSkillsDir, entry.name, 'SKILL.md');
+          try {
+            const content = await readFile(skillFile, 'utf-8');
+            const nameMatch = content.match(/^---\n[\s\S]*?name:\s*(.*?)\n/);
+            const descMatch = content.match(/^---\n[\s\S]*?description:\s*(.*?)\n/);
+            const name = nameMatch ? nameMatch[1]!.trim() : entry.name;
+            const description = descMatch ? descMatch[1]!.replace(/^["']|["']$/g, '').trim() : '';
+            skills.push({ name, path: skillFile, description });
+          } catch {
+            // No readable SKILL.md --- skip
+          }
+        }
+      }
+
+      return skills;
+    } catch (err) {
+      console.error('[Main] skills:list failed:', (err as Error).message);
+      return [];
+    }
+  });
+
+  // ── Pending notification tracking ───────────────────────────────────
+  // On Windows, Electron Notification.on('click') does not reliably fire
+  // because WinRT toast activation needs a proper Start Menu shortcut.
+  // As a fallback we register window.once('focus') per notification —
+  // Windows always brings the app window to the foreground when a toast
+  // is clicked, which triggers our fallback handler.
+
+  let pendingSessionId: string | null = null;
+  let pendingClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Navigate to the completed session (window focus + renderer message). */
+  function navigateToSession(sessionId: string): void {
+    try {
+      const win = windowManager.getMainWindow();
+      if (win && !win.isDestroyed()) {
+        win.show();
+        win.focus();
+        win.webContents.send('notify:task-click', { sessionId });
+      }
+    } catch (err) {
+      console.error('[Main] Failed to navigate on notification click:', (err as Error).message);
+    }
+  }
+
+  /** Clear the pending notification state. */
+  function clearPendingNotification(): void {
+    pendingSessionId = null;
+    if (pendingClearTimer) {
+      clearTimeout(pendingClearTimer);
+      pendingClearTimer = null;
+    }
+  }
+
+  ipcMain.on('notify:task-complete', (_event, title: string, body: string, sessionId?: string) => {
+    try {
+      const win = windowManager.getMainWindow();
+
+      // Store pending session so the focus fallback can pick it up
+      pendingSessionId = sessionId ?? null;
+
+      // Auto-clear after 30 s to avoid stale navigation on normal focus
+      if (pendingClearTimer) clearTimeout(pendingClearTimer);
+      pendingClearTimer = setTimeout(() => {
+        pendingSessionId = null;
+      }, 30_000);
+
+      // Focus fallback: register once per notification.
+      // Windows always activates the window when a toast is clicked; the
+      // 'focus' event here is our fallback if Notification.on('click')
+      // does not fire (common on Windows).
+      if (win && !win.isDestroyed()) {
+        win.once('focus', () => {
+          if (pendingSessionId) {
+            const sid = pendingSessionId;
+            clearPendingNotification();
+            navigateToSession(sid);
+          }
+        });
+      }
+
       const notification = new Notification({ title, body });
+      notification.on('click', () => {
+        clearPendingNotification();
+        if (sessionId) navigateToSession(sessionId);
+      });
       notification.show();
+
+      console.log('[Main] Task-complete notification shown for session:', sessionId?.slice(-8));
     } catch (err) {
       console.error('[Main] Failed to show task completion notification:', (err as Error).message);
     }
@@ -780,6 +910,11 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.handle('app:getLogPath', async () => {
     return getLogPath();
+  });
+
+  // Get the absolute path of a session file (stored under app data dir, not working dir)
+  ipcMain.handle('session:getFilePath', async (_event, sessionId: string) => {
+    return getSessionFilePath(sessionId);
   });
 
   // Open a path in the system file explorer

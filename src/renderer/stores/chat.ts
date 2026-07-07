@@ -130,7 +130,11 @@ function thinkingFromMessageContent(content: Message['content']): string {
 
 function applyFinalMessageToUi(target: ChatMessage, finalMessage: Message): void {
   const content = textFromMessageContent(finalMessage.content);
-  const taskPlan = parseTaskPlan(content, false) ?? undefined;
+  const parsedPlan = parseTaskPlan(content, false);
+  // Prefer the structured plan accumulated across turns by the worker.
+  // Fall back to parsing the final text, and never clear an existing plan when
+  // the last turn has no 📋 marker — the plan should persist until a new run.
+  const taskPlan = finalMessage.taskPlan ?? parsedPlan ?? target.taskPlan;
   target.content = taskPlan ? stripPlanFromContent(content) : content;
   target.thinking = thinkingFromMessageContent(finalMessage.content) || target.thinking;
   target.taskPlan = taskPlan;
@@ -358,6 +362,7 @@ export const useChatStore = defineStore('chat', () => {
                 turnDetails: target.turnDetails,
                 uiLanguage: target.uiLanguage,
                 finalMessage: event.message,
+                taskPlan: target.taskPlan,
               }),
               sessionId,
             );
@@ -467,7 +472,10 @@ export const useChatStore = defineStore('chat', () => {
           isStreaming.value = event.type === 'message_update';
         }
 
-        // Parse task plan on message_update (throttled)
+        // Parse task plan on message_update (throttled).
+        // Each turn's data.text is single-turn only, so when a later tool-use turn
+        // has no 📋 marker we must NOT overwrite the accumulated plan — only
+        // update it when a fresh plan block is actually present in this turn's text.
         if (event.type === 'message_update' && data.text) {
           if (data.text.length - lastParsedPlanLength >= 30 || data.text.includes('[PLAN]')) {
             const plan = parseTaskPlan(data.text, true);
@@ -508,6 +516,7 @@ export const useChatStore = defineStore('chat', () => {
                 turnDetails: target.turnDetails,
                 uiLanguage: target.uiLanguage,
                 finalMessage: event.message,
+                taskPlan: target.taskPlan,
               }),
               sessionId,
             );
@@ -755,7 +764,7 @@ export const useChatStore = defineStore('chat', () => {
         const content = textFromMessageContent(message.content);
         const thinking = thinkingFromMessageContent(message.content);
 
-        const taskPlan = parseTaskPlan(content, false) ?? undefined;
+        const taskPlan = message.taskPlan ?? parseTaskPlan(content, false) ?? undefined;
         const displayContent = taskPlan ? stripPlanFromContent(content) : content;
         if (message.role === 'user') {
           inferredUiLanguage = message.uiLanguage ?? detectUiLanguage(content);

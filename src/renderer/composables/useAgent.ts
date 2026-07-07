@@ -139,7 +139,13 @@ export function useAgent() {
         const ntSettings = useSettingsStore().settings;
         const mode = ntSettings.taskCompleteNotification ?? 'never';
         if (mode === 'always' || (mode === 'unfocused' && !windowFocused)) {
-          bridge.showTaskCompleteNotification('SunCode', '任务已完成');
+          const session = sessionsStore.sessions.find((s) => s.id === data.sessionId);
+          const sessionName = session?.name ?? '未知对话';
+          bridge.showTaskCompleteNotification(
+            'SunCode',
+            `${sessionName} · 任务已完成`,
+            data.sessionId,
+          );
         }
 
         scheduleNextPrompt();
@@ -159,6 +165,15 @@ export function useAgent() {
         ) {
           agentStore.setGoalActive(false);
         }
+      }),
+    );
+
+    // Switch to the session when the user clicks a task completion notification.
+    // Use force=true to reload messages even if the session is already active,
+    // ensuring the view scrolls to the latest messages.
+    cleanups.push(
+      bridge.onTaskNotificationClick((clickData) => {
+        void sessionsStore.selectSession(clickData.sessionId, undefined, true);
       }),
     );
   }

@@ -32,6 +32,11 @@ function sessionPath(id: string): string {
   return join(getSessionsDir(), `${id}.json`);
 }
 
+/** Absolute path of the session file for the given session id. */
+export function getSessionFilePath(id: string): string {
+  return sessionPath(id);
+}
+
 /** Temp path used for atomic writes. */
 function tempPath(id: string): string {
   return join(getSessionsDir(), `${id}.json.tmp`);

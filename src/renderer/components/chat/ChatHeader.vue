@@ -32,13 +32,20 @@ const folderName = computed(() => {
   return segments[segments.length - 1] || dir;
 });
 
-// Sync folder name to native title bar overlay
+// Sync chat header info (conversation name · folder · git branch) to the
+// global window title so the title bar row stays consistent with the header.
+const titleBarText = computed(() => {
+  const parts: string[] = [];
+  if (activeSession.value?.name) parts.push(activeSession.value.name);
+  if (folderName.value) parts.push(folderName.value);
+  if (gitBranch.value) parts.push(gitBranch.value);
+  return parts.join(' · ');
+});
+
 watch(
-  folderName,
-  (name) => {
-    if (name) {
-      bridge.setTitleBarOverlayText(name);
-    }
+  titleBarText,
+  (text) => {
+    bridge.setTitleBarOverlayText(text);
   },
   { immediate: true },
 );

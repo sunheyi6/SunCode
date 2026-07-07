@@ -1,5 +1,5 @@
 import { sanitizeStructuredMessageLeak } from '@shared/finalization';
-import type { Message, ToolCallContent, TurnDetail } from '@shared/types';
+import type { Message, TaskPlan, ToolCallContent, TurnDetail } from '@shared/types';
 import type { UiLanguage } from '../utils/ui-language';
 
 interface PersistedAssistantInput {
@@ -10,6 +10,8 @@ interface PersistedAssistantInput {
   turnDetails?: TurnDetail[];
   uiLanguage?: UiLanguage;
   finalMessage?: Message;
+  /** Structured task plan accumulated across turns (from the worker). */
+  taskPlan?: TaskPlan;
 }
 
 export function buildPersistedAssistantMessage(input: PersistedAssistantInput): Message {
@@ -18,6 +20,9 @@ export function buildPersistedAssistantMessage(input: PersistedAssistantInput): 
     finalContent && (typeof finalContent === 'string' || finalContent.length > 0)
       ? sanitizeMessageContent(finalContent)
       : buildContentBlocks(input.visibleContent, input.thinking);
+
+  // Prefer the explicitly-passed task plan; fall back to one carried on finalMessage.
+  const taskPlan = input.taskPlan ?? input.finalMessage?.taskPlan;
 
   const message: Message = {
     role: 'assistant',
@@ -35,6 +40,7 @@ export function buildPersistedAssistantMessage(input: PersistedAssistantInput): 
     // Persist system prompt so call trace panel works across session switches
     systemPrompt: input.systemPrompt,
     ...(input.turnDetails ? { turnDetails: input.turnDetails } : {}),
+    ...(taskPlan ? { taskPlan } : {}),
   };
 
   // Deep-clone to strip Vue reactivity proxies before IPC.

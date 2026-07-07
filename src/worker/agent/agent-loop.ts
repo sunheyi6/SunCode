@@ -10,6 +10,8 @@ import type {
   RunEvent,
   StopHookRegistry,
   StreamEvent,
+  TaskPlan,
+  TaskStep,
   ToolCallContent,
   ToolDefinition,
   ToolResult,
@@ -187,6 +189,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
   let lastSystemPrompt = '';
 
+  // Accumulate the latest 📋 plan block across turns. Each turn's assistantText
+  // is single-turn only, so without accumulation the final message would only
+  // carry the last turn's text — losing the plan when the last turn has no 📋
+  // marker. We keep the most recent plan block (execution plan or progress
+  // update) so it can be attached to the final message for the renderer.
+  let accumulatedPlanBlock = '';
+  let accumulatedPlanTaskType: TaskPlan['taskType'] = 'execution';
+
   console.log(
     `[AgentLoop] Starting with model=${settings.activeProvider}/${settings.activeModel}, tools=${tools.length}`,
   );
@@ -336,6 +346,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // Persist task plan to disk in real-time if 📋 marker is present
       maybeSaveTurnPlan(rawAssistantText, workingDir, sessionId);
 
+      // Accumulate the latest plan block across turns so the final message
+      // carries the plan even when the last turn has no 📋 marker.
+      const planBlock = extractPlanBlock(rawAssistantText);
+      if (planBlock) {
+        accumulatedPlanBlock = planBlock.text;
+        accumulatedPlanTaskType = planBlock.taskType;
+      }
+
       // ===== Defensive parse: extract tool calls from suncode.message JSON in text =====
       // Some providers (DeepSeek) may output tool calls as JSON inside the text content
       // instead of using the API's native tool_calls field. This fallback catches those.
@@ -429,7 +447,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             contentBlocks.push({ type: 'text', text: mergedText });
 
             return {
-              finalMessage: { role: 'assistant', content: contentBlocks },
+              finalMessage: {
+                role: 'assistant',
+                content: contentBlocks,
+                taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
+              },
               turnCount,
               tokenUsage,
               decision: { decision: 'stop', reason: 'blocked', taxonomy: 'blocked' },
@@ -498,7 +520,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         });
 
         return {
-          finalMessage: { role: 'assistant', content: contentBlocks },
+          finalMessage: {
+            role: 'assistant',
+            content: contentBlocks,
+            taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
+          },
           turnCount,
           tokenUsage,
           decision: turnDecision,
@@ -656,6 +682,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           text: `已达到最大轮次限制（${settings.maxTurns}轮）。请尝试更具体的提问，或调整设置中的最大轮次。`,
         },
       ],
+      taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
     },
     turnCount,
     tokenUsage,
@@ -890,7 +917,7 @@ function tryParseToolCallsFromText(
  */
 function maybeSaveTurnPlan(assistantText: string, workingDir: string, sessionId: string): void {
   try {
-    if (!assistantText || !assistantText.includes('📋')) return;
+    if (!assistantText?.includes('📋')) return;
 
     // Find the LAST plan marker
     const execIdx = assistantText.lastIndexOf('📋 执行计划：');
@@ -913,4 +940,102 @@ function maybeSaveTurnPlan(assistantText: string, workingDir: string, sessionId:
   } catch {
     // Best-effort
   }
+}
+
+/**
+ * Extract the latest 📋 plan block from a turn's assistant text.
+ * Returns the block text and inferred task type, or null if no marker.
+ */
+function extractPlanBlock(
+  assistantText: string,
+): { text: string; taskType: TaskPlan['taskType'] } | null {
+  if (!assistantText?.includes('📋')) return null;
+  const execIdx = assistantText.lastIndexOf('📋 执行计划：');
+  const progIdx = assistantText.lastIndexOf('📋 进度更新：');
+  const markerIdx = Math.max(execIdx, progIdx);
+  if (markerIdx < 0) return null;
+
+  const afterMarker = assistantText.slice(markerIdx);
+  const blockEnd = afterMarker.indexOf('\n\n');
+  const block = blockEnd >= 0 ? afterMarker.slice(0, blockEnd) : afterMarker;
+  return { text: block, taskType: 'execution' };
+}
+
+/**
+ * Parse an accumulated 📋 plan block into a TaskPlan structure (non-streaming).
+ * Mirrors the renderer's task-plan-parser so the final message can carry a
+ * structured plan that survives multi-turn runs.
+ */
+function parsePlanBlockToTaskPlan(
+  planBlock: string,
+  taskType: TaskPlan['taskType'],
+): TaskPlan | null {
+  const steps: TaskStep[] = [];
+  const strictRegex = /^\s*[-*+]\s+\[([ xX])\]\s+Step\s+(\d+):\s*(.+)\$/gm;
+  const looseRegex = /^\s*[-*+]\s+\[([ xX])\]\s*(.+)\$/gm;
+
+  let match: RegExpExecArray | null = strictRegex.exec(planBlock);
+  while (match !== null) {
+    const status: TaskStep['status'] =
+      (match[1] ?? '').trim().toLowerCase() === 'x' ? 'done' : 'pending';
+    const stepNum = parseInt(match[2] ?? '', 10);
+    const raw = (match[3] ?? '').trim();
+    const { description, result } = splitStepResult(raw);
+    steps.push({ id: `step_${stepNum}`, index: stepNum, description, status, result });
+    match = strictRegex.exec(planBlock);
+  }
+
+  if (steps.length === 0) {
+    let autoIndex = 0;
+    match = looseRegex.exec(planBlock);
+    while (match !== null) {
+      const status: TaskStep['status'] =
+        (match[1] ?? '').trim().toLowerCase() === 'x' ? 'done' : 'pending';
+      const raw = (match[2] ?? '').trim();
+      autoIndex++;
+      const numMatch = raw.match(/^(?:Step\s*)?(\d+)[.、:：]\s*/);
+      let index: number;
+      let descStart: number;
+      if (numMatch) {
+        index = parseInt(numMatch[1] ?? '', 10);
+        descStart = numMatch[0]?.length ?? 0;
+      } else {
+        index = autoIndex;
+        descStart = 0;
+      }
+      const { description, result } = splitStepResult(raw.slice(descStart));
+      steps.push({ id: `step_${index}`, index, description, status, result });
+      match = looseRegex.exec(planBlock);
+    }
+  }
+
+  if (steps.length === 0) return null;
+  return { taskType, steps };
+}
+
+function splitStepResult(raw: string): { description: string; result?: string } {
+  const emdashIdx = raw.indexOf(' — ');
+  if (emdashIdx > 0) {
+    return {
+      description: raw.slice(0, emdashIdx).trim(),
+      result: raw.slice(emdashIdx + 3).trim(),
+    };
+  }
+  const colonIdx = raw.indexOf('：');
+  if (colonIdx > 4 && colonIdx < raw.length - 3) {
+    return {
+      description: raw.slice(0, colonIdx).trim(),
+      result: raw.slice(colonIdx + 1).trim(),
+    };
+  }
+  return { description: raw };
+}
+
+/** Build a TaskPlan from the accumulated plan block, if any. */
+function buildAccumulatedTaskPlan(
+  planBlock: string,
+  taskType: TaskPlan['taskType'],
+): TaskPlan | undefined {
+  if (!planBlock) return undefined;
+  return parsePlanBlockToTaskPlan(planBlock, taskType) ?? undefined;
 }

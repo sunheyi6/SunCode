@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Type-safe wrapper around the window.suncode API.
  * Provides a clean interface for Vue components to interact with the agent.
  */
@@ -141,8 +141,13 @@ export const bridge = {
   },
 
   /** Show native task completion notification */
-  showTaskCompleteNotification(title: string, body: string): void {
-    api().showTaskCompleteNotification(title, body);
+  showTaskCompleteNotification(title: string, body: string, sessionId?: string): void {
+    api().showTaskCompleteNotification(title, body, sessionId);
+  },
+
+  /** Listen for task completion notification clicks (to switch session) */
+  onTaskNotificationClick(callback: (data: { sessionId: string }) => void): () => void {
+    return api().onTaskNotificationClick(callback);
   },
 
   // ===== Model Discovery =====
@@ -191,6 +196,10 @@ export const bridge = {
     return api().getLogPath();
   },
 
+  async getSessionFilePath(sessionId: string): Promise<string> {
+    return api().getSessionFilePath(sessionId);
+  },
+
   async openPath(targetPath: string): Promise<void> {
     return api().openPath(targetPath);
   },
@@ -201,6 +210,10 @@ export const bridge = {
 
   async getTokenUsage(): Promise<TokenUsageSummary> {
     return api().getTokenUsage();
+  },
+
+  async getSkills(): Promise<Array<{ name: string; path: string; description: string }>> {
+    return api().getSkills();
   },
 
   // ===== Git =====

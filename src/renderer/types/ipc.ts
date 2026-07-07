@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Type declarations for the window.suncode API.
  * All event callbacks receive a wrapper with sessionId for multi-session routing.
  */
@@ -132,7 +132,8 @@ declare global {
       getSettings(): Promise<AppSettings>;
       updateSettings(partial: Partial<AppSettings>): Promise<AppSettings>;
       onSettingsChanged(callback: (settings: AppSettings) => void): () => void;
-      showTaskCompleteNotification(title: string, body: string): void;
+      showTaskCompleteNotification(title: string, body: string, sessionId?: string): void;
+      onTaskNotificationClick(callback: (data: { sessionId: string }) => void): () => void;
 
       // Model Discovery
       getProviders(): Promise<string[]>;
@@ -159,9 +160,11 @@ declare global {
       getWorkingDir(): Promise<string>;
       getAppVersion(): Promise<string>;
       getLogPath(): Promise<string>;
+      getSessionFilePath(sessionId: string): Promise<string>;
       openPath(targetPath: string): Promise<void>;
       showItemInFolder(fullPath: string): void;
       getTokenUsage(): Promise<TokenUsageSummary>;
+      getSkills(): Promise<Array<{ name: string; path: string; description: string }>>;
 
       // Git
       getGitInfo(workingDir: string): Promise<GitInfo>;

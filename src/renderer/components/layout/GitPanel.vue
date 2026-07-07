@@ -31,6 +31,15 @@ const planStartTime = ref(0);
 const { processes } = useBackgroundProcesses();
 const { showToast } = useToast();
 
+// ── Vertical drag (long-press to move up/down) ──
+const DRAG_PRESS_MS = 220;
+const panelTop = ref<number | null>(null); // null = use CSS default position
+const dragging = ref(false);
+let pressTimer: ReturnType<typeof setTimeout> | undefined;
+let dragStartY = 0;
+let dragStartTop = 0;
+let suppressClick = false;
+
 const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
 );
@@ -153,6 +162,39 @@ const elapsedText = computed(() => {
   return formatElapsedTime(now.value - running.startTime);
 });
 
+// ── Conversation elapsed time (current/last assistant run) ──
+// Live-ticks while streaming; freezes at the moment streaming ends so the
+// total stays visible after the conversation finishes.
+const latestAssistantMsg = computed(() => {
+  const msgs = chatStore.messages;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'assistant') return msgs[i];
+  }
+  return null;
+});
+
+const frozenEndTimes = ref<Record<string, number>>({});
+
+watch(
+  () => chatStore.isStreaming,
+  (streaming, prev) => {
+    if (!streaming && prev && latestAssistantMsg.value) {
+      frozenEndTimes.value[latestAssistantMsg.value.id] = Date.now();
+    }
+  },
+);
+
+const isConversationStreaming = computed(() => Boolean(latestAssistantMsg.value?.isStreaming));
+
+const conversationElapsed = computed(() => {
+  const msg = latestAssistantMsg.value;
+  if (!msg) return '';
+  if (msg.isStreaming) return formatElapsedTime(now.value - msg.timestamp);
+  const end = frozenEndTimes.value[msg.id];
+  if (!end) return '';
+  return formatElapsedTime(end - msg.timestamp);
+});
+
 async function refreshGit(): Promise<void> {
   const dir = activeSession.value?.workingDirectory;
   if (!dir) {
@@ -263,6 +305,64 @@ function onDocumentClick(e: MouseEvent): void {
   }
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function onHandleMouseDown(e: MouseEvent): void {
+  if (e.button !== 0) return;
+  const el = panelRef.value;
+  if (!el) return;
+  const parent = el.offsetParent as HTMLElement | null;
+  const parentTop = parent ? parent.getBoundingClientRect().top : 0;
+  dragStartY = e.clientY;
+  dragStartTop = el.getBoundingClientRect().top - parentTop;
+  pressTimer = setTimeout(() => {
+    dragging.value = true;
+  }, DRAG_PRESS_MS);
+  document.addEventListener('mousemove', onDragMouseMove);
+  document.addEventListener('mouseup', onDragMouseUp);
+}
+
+function onDragMouseMove(e: MouseEvent): void {
+  // Moved before long-press fired — cancel pending press (treat as click/scroll)
+  if (!dragging.value) {
+    if (Math.abs(e.clientY - dragStartY) > 4 && pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = undefined;
+    }
+    return;
+  }
+  e.preventDefault();
+  const el = panelRef.value;
+  if (!el) return;
+  const parent = el.offsetParent as HTMLElement | null;
+  const parentH = parent ? parent.clientHeight : window.innerHeight;
+  const elH = el.offsetHeight;
+  let top = dragStartTop + (e.clientY - dragStartY);
+  top = Math.max(8, Math.min(top, parentH - elH - 8));
+  panelTop.value = top;
+}
+
+function onDragMouseUp(): void {
+  if (pressTimer) {
+    clearTimeout(pressTimer);
+    pressTimer = undefined;
+  }
+  if (dragging.value) {
+    suppressClick = true;
+    dragging.value = false;
+  }
+  document.removeEventListener('mousemove', onDragMouseMove);
+  document.removeEventListener('mouseup', onDragMouseUp);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function onPillClick(): void {
+  if (suppressClick) {
+    suppressClick = false;
+    return;
+  }
+  togglePanel();
+}
+
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 let gitTimer: ReturnType<typeof setInterval> | undefined;
 let cleanupToolEnd: (() => void) | undefined;
@@ -295,6 +395,9 @@ onUnmounted(() => {
   if (gitTimer) clearInterval(gitTimer);
   if (throttledRefreshTimer) clearTimeout(throttledRefreshTimer);
   if (cleanupToolEnd) cleanupToolEnd();
+  if (pressTimer) clearTimeout(pressTimer);
+  document.removeEventListener('mousemove', onDragMouseMove);
+  document.removeEventListener('mouseup', onDragMouseUp);
 });
 
 // Periodically refresh git info while the panel is expanded (fallback)
@@ -312,13 +415,21 @@ watch(collapsed, (isCollapsed) => {
 </script>
 
 <template>
-  <div v-if="showPanel" ref="panelRef" class="git-float" @click.stop>
+  <div
+    v-if="showPanel"
+    ref="panelRef"
+    class="git-float"
+    :class="{ dragging: dragging }"
+    :style="panelTop !== null ? `top: ${panelTop}px` : undefined"
+    @click.stop
+  >
     <button
       v-if="collapsed"
       class="git-pill"
       type="button"
       :aria-expanded="!collapsed"
-      @click="togglePanel"
+      @click="onPillClick"
+      @mousedown="onHandleMouseDown"
     >
       <!-- Plan summary in pill -->
       <template v-if="hasPlan">
@@ -341,16 +452,33 @@ watch(collapsed, (isCollapsed) => {
           <strong class="deleted">-{{ gitStatus.deletedLines }}</strong>
         </span>
       </template>
+
+      <!-- Live conversation elapsed (ticks while the assistant responds) -->
+      <span
+        v-if="isConversationStreaming && conversationElapsed"
+        class="pill-elapsed"
+        aria-hidden="true"
+      >{{ conversationElapsed }}</span>
     </button>
 
     <section v-if="!collapsed" class="git-card">
-      <header class="card-top">
+      <header class="card-top" @mousedown="onHandleMouseDown">
         <span class="panel-title">{{ panelTitle }}</span>
         <span class="panel-actions">
-          <button type="button" class="icon-button" aria-label="刷新 Git 信息" @click="refreshGit">•••</button>
-          <button type="button" class="icon-button" aria-label="收起 Git 面板" @click="togglePanel">↙</button>
+          <button type="button" class="icon-button" aria-label="刷新 Git 信息" @mousedown.stop @click="refreshGit">•••</button>
+          <button type="button" class="icon-button" aria-label="收起 Git 面板" @mousedown.stop @click="togglePanel">↙</button>
         </span>
       </header>
+
+      <!-- ═══ Conversation elapsed ═══ -->
+      <div
+        v-if="conversationElapsed"
+        class="conversation-row"
+        :class="{ streaming: isConversationStreaming }"
+      >
+        <span class="row-label"><span aria-hidden="true">⏱</span>{{ isConversationStreaming ? '对话中' : '对话耗时' }}</span>
+        <span class="conversation-time">{{ conversationElapsed }}</span>
+      </div>
 
       <!-- ═══ Git Section ═══ -->
       <template v-if="gitStatus.isRepo">
@@ -505,9 +633,19 @@ watch(collapsed, (isCollapsed) => {
   color: var(--color-text);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
   backdrop-filter: blur(10px);
-  cursor: pointer;
+  cursor: grab;
   opacity: 0.42;
   transition: opacity 0.15s, background 0.15s, color 0.15s, box-shadow 0.15s;
+  user-select: none;
+}
+
+.git-float.dragging .git-pill,
+.git-float.dragging .card-top {
+  cursor: grabbing;
+}
+
+.git-float.dragging {
+  transition: none;
 }
 
 .git-card {
@@ -530,8 +668,9 @@ watch(collapsed, (isCollapsed) => {
   justify-content: space-between;
   min-height: 50px;
   padding: 0 18px;
+  cursor: grab;
+  user-select: none;
 }
-
 .panel-title {
   color: var(--color-text-secondary);
   font-size: 15px;
@@ -840,6 +979,41 @@ watch(collapsed, (isCollapsed) => {
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--color-text-muted);
+}
+
+.pill-elapsed {
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-color-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.conversation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 0 14px;
+  color: var(--color-text-muted);
+}
+
+.conversation-row.streaming {
+  color: var(--color-accent);
+}
+
+.conversation-row.streaming .row-label span {
+  color: var(--color-accent);
+  animation: plan-pulse-right 1.4s ease-in-out infinite;
+}
+
+.conversation-time {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .card-progress {

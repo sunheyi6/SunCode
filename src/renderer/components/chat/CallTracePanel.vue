@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ToolCallContent } from '@shared/types';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { bridge } from '../../api/bridge';
 import type { ChatMessage } from '../../stores/chat';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
@@ -64,14 +64,27 @@ const outline = computed(() =>
   }),
 );
 
-const traceFilePath = computed(() => {
-  if (!props.workingDir) return '';
-  const sessionsDir = `${props.workingDir}/.suncode/sessions`.replace(/\\/g, '/');
-  if (props.sessionId) {
-    return `${sessionsDir}/${props.sessionId}.json`;
+const traceFilePath = ref('');
+
+async function refreshTraceFilePath(): Promise<void> {
+  if (!props.sessionId) {
+    traceFilePath.value = '';
+    return;
   }
-  return sessionsDir;
-});
+  try {
+    traceFilePath.value = await bridge.getSessionFilePath(props.sessionId);
+  } catch {
+    traceFilePath.value = '';
+  }
+}
+
+watch(
+  () => props.sessionId,
+  () => {
+    void refreshTraceFilePath();
+  },
+  { immediate: true },
+);
 
 const systemPromptText = computed(() => outline.value.systemPrompt?.text ?? '');
 
@@ -85,11 +98,19 @@ const systemPromptPreview = computed(() => {
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function openTraceFolder(): void {
-  if (!traceFilePath.value) return;
-  if (props.sessionId) {
-    bridge.showItemInFolder(traceFilePath.value);
-  } else {
-    bridge.openPath(traceFilePath.value);
+  const p = traceFilePath.value;
+  if (!p) return;
+  bridge.showItemInFolder(p);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+async function copyTraceFilePath(): Promise<void> {
+  const p = traceFilePath.value;
+  if (!p) return;
+  try {
+    await navigator.clipboard.writeText(p);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -243,6 +264,14 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
     <div class="trace-path-bar">
       <span class="trace-path-label">会话文件</span>
       <span class="trace-path-value">{{ traceFilePath || '-' }}</span>
+      <button
+        v-if="traceFilePath"
+        class="trace-path-copy-btn"
+        title="复制绝对路径"
+        @click="copyTraceFilePath"
+      >
+        复制
+      </button>
     </div>
 
     <div class="trace-body">
@@ -485,6 +514,30 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.trace-path-copy-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+
+.trace-path-copy-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .trace-body {

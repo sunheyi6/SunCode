@@ -26,6 +26,7 @@ const updateStore = useUpdateStore();
 const statsStore = useStatsStore();
 const appVersion = ref('');
 const logPath = ref('');
+const loadedSkills = ref<Array<{ name: string; path: string; description: string }>>([]);
 
 type Section = 'general' | 'models' | 'behavior' | 'mcp' | 'skills' | 'usage' | 'about';
 const activeSection = ref<Section>(props.initialSection as Section);
@@ -77,7 +78,20 @@ onMounted(async () => {
   }
 
   void statsStore.loadTokenUsage();
+  void loadSkills();
 });
+
+async function loadSkills(): Promise<void> {
+  try {
+    console.log('[SettingsPanel] loadSkills() called');
+    const result = await bridge.getSkills();
+    console.log('[SettingsPanel] getSkills() returned:', result.length, 'skills', result);
+    loadedSkills.value = result;
+  } catch (err) {
+    console.error('[SettingsPanel] loadSkills() failed:', err);
+    loadedSkills.value = [];
+  }
+}
 
 function openLogFile(): void {
   if (logPath.value) {
@@ -465,39 +479,62 @@ function themeLabel(theme: AppSettings['theme']): string {
             </div>
           </section>
 
-          <section v-else-if="activeSection === 'skills'" class="settings-stack">
-            <div class="settings-card">
-              <label class="setting-row">
-                <span class="setting-copy">
-                  <strong>技能记忆数量</strong>
-                  <small>控制保留的经验条目数量。</small>
-                </span>
-                <span class="number-control">
-                  <input
-                    type="number"
-                    min="20"
-                    max="1000"
-                    :value="settingsStore.settings.maxLessons ?? 200"
-                    @change="updateMaxLessons"
-                  />
-                </span>
-              </label>
-              <div class="setting-row static">
-                <span class="setting-copy">
-                  <strong>已配置技能目录</strong>
-                  <small>{{ settingsStore.settings.skills.length }} 个目录。</small>
-                </span>
+            <section v-else-if="activeSection === 'skills'" class="settings-stack">
+              <div class="settings-card">
+                <label class="setting-row">
+                  <span class="setting-copy">
+                    <strong>技能记忆数量</strong>
+                    <small>控制保留的经验条目数量。</small>
+                  </span>
+                  <span class="number-control">
+                    <input
+                      type="number"
+                      min="20"
+                      max="1000"
+                      :value="settingsStore.settings.maxLessons ?? 200"
+                      @change="updateMaxLessons"
+                    />
+                  </span>
+                </label>
               </div>
-              <div v-if="settingsStore.settings.skills.length > 0" class="simple-list">
-                <div v-for="skill in settingsStore.settings.skills" :key="skill" class="simple-item">
-                  <span>
-                    <strong>{{ skill }}</strong>
+
+              <div class="settings-card">
+                <div class="setting-row static">
+                  <span class="setting-copy">
+                    <strong>内置技能</strong>
+                    <small>{{ loadedSkills.length }} 个可用技能。</small>
                   </span>
                 </div>
+                <div v-if="loadedSkills.length > 0" class="simple-list">
+                  <div v-for="skill in loadedSkills" :key="skill.name" class="simple-item">
+                    <span>
+                      <strong>{{ skill.name }}</strong>
+                      <small>{{ skill.description || '无描述' }}</small>
+                    </span>
+                    <span class="badge">已加载</span>
+                  </div>
+                </div>
+                <p v-else class="empty-text">正在加载…</p>
               </div>
-              <p v-else class="empty-text">暂无额外技能目录。</p>
-            </div>
-          </section>
+
+              <div class="settings-card">
+                <label class="setting-row static">
+                  <span class="setting-copy">
+                    <strong>已配置额外技能目录</strong>
+                    <small>{{ settingsStore.settings.skills.length }} 个目录。</small>
+                  </span>
+                </label>
+                <div v-if="settingsStore.settings.skills.length > 0" class="simple-list">
+                  <div v-for="skill in settingsStore.settings.skills" :key="skill" class="simple-item">
+                    <span>
+                      <strong>{{ skill }}</strong>
+                    </span>
+                    <span class="status-pill">外部</span>
+                  </div>
+                </div>
+                <p v-else class="empty-text">暂无额外技能目录。</p>
+              </div>
+            </section>
 
           <section v-else-if="activeSection === 'usage'" class="settings-stack">
             <TokenUsage />
@@ -999,6 +1036,15 @@ function themeLabel(theme: AppSettings['theme']): string {
   overflow-wrap: anywhere;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.badge {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-green) 13%, var(--color-surface));
+  color: var(--color-green);
   font-size: 12px;
 }
 

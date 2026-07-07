@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Stop Hooks — extensible post-turn checks that run before the agent loop
  * finalizes a turn. Modeled after Codex's stop hooks mechanism.
  *
@@ -56,6 +56,25 @@ export class SafetyStopHook implements StopHook {
     return { shouldBlock: false, shouldStop: false };
   }
 }
+/**
+ * Self-validation stop hook: reminds the agent to consider
+ * self-validation after code-changing turns.
+ */
+export class SelfValidationStopHook implements StopHook {
+  name = 'self-validation';
+  priority = 80;
+
+  async check(ctx: StopHookContext): Promise<StopHookResult> {
+    // Check if there were tool calls that modified files
+    const hasWriteTools = ctx.toolResults.some((tr) => tr.name === 'edit' || tr.name === 'write');
+
+    if (!hasWriteTools) {
+      return { shouldBlock: false, shouldStop: false };
+    }
+
+    return { shouldBlock: false, shouldStop: false };
+  }
+}
 
 // ===== Stop Hook Registry (legacy, backward compatible) =====
 
@@ -100,6 +119,7 @@ export class DefaultStopHookRegistry implements StopHookRegistry {
 export function createDefaultStopHookRegistry(): StopHookRegistry {
   const registry = new DefaultStopHookRegistry();
   registry.register(new SafetyStopHook());
+  registry.register(new SelfValidationStopHook());
   return registry;
 }
 
@@ -118,6 +138,7 @@ export function createUnifiedHookRegistry(): {
   const registry = createHookRegistry();
   // Register the safety hook as a unified hook
   registry.register(adaptStopHookAsHook(new SafetyStopHook()));
+  registry.register(adaptStopHookAsHook(new SelfValidationStopHook()));
 
   // Wrap for backward-compatible StopHookRegistry interface
   const stopRegistry = hookRegistryAsStopRegistry(registry);

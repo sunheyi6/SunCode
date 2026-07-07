@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   AgentStatus,
   AppSettings,
   BackgroundProcess,
@@ -213,6 +213,11 @@ const suncodeAPI = {
     return () => ipcRenderer.removeListener('agent:subagent-progress', handler);
   },
 
+  /** List built-in skills for display in settings UI */
+  async getSkills(): Promise<Array<{ name: string; path: string; description: string }>> {
+    return ipcRenderer.invoke('skills:list');
+  },
+
   /** Get token usage statistics */
   async getTokenUsage(): Promise<TokenUsageSummary> {
     return ipcRenderer.invoke('stats:getTokenUsage');
@@ -239,8 +244,16 @@ const suncodeAPI = {
   },
 
   /** Show native task completion notification */
-  showTaskCompleteNotification(title: string, body: string): void {
-    ipcRenderer.send('notify:task-complete', title, body);
+  showTaskCompleteNotification(title: string, body: string, sessionId?: string): void {
+    ipcRenderer.send('notify:task-complete', title, body, sessionId);
+  },
+
+  /** Listen for task completion notification clicks (to switch session) */
+  onTaskNotificationClick(callback: (data: { sessionId: string }) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string }): void =>
+      callback(data);
+    ipcRenderer.on('notify:task-click', handler);
+    return () => ipcRenderer.removeListener('notify:task-click', handler);
   },
 
   // ===== Model Discovery =====
@@ -413,6 +426,11 @@ const suncodeAPI = {
   /** Get the absolute path to the current app log file */
   async getLogPath(): Promise<string> {
     return ipcRenderer.invoke('app:getLogPath');
+  },
+
+  /** Get the absolute path to a session file by session id */
+  async getSessionFilePath(sessionId: string): Promise<string> {
+    return ipcRenderer.invoke('session:getFilePath', sessionId);
   },
 
   /** Open a file or folder in the system file explorer */

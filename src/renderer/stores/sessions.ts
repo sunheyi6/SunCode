@@ -33,8 +33,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     useChatStore().loadMessages(session.id, []);
   }
 
-  async function selectSession(id: string, maxMessages?: number): Promise<void> {
-    if (id === activeSessionId.value) return;
+  async function selectSession(id: string, maxMessages?: number, force = false): Promise<void> {
+    if (!force && id === activeSessionId.value) return;
     console.log(`[Sessions] selectSession id=${id.slice(-8)}`);
     // Prewarmed cache: use 10-msg snapshot for instant display, then reload full.
     const cached = sessionMessagesCache.get(id);

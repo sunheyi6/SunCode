@@ -55,6 +55,8 @@ export interface Message {
   systemPrompt?: string;
   /** Per-turn LLM request/response details (persisted for call trace panel). */
   turnDetails?: TurnDetail[];
+  /** Structured task plan accumulated across turns (persisted for the plan panel). */
+  taskPlan?: TaskPlan;
 }
 
 // ===== Tool Types =====
