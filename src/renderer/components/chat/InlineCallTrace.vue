@@ -8,7 +8,6 @@ import { buildSubagentInlineTrace, type InlineCallTraceEntry } from './call-trac
 import StreamingText from './StreamingText.vue';
 
 const INLINE_TEXT_LIMIT = 80;
-const INTERMEDIATE_PREVIEW_LIMIT = 120;
 
 const props = withDefaults(
   defineProps<{
@@ -161,16 +160,6 @@ function emptyOutputLabel(): string {
   return props.uiLanguage === 'en' ? 'No output yet' : '暂无输出';
 }
 
-// One-line preview for intermediate (non-final) model text blocks streamed
-// between tool calls. The UI exists to show the overall run logic, so long
-// intermediate narration is collapsed to a single line and expandable on demand.
-function intermediatePreview(text: string): string {
-  const firstLine = (text.trim().split('\n')[0] ?? '').trim();
-  const collapsed = firstLine.replace(/\s+/g, ' ');
-  if (collapsed.length <= INTERMEDIATE_PREVIEW_LIMIT) return collapsed;
-  return `${collapsed.slice(0, INTERMEDIATE_PREVIEW_LIMIT)}…`;
-}
-
 // ── subagent helpers ──
 
 function subResultTrace(result: SubagentResult, isStreaming: boolean) {
@@ -220,27 +209,6 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
         :class="{ active: entry.isActive }"
       >
         <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isActive" />
-      </div>
-
-      <!-- Previous text entries: intermediate model output, collapsed to a one-line preview -->
-      <details
-        v-else-if="entry.kind === 'text' && !entry.isCurrent"
-        class="streaming-intermediate-details"
-      >
-        <summary class="streaming-intermediate-summary">
-          <span class="streaming-intermediate-preview">{{ intermediatePreview(entry.text) }}</span>
-        </summary>
-        <div class="streaming-intermediate-full">
-          <StreamingText :text="entry.text" :is-streaming="false" />
-        </div>
-      </details>
-
-      <div
-        v-else-if="entry.kind === 'text' && entry.isCurrent"
-        class="streaming-process-text streaming-live-text"
-        :class="{ active: entry.isActive }"
-      >
-        <StreamingText :text="entry.text" :is-streaming="isStreaming" />
       </div>
 
       <!-- Mid-run guidance: shown inline (no standalone user bubble) -->
@@ -478,58 +446,6 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 
 .streaming-thinking-text {
   color: var(--color-text);
-}
-
-/* Intermediate (non-final) model text between tool calls: collapsed to a
-   one-line preview, expandable to read the full narration. */
-.streaming-intermediate-details {
-  min-width: 0;
-}
-
-.streaming-intermediate-summary {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  max-width: 100%;
-  cursor: pointer;
-  list-style: none;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--color-text-muted);
-  padding: 1px 0;
-}
-
-.streaming-intermediate-summary::-webkit-details-marker {
-  display: none;
-}
-
-.streaming-intermediate-summary::before {
-  content: '▸';
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: currentColor;
-  opacity: 0.6;
-  transition: transform 0.15s;
-}
-
-.streaming-intermediate-details[open] > .streaming-intermediate-summary::before {
-  transform: rotate(90deg);
-}
-
-.streaming-intermediate-preview {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.streaming-intermediate-full {
-  margin: 4px 0 6px;
-  padding: 4px 0;
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  line-height: 1.6;
 }
 
 .streaming-tool-details {
