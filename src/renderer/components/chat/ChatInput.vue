@@ -9,6 +9,7 @@ import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
 import CommandDropdown from './CommandDropdown.vue';
 import {
+  COLLAPSED_TEXTAREA_HEIGHT,
   getChatInputClasses,
   getComposerTextareaHeight,
   isInsideControlDropdown,
@@ -40,6 +41,20 @@ const chatStore = useChatStore();
 const inputText = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const inputRef = ref<HTMLElement | null>(null);
+const inputExpanded = ref(false);
+
+const isInputLong = computed(() => {
+  const text = inputText.value;
+  const lineCount = text.split('\n').length;
+  return lineCount > 5 || text.length > 400;
+});
+
+const isInputCollapsed = computed(() => isInputLong.value && !inputExpanded.value);
+
+function toggleInputExpand() {
+  inputExpanded.value = !inputExpanded.value;
+  void nextTick(() => resizeTextarea());
+}
 
 // --- Slash Command Dropdown ---
 const showCommandDropdown = ref(false);
@@ -217,6 +232,11 @@ function resizeTextarea(): void {
   const textarea = textareaRef.value;
   if (!textarea) return;
 
+  if (isInputCollapsed.value) {
+    textarea.style.height = `${COLLAPSED_TEXTAREA_HEIGHT}px`;
+    return;
+  }
+
   textarea.style.height = 'auto';
   textarea.style.height = `${getComposerTextareaHeight(textarea.scrollHeight)}px`;
 }
@@ -238,6 +258,7 @@ async function handleSend(): Promise<void> {
       textareaRef.value.value = '';
       textareaRef.value.style.height = '64px';
     }
+    inputExpanded.value = false;
     return;
   }
 
@@ -253,6 +274,7 @@ async function handleSend(): Promise<void> {
     textareaRef.value.value = '';
     textareaRef.value.style.height = '64px';
   }
+  inputExpanded.value = false;
 }
 
 // --- Input history (ArrowUp / ArrowDown cycling) ---
@@ -435,11 +457,20 @@ watch(
         ref="textareaRef"
         v-model="inputText"
         class="input-field"
+        :class="{ collapsed: isInputCollapsed }"
         :placeholder="placeholderText"
         rows="1"
         @input="resizeTextarea"
         @keydown="handleKeydown"
       />
+
+      <button
+        v-if="isInputLong"
+        class="input-expand-btn"
+        @click="toggleInputExpand"
+      >
+        {{ inputExpanded ? '收起 ▲' : `展开更多 ▼` }}
+      </button>
 
       <div class="composer-toolbar">
         <div class="toolbar-group toolbar-left">
@@ -704,6 +735,10 @@ watch(
   box-shadow: none;
 }
 
+.input-field.collapsed {
+  max-height: 120px;
+}
+
 .chat-input-empty .input-field {
   height: 62px;
   min-height: 62px;
@@ -717,6 +752,24 @@ watch(
 .input-field::placeholder {
   color: var(--color-text-muted);
   opacity: 0.76;
+}
+
+.input-expand-btn {
+  display: block;
+  margin: -4px 0 8px;
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  transition: all 0.12s ease;
+}
+
+.input-expand-btn:hover {
+  background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
+  color: var(--color-text);
 }
 
 .composer-toolbar,

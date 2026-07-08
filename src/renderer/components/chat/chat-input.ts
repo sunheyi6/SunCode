@@ -1,5 +1,6 @@
 const MIN_TEXTAREA_HEIGHT = 64;
 const MAX_TEXTAREA_HEIGHT = 200;
+export const COLLAPSED_TEXTAREA_HEIGHT = 120;
 const DROPDOWN_OPEN_BODY_CLASS = 'chat-input-dropdown-open';
 
 export function getComposerTextareaHeight(scrollHeight: number): number {

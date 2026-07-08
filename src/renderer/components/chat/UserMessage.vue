@@ -7,6 +7,17 @@ const props = defineProps<{
 }>();
 
 const copied = ref(false);
+const expanded = ref(false);
+
+const isLongContent = computed(() => {
+  const content = props.message.content;
+  const lineCount = content.split('\n').length;
+  return lineCount > 6 || content.length > 500;
+});
+
+function toggleExpand() {
+  expanded.value = !expanded.value;
+}
 
 const timeLabel = computed(() => {
   const d = new Date(props.message.timestamp);
@@ -42,7 +53,17 @@ async function copyContent(text: string) {
 <template>
   <div class="user-message">
     <div class="message-bubble">
-      <div class="message-text">{{ message.content }}</div>
+      <div
+        class="message-text"
+        :class="{ collapsed: isLongContent && !expanded }"
+      >{{ message.content }}</div>
+      <button
+        v-if="isLongContent"
+        class="expand-btn"
+        @click="toggleExpand"
+      >
+        {{ expanded ? '收起 ▲' : `展开更多 ${message.content.split('\n').length} 行 ▼` }}
+      </button>
     </div>
     <div class="message-footer">
       <span class="message-time">{{ timeLabel }}</span>
@@ -79,6 +100,30 @@ async function copyContent(text: string) {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.message-text.collapsed {
+  max-height: 160px;
+  overflow: hidden;
+  position: relative;
+}
+
+.expand-btn {
+  display: block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  transition: all 0.12s ease;
+}
+
+.expand-btn:hover {
+  background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
+  color: var(--color-text);
 }
 
 .message-footer {
