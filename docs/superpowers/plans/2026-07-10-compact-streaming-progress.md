@@ -4,7 +4,7 @@
 
 **Goal:** 将执行中的助手输出展示为简短摘要与结构化工具/命令交替出现，并在执行结束后只显示最终回答。
 
-**Architecture:** 保留现有 `ChatMessage.blocks` 和 `InlineCallTraceEntry` 顺序数据，不改变 IPC、消息持久化或工具协议。系统提示词要求模型把面向用户的过程文本写成最多五行的关键摘要；renderer 在流式阶段把 `text` block 放进过程时间线，隐藏重复的正文区域，结束后恢复最终正文展示。前端不截断、不改写摘要。
+**Architecture:** 保留现有 `ChatMessage.blocks` 和 `InlineCallTraceEntry` 顺序数据，不改变 IPC、消息持久化或工具协议。系统提示词要求模型把面向用户的过程文本写成最多五行的关键摘要；renderer 在流式阶段把 `text` block 放进过程时间线，隐藏重复的正文区域，结束后恢复最终正文展示。摘要仅是 UI 投影，底层 `content`、`blocks`、turn details 和持久化数据保持完整；前端不截断、不改写、不删除原始内容。
 
 **Tech Stack:** Vue 3、TypeScript strict、Pinia stores、Vitest、Biome。
 
