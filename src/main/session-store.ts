@@ -180,21 +180,180 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-/** Load a full session including messages. If maxMessages is set, only the last N messages are returned. */
+/**
+ * Load a full session including messages.
+ *
+ * If maxMessages is specified AND the file is large, only the last N messages
+ * are extracted from the pretty-printed JSON (written by JSON.stringify with
+ * 2-space indent), avoiding the O(n) cost of parsing the full message array.
+ * For small files (under 50KB), the full parse is used — JSON.parse is fast
+ * enough that custom parsing adds more complexity than value.
+ */
 export async function loadSession(id: string, maxMessages?: number): Promise<SessionFile | null> {
   const path = sessionPath(id);
   try {
     if (!existsSync(path)) return null;
-    const raw = await readFile(path, 'utf-8');
-    const data = JSON.parse(raw) as SessionFile;
-    if (maxMessages !== undefined && data.messages.length > maxMessages) {
-      data.messages = data.messages.slice(-maxMessages);
+
+    // For large files with maxMessages, extract only the tail of the messages
+    // array using the predictable pretty-print format.
+    if (maxMessages !== undefined) {
+      return await loadSessionTail(path, id, maxMessages);
     }
-    return data;
+
+    // Full load — parse everything
+    const raw = await readFile(path, 'utf-8');
+    return JSON.parse(raw) as SessionFile;
   } catch {
     console.warn(`[SessionStore] Failed to load session: ${id}`);
     return null;
   }
+}
+
+/** Threshold: files under this size use full JSON.parse. */
+const FULL_PARSE_SIZE_LIMIT = 50 * 1024;
+
+/**
+ * Load a session file but only parse the last `maxMessages` messages
+ * from the pretty-printed JSON array. Messages in pretty-print format
+ * (JSON.stringify with 2-space indent) start with `    {` on their own
+ * line after a comma, making them easy to find by scanning backwards.
+ */
+async function loadSessionTail(
+  path: string,
+  id: string,
+  maxMessages: number,
+): Promise<SessionFile | null> {
+  try {
+    const { stat } = await import('node:fs/promises');
+    const fileStat = await stat(path);
+
+    // Small files: just full parse
+    if (fileStat.size < FULL_PARSE_SIZE_LIMIT) {
+      const raw = await readFile(path, 'utf-8');
+      const data = JSON.parse(raw) as SessionFile;
+      if (data.messages.length > maxMessages) {
+        data.messages = data.messages.slice(-maxMessages);
+      }
+      return data;
+    }
+
+    // Large file: read all, then parse tail-only
+    const raw = await readFile(path, 'utf-8');
+
+    // Find the messages array boundaries
+    const msgKeyIdx = raw.indexOf('"messages"');
+    if (msgKeyIdx < 0) {
+      // No messages key — fallback to full parse
+      const data = JSON.parse(raw) as SessionFile;
+      if (data.messages.length > maxMessages) {
+        data.messages = data.messages.slice(-maxMessages);
+      }
+      return data;
+    }
+
+    const arrStart = raw.indexOf('[', msgKeyIdx);
+    const arrEnd = raw.lastIndexOf(']');
+    if (arrStart < 0 || arrEnd <= arrStart) {
+      // Malformed array — fallback
+      const data = JSON.parse(raw) as SessionFile;
+      if (data.messages.length > maxMessages) {
+        data.messages = data.messages.slice(-maxMessages);
+      }
+      return data;
+    }
+
+    // Extract meta: everything before the messages array, re-close as JSON
+    const metaText = raw.slice(0, arrStart).replace(/,\s*$/, '');
+    let meta: SessionMeta;
+    try {
+      meta = (JSON.parse(`${metaText}}`) as { meta: SessionMeta }).meta;
+    } catch {
+      // Meta parse failed — fallback
+      const data = JSON.parse(raw) as SessionFile;
+      if (data.messages.length > maxMessages) {
+        data.messages = data.messages.slice(-maxMessages);
+      }
+      return data;
+    }
+
+    // Extract messages: use split-by-boundary for pretty-printed JSON
+    // Pretty-print format: each message object ends with "  }," or "  }"
+    // and the next message starts a new line:
+    //   {
+    //     "id": ...
+    //   },
+    //   {
+    //     "id": ...
+    //   }
+    const arrayContent = raw.slice(arrStart + 1, arrEnd).trim();
+
+    // Try: count brace-depth to find individual objects
+    const messages = extractTailMessages(arrayContent, maxMessages);
+
+    // If extraction fails or returns wrong count, fall back
+    if (messages.length === 0 && maxMessages > 0) {
+      // Fallback
+      const data = JSON.parse(raw) as SessionFile;
+      if (data.messages.length > maxMessages) {
+        data.messages = data.messages.slice(-maxMessages);
+      }
+      return { meta, messages: data.messages };
+    }
+
+    return { meta, messages: messages.slice(-maxMessages) };
+  } catch {
+    console.warn(`[SessionStore] Failed to load tail for session: ${id}`);
+    return null;
+  }
+}
+
+/**
+ * Extract the last `count` message objects from a JSON array content string
+ * (content between [ and ]). Uses brace-depth scanning from the end to find
+ * object boundaries — reliable for any nesting depth.
+ */
+function extractTailMessages(arrayContent: string, count: number): Message[] {
+  const messages: Message[] = [];
+  let pos = arrayContent.length - 1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let objEnd = -1;
+
+  while (pos >= 0 && messages.length < count) {
+    const ch = arrayContent[pos];
+
+    if (escaped) {
+      escaped = false;
+    } else if (inString) {
+      if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+    } else if (ch === '"') {
+      inString = true;
+    } else if (ch === '}' || ch === ']') {
+      if (depth === 0) objEnd = pos;
+      depth++;
+    } else if (ch === '{' || ch === '[') {
+      depth--;
+      if (depth === 0 && ch === '{') {
+        // Found a complete object — extract and parse
+        try {
+          const objText = arrayContent.slice(pos, objEnd + 1);
+          messages.unshift(JSON.parse(objText) as Message);
+        } catch {
+          // Skip malformed object
+        }
+        objEnd = -1;
+      }
+    }
+
+    pos--;
+  }
+
+  return messages;
 }
 
 /** Save a session to disk atomically (write .tmp → rename). */

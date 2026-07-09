@@ -18,6 +18,9 @@ const workerPort = parentPort;
 console.log('[Worker] Started');
 
 /** Per-session agent instances. Keyed by sessionId. */
+const agentWorkingDirs = new Map<string, string>();
+
+/** Per-session agent instances. Keyed by sessionId. */
 const agents = new Map<string, Agent>();
 let settings: AppSettings = { ...DEFAULT_SETTINGS };
 const backgroundProcessMonitor = new BackgroundProcessMonitor((item, exitCode) => {
@@ -253,6 +256,12 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
         console.error('[Worker] setWorkingDir: missing sessionId');
         return;
       }
+      // Skip if the working directory hasn't changed
+      if (agentWorkingDirs.get(sid) === msg.path) {
+        console.log('[Worker] Working dir unchanged, skip session=', sid.slice(-8));
+        return;
+      }
+      agentWorkingDirs.set(sid, msg.path);
       console.log('[Worker] Working dir set:', msg.path, 'session=', sid.slice(-8));
       withSessionLock(sid, async () => {
         const existing = agents.get(sid);

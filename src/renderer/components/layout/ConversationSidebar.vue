@@ -38,6 +38,9 @@ const selectedIds = ref<Set<string>>(new Set());
 const collapsedGroups = ref<Set<string>>(new Set());
 const expandedSessionGroups = ref<Set<string>>(new Set());
 
+/** Toggle between flat time-ordered list and folder-grouped view. Default = flat list. */
+const groupByFolder = ref(false);
+
 function toggleGroup(path: string) {
   const next = new Set(collapsedGroups.value);
   if (next.has(path)) {
@@ -140,8 +143,14 @@ watch(activeGroupPath, (newPath) => {
 
 const allDisplayedIds = computed(() => {
   const ids: string[] = [];
-  for (const group of visibleGroupedSessions.value) {
-    for (const s of group.sessions) {
+  if (groupByFolder.value) {
+    for (const group of visibleGroupedSessions.value) {
+      for (const s of group.sessions) {
+        ids.push(s.id);
+      }
+    }
+  } else {
+    for (const s of filteredSessions.value) {
       ids.push(s.id);
     }
   }
@@ -280,9 +289,14 @@ function formatTime(value: string): string {
       </div>
 
       <div class="scope-toolbar">
-        <button class="scope-chip active" type="button">
+        <button
+          class="scope-chip"
+          :class="{ active: groupByFolder }"
+          type="button"
+          @click="groupByFolder = !groupByFolder"
+        >
           <span>#</span>
-          <span>分组</span>
+          <span>{{ groupByFolder ? '分组' : '时间' }}</span>
         </button>
         <span class="scope-spacer" />
         <button
@@ -308,88 +322,137 @@ function formatTime(value: string): string {
         <span>{{ allSelected ? '取消全选' : '全选' }}</span>
       </label>
 
-      <section
-        v-for="group in visibleGroupedSessions"
-        :key="group.path"
-        class="project-group"
-        :class="[
-          `tone-${groupTone(group.path)}`,
-          { active: group.path === activeGroupPath },
-        ]"
-      >
-        <div
-          class="project-heading"
-          :class="{ collapsed: collapsedGroups.has(group.path) }"
-          :title="group.path"
-          @click="toggleGroup(group.path)"
+      <!-- Folder-grouped view -->
+      <template v-if="groupByFolder">
+        <section
+          v-for="group in visibleGroupedSessions"
+          :key="group.path"
+          class="project-group"
+          :class="[
+            `tone-${groupTone(group.path)}`,
+            { active: group.path === activeGroupPath },
+          ]"
         >
-          <span class="project-icon">#</span>
-          <span class="project-name">{{ projectName(group.path) }}</span>
-          <span class="project-chevron">{{ collapsedGroups.has(group.path) ? '›' : '⌄' }}</span>
-          <span class="project-count">{{ group.totalCount }}</span>
-          <button
-            class="project-add"
-            title="在此项目中新建任务"
-            @click.stop="createSessionInGroup(group.path)"
-          >
-            ⊕
-          </button>
-        </div>
-
-        <div v-if="!collapsedGroups.has(group.path)" class="project-sessions">
           <div
-            v-for="session in group.sessions"
-            :key="session.id"
-            class="conversation-row"
-            :class="{
-              active: session.id === sessionsStore.activeSessionId,
-              selected: selectedIds.has(session.id),
-            }"
+            class="project-heading"
+            :class="{ collapsed: collapsedGroups.has(group.path) }"
+            :title="group.path"
+            @click="toggleGroup(group.path)"
           >
-            <!-- Checkbox in select mode -->
-            <label v-if="selectMode" class="select-checkbox">
-              <input
-                type="checkbox"
-                :checked="selectedIds.has(session.id)"
-                @change="toggleSelect(session.id)"
-              />
-            </label>
-
+            <span class="project-icon">#</span>
+            <span class="project-name">{{ projectName(group.path) }}</span>
+            <span class="project-chevron">{{ collapsedGroups.has(group.path) ? '›' : '⌄' }}</span>
+            <span class="project-count">{{ group.totalCount }}</span>
             <button
-              class="conversation-item"
-              :class="{ running: chatStore.streamingSessionIds.has(session.id) }"
-              @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
+              class="project-add"
+              title="在此项目中新建任务"
+              @click.stop="createSessionInGroup(group.path)"
             >
-              <span class="conversation-mark" :class="{ running: chatStore.streamingSessionIds.has(session.id) }" />
-              <span class="conversation-name">{{ session.name }}</span>
-              <span class="conversation-time">{{ formatTime(session.updated) }}</span>
-            </button>
-
-            <!-- Delete button on hover (hidden in select mode) -->
-            <button
-              v-if="!selectMode"
-              class="delete-btn"
-              title="删除对话"
-              @click.stop="deleteSingle(session.id)"
-            >
-              ×
+              ⊕
             </button>
           </div>
 
+          <div v-if="!collapsedGroups.has(group.path)" class="project-sessions">
+            <div
+              v-for="session in group.sessions"
+              :key="session.id"
+              class="conversation-row"
+              :class="{
+                active: session.id === sessionsStore.activeSessionId,
+                selected: selectedIds.has(session.id),
+              }"
+            >
+              <!-- Checkbox in select mode -->
+              <label v-if="selectMode" class="select-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.has(session.id)"
+                  @change="toggleSelect(session.id)"
+                />
+              </label>
+
+              <button
+                class="conversation-item"
+                :class="{ running: chatStore.streamingSessionIds.has(session.id) }"
+                @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
+              >
+                <span class="conversation-mark" :class="{ running: chatStore.streamingSessionIds.has(session.id) }" />
+                <span class="conversation-name">{{ session.name }}</span>
+                <span class="conversation-time">{{ formatTime(session.updated) }}</span>
+              </button>
+
+              <!-- Delete button on hover (hidden in select mode) -->
+              <button
+                v-if="!selectMode"
+                class="delete-btn"
+                title="删除对话"
+                @click.stop="deleteSingle(session.id)"
+              >
+                ×
+              </button>
+            </div>
+
+            <button
+              v-if="group.hiddenCount > 0"
+              class="show-more-sessions"
+              type="button"
+              @click="showAllSessions(group.path)"
+            >
+              显示其余 {{ group.hiddenCount }} 个对话
+            </button>
+          </div>
+        </section>
+
+        <div v-if="groupedSessions.length === 0" class="empty-conversations">
+          没有找到匹配的对话
+        </div>
+      </template>
+
+      <!-- Flat time-ordered view (default) -->
+      <template v-else>
+        <div
+          v-for="session in filteredSessions"
+          :key="session.id"
+          class="conversation-row"
+          :class="{
+            active: session.id === sessionsStore.activeSessionId,
+            selected: selectedIds.has(session.id),
+          }"
+        >
+          <!-- Checkbox in select mode -->
+          <label v-if="selectMode" class="select-checkbox">
+            <input
+              type="checkbox"
+              :checked="selectedIds.has(session.id)"
+              @change="toggleSelect(session.id)"
+            />
+          </label>
+
           <button
-            v-if="group.hiddenCount > 0"
-            class="show-more-sessions"
-            type="button"
-            @click="showAllSessions(group.path)"
+            class="conversation-item"
+            :class="{ running: chatStore.streamingSessionIds.has(session.id) }"
+            @click="selectMode ? toggleSelect(session.id) : sessionsStore.selectSession(session.id)"
           >
-            显示其余 {{ group.hiddenCount }} 个对话
+            <span class="conversation-mark" :class="{ running: chatStore.streamingSessionIds.has(session.id) }" />
+            <span class="conversation-name">{{ session.name }}</span>
+            <span class="conversation-time">{{ formatTime(session.updated) }}</span>
+          </button>
+
+          <!-- Delete button on hover (hidden in select mode) -->
+          <button
+            v-if="!selectMode"
+            class="delete-btn"
+            title="删除对话"
+            @click.stop="deleteSingle(session.id)"
+          >
+            ×
           </button>
         </div>
-      </section>
 
-      <div v-if="groupedSessions.length === 0" class="empty-conversations">
-        没有找到匹配的对话
-      </div>
+        <div v-if="filteredSessions.length === 0" class="empty-conversations">
+          没有找到匹配的对话
+        </div>
+      </template>
     </div>
 
     <!-- Batch action bar -->

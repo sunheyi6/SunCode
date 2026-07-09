@@ -3,8 +3,10 @@ import type { GitBranch } from '@shared/types';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { bridge } from '../../api/bridge';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
+import { useAgentStore } from '../../stores/agent';
 import { useSessionsStore } from '../../stores/sessions';
 
+const agentStore = useAgentStore();
 const sessionsStore = useSessionsStore();
 const gitBranch = ref<string | null>(null);
 const gitError = ref(false);
@@ -32,13 +34,26 @@ const folderName = computed(() => {
   return segments[segments.length - 1] || dir;
 });
 
-// Sync chat header info (conversation name · folder · git branch) to the
+const tokenDisplay = computed(() => {
+  const t = agentStore.status.tokenUsage;
+  if (t.total === 0) return '';
+  const fmt = (n: number) =>
+    n >= 1_000_000
+      ? `${(n / 1_000_000).toFixed(1)}M`
+      : n >= 1_000
+        ? `${(n / 1_000).toFixed(1)}k`
+        : `${n}`;
+  return `△ ${fmt(t.total)}`;
+});
+
+// Sync chat header info (conversation name · folder · git branch · tokens) to the
 // global window title so the title bar row stays consistent with the header.
 const titleBarText = computed(() => {
   const parts: string[] = [];
   if (activeSession.value?.name) parts.push(activeSession.value.name);
   if (folderName.value) parts.push(folderName.value);
   if (gitBranch.value) parts.push(gitBranch.value);
+  if (tokenDisplay.value) parts.push(tokenDisplay.value);
   return parts.join(' · ');
 });
 
@@ -207,6 +222,8 @@ onBeforeUnmount(() => {
         ↻ {{ runningBgCount }} 个后台
       </span>
 
+      <span v-if="tokenDisplay" class="header-tokens" title="当前对话 Token 消耗">{{ tokenDisplay }}</span>
+
       <button class="more-btn" title="更多">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <circle cx="12" cy="5" r="2" />
@@ -303,6 +320,20 @@ onBeforeUnmount(() => {
   font-weight: 550;
   font-size: 11px;
 }
+
+  .header-tokens {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border: none;
+    border-radius: var(--border-radius-sm);
+    background: transparent;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    user-select: none;
+  }
 
 .header-git-dropdown {
   position: relative;

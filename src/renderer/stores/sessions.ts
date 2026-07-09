@@ -71,7 +71,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     isLoaded.value = true;
   }
 
-  /** Load 10-message snapshots for all remaining sessions in background. */
+  /** Load message snapshots for all remaining sessions in background. */
   function prewarmRemaining(maxMessages: number): void {
     const remaining = sortedSessions.value.slice(1);
     for (const session of remaining) {
