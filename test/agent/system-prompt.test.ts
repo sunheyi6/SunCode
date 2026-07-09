@@ -67,6 +67,14 @@ describe('buildSystemPrompt', () => {
     );
   });
 
+  it('requires concise user-facing progress summaries before tools', () => {
+    const prompt = parsePrompt();
+
+    expect(prompt.guidelines).toContain(
+      'For user-facing progress between tool calls, output only a concise key-logic summary of at most five lines, then use the concrete tool or command. Do not expose full internal reasoning.',
+    );
+  });
+
   it('is deterministic for the same input', () => {
     const input = baseInput({ memoryContent: 'test memory' });
     expect(buildSystemPrompt(input)).toBe(buildSystemPrompt(input));

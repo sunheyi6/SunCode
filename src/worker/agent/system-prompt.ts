@@ -121,6 +121,9 @@ function getToolGuidelines(toolNames: string[]): string[] {
     }
   }
   result.push('Be concise in your responses');
+  result.push(
+    'For user-facing progress between tool calls, output only a concise key-logic summary of at most five lines, then use the concrete tool or command. Do not expose full internal reasoning.',
+  );
   result.push('Show file paths clearly when working with files');
   result.push(
     'If context.relevantLessons is present, review it before acting and apply its solution when it matches the current code and request. If a similar failure happens again, use search_lessons for details.',
