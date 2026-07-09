@@ -10,6 +10,7 @@ release/
 .suncode/
 .superpowers/
 .playwright-mcp/
+.worktrees/
 
 # Environment files
 .env
