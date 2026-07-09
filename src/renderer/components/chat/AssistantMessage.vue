@@ -168,11 +168,11 @@ async function copyContent() {
         </div>
       </details>
 
-      <!-- Visible reply text: always render the assistant's answer in the main
-           content area. The streaming InlineCallTrace only shows process
-           entries (thinking / tools / guidance), so text is not double-rendered. -->
+      <!-- Render the complete assistant answer in the main content area only
+           after streaming. During streaming, text blocks are shown as ordered
+           progress entries in InlineCallTrace and remain in the message data. -->
       <div
-        v-if="hasContent"
+        v-if="hasContent && !message.isStreaming"
         class="message-content"
         :class="{ streaming: message.isStreaming }"
       >

@@ -406,6 +406,45 @@ describe('buildInlineCallTrace', () => {
     ]);
   });
 
+  test('keeps concise progress summaries beside tools in streaming order', () => {
+    const message: ChatMessage = {
+      id: 'a-progress-summary',
+      role: 'assistant',
+      content: '已定位启动入口',
+      thinking: '',
+      timestamp: 1,
+      isStreaming: true,
+      uiLanguage: 'zh',
+      blocks: [
+        { id: 'b1', type: 'text', text: '已定位启动入口' },
+        {
+          id: 'b2',
+          type: 'tool_call',
+          toolCall: {
+            type: 'tool_call',
+            id: 'tc1',
+            name: 'grep',
+            arguments: '{"pattern":"Git Panel"}',
+          },
+        },
+      ],
+      toolCalls: [
+        {
+          type: 'tool_call',
+          id: 'tc1',
+          name: 'grep',
+          arguments: '{"pattern":"Git Panel"}',
+          status: 'running',
+        },
+      ],
+    };
+
+    expect(buildInlineCallTrace(message).entries).toMatchObject([
+      { kind: 'text', text: '已定位启动入口' },
+      { kind: 'tools', isCurrent: true },
+    ]);
+  });
+
   test('merges adjacent commands into a compact command count', () => {
     const message: ChatMessage = {
       id: 'a-commands',

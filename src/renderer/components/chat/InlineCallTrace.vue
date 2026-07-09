@@ -211,6 +211,14 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
         <StreamingText :text="entry.text" :is-streaming="isStreaming && entry.isActive" />
       </div>
 
+      <div
+        v-else-if="entry.kind === 'text'"
+        class="streaming-process-text streaming-progress-summary"
+        :class="{ active: entry.isActive }"
+      >
+        <StreamingText :text="entry.text" :is-streaming="entry.isActive" />
+      </div>
+
       <!-- Mid-run guidance: shown inline (no standalone user bubble) -->
       <div
         v-else-if="entry.kind === 'guidance'"
@@ -445,6 +453,16 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 }
 
 .streaming-thinking-text {
+  color: var(--color-text);
+}
+
+.streaming-progress-summary {
+  border-left: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  padding-left: 8px;
+  color: var(--color-text-secondary);
+}
+
+.streaming-progress-summary.active {
   color: var(--color-text);
 }
 
