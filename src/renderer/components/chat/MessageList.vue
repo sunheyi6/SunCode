@@ -201,6 +201,37 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: var(--spacing-md) 0;
   position: relative;
+  /* Always-visible thicker scrollbar, toned to match panel background */
+  scrollbar-width: auto;
+  scrollbar-color: var(--color-bg-tertiary) var(--color-bg);
+}
+
+.message-list::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.message-list::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+.message-list::-webkit-scrollbar-thumb {
+  background: var(--color-bg-tertiary);
+  border-radius: 5px;
+  border: 2px solid var(--color-bg);
+  background-clip: padding-box;
+}
+
+.message-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-overlay);
+  border: 2px solid var(--color-bg);
+  background-clip: padding-box;
+}
+
+.message-list::-webkit-scrollbar-thumb:active {
+  background: var(--color-text-muted);
+  border: 2px solid var(--color-bg);
+  background-clip: padding-box;
 }
 
 /* ---- 滚动到底部按钮 ---- */

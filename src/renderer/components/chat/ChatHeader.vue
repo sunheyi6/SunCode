@@ -5,6 +5,8 @@ import { bridge } from '../../api/bridge';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
 import { useAgentStore } from '../../stores/agent';
 import { useSessionsStore } from '../../stores/sessions';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 import { formatHeaderTokenUsage } from './header-token-usage';
 
 const agentStore = useAgentStore();
@@ -193,10 +195,16 @@ onBeforeUnmount(() => {
           title="切换 Git 分支"
           @click.stop="toggleBranchMenu"
         >
-        <template v-if="gitError">⚠ git</template>
-        <template v-else-if="gitBranch">⑂ {{ gitBranch }}</template>
+        <template v-if="gitError">
+          <AppIcon name="alert-triangle" :size="13" /> git
+        </template>
+        <template v-else-if="gitBranch">
+          <AppIcon name="git-branch" :size="13" /> {{ gitBranch }}
+        </template>
         <template v-else>—</template>
-          <span v-if="gitBranch && !gitError" class="git-chevron">⌄</span>
+          <span v-if="gitBranch && !gitError" class="git-chevron">
+            <AppIcon name="chevron-down" :size="13" />
+          </span>
         </button>
 
         <div v-if="branchMenuOpen" class="branch-menu" role="menu">
@@ -212,7 +220,9 @@ onBeforeUnmount(() => {
               :disabled="branch.current || branchSwitching"
               @click.stop="checkoutBranch(branch)"
             >
-              <span class="branch-check">{{ branch.current ? '✓' : '' }}</span>
+              <span class="branch-check">
+                <AppIcon v-if="branch.current" name="check" :size="12" />
+              </span>
               <span class="branch-label">{{ branch.name }}</span>
             </button>
           </template>
@@ -408,9 +418,10 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 8px;
-  background: var(--color-bg);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+  border-radius: var(--border-radius-lg);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--shadow-lg);
 }
 
 .branch-menu-item {
@@ -421,7 +432,7 @@ onBeforeUnmount(() => {
   min-height: 28px;
   padding: 5px 8px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--border-radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;

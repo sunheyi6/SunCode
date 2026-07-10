@@ -6,7 +6,14 @@ import electronRenderer from 'vite-plugin-electron-renderer';
 
 export default defineConfig({
   plugins: [
-    vue(),
+    vue({
+      template: {
+        compilerOptions: {
+          // vanilla-colorful custom elements
+          isCustomElement: (tag) => tag.endsWith('-color-picker') || tag === 'hex-input',
+        },
+      },
+    }),
     electron([
       // Main process
       {

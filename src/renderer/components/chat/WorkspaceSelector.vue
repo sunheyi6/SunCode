@@ -9,6 +9,8 @@ import {
 } from '../../composables/useDropdown';
 import { useToast } from '../../composables/useToast';
 import { useSessionsStore } from '../../stores/sessions';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -166,9 +168,9 @@ defineExpose({
         aria-haspopup="menu"
         @click="toggle"
       >
-        <span class="folder-icon" aria-hidden="true">📁</span>
+        <span class="folder-icon" aria-hidden="true"><AppIcon name="folder" :size="14" /></span>
         <span class="workspace-name">{{ workspaceName }}</span>
-        <span class="chevron" aria-hidden="true">⌄</span>
+        <span class="chevron" aria-hidden="true"><AppIcon name="chevron-down" :size="14" /></span>
       </button>
       <div v-if="isOpen" class="dropdown-menu folder-menu" role="menu">
         <button
@@ -180,7 +182,7 @@ defineExpose({
           role="menuitem"
           @click="switchToFolder(item)"
         >
-          <span class="item-folder-icon">📁</span>
+          <span class="item-folder-icon"><AppIcon name="folder" :size="14" /></span>
           <span class="item-info">
             <span class="item-label">{{ item.path.split(/[\\/]/).filter(Boolean).pop() || item.path }}</span>
             <span class="item-desc">{{ item.path }}</span>
@@ -193,7 +195,7 @@ defineExpose({
           role="menuitem"
           @click="selectFolder"
         >
-          <span class="item-icon-pick">＋</span>
+          <span class="item-icon-pick"><AppIcon name="plus" :size="14" /></span>
           <span class="item-info">
             <span class="item-label">选择其他文件夹...</span>
           </span>
@@ -209,9 +211,9 @@ defineExpose({
         title="切换 Git 分支"
         @click="toggleBranch"
       >
-        <span class="branch-icon" aria-hidden="true">⑂</span>
+        <span class="branch-icon" aria-hidden="true"><AppIcon name="git-branch" :size="14" /></span>
         <span class="branch-name">{{ gitBranch }}</span>
-        <span class="chevron" aria-hidden="true">⌄</span>
+        <span class="chevron" aria-hidden="true"><AppIcon name="chevron-down" :size="14" /></span>
       </button>
       <div v-if="isBranchOpen" class="dropdown-menu branch-menu" role="menu">
         <div v-if="isLoadingBranches" class="branch-loading">加载中...</div>
@@ -225,7 +227,7 @@ defineExpose({
             role="menuitem"
             @click="switchBranch(branch.name)"
           >
-            <span class="item-check">⑂</span>
+            <span class="item-check"><AppIcon name="git-branch" :size="13" /></span>
             <span class="item-label">{{ branch.name }}</span>
           </button>
         </template>
@@ -361,9 +363,11 @@ defineExpose({
   max-height: 280px;
   overflow-y: auto;
   border: 1px solid var(--border-color-strong);
-  border-radius: 14px;
-  background: var(--color-bg);
-  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
+  border-radius: var(--border-radius-lg);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
   z-index: 100;
 }
 
@@ -410,7 +414,7 @@ defineExpose({
   width: 100%;
   padding: 8px 11px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--border-radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px;

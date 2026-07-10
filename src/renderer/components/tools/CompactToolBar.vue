@@ -3,6 +3,8 @@ import type { ToolCallContent } from '@shared/types';
 import { computed } from 'vue';
 import { parseToolArguments } from '../../utils/tool-presentation';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 const props = defineProps<{
@@ -119,7 +121,7 @@ function resultCommand(call: ToolCallContent): string | undefined {
     <!-- File inspect (merged) -->
     <div v-if="inspectCalls.length > 0" class="compact-line inspect-line" :class="{ 'status-running': inspectRunning }">
       <span v-if="inspectRunning" class="compact-breathe-dot" />
-      <span class="compact-icon">$</span>
+      <span class="compact-icon"><AppIcon name="search" :size="12" /></span>
       <span class="compact-label">{{ inspectLabel }}</span>
       <span class="compact-target">{{ inspectTarget }}</span>
       <span class="compact-status">{{ inspectStatus }}</span>
@@ -129,7 +131,7 @@ function resultCommand(call: ToolCallContent): string | undefined {
     <div v-for="call in bashCalls" :key="call.id">
       <div class="compact-line" :class="callStatusClass(call)">
         <span v-if="call.status === 'running'" class="compact-breathe-dot" />
-        <span class="compact-icon">&gt;</span>
+        <span class="compact-icon"><AppIcon name="terminal" :size="12" /></span>
         <span class="compact-label">{{ callLabel(call.name) }}</span>
         <span class="compact-target">{{ callTarget(call) }}</span>
         <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
@@ -146,7 +148,7 @@ function resultCommand(call: ToolCallContent): string | undefined {
     <div v-for="call in editCalls" :key="call.id">
       <div class="compact-line" :class="callStatusClass(call)">
         <span v-if="call.status === 'running'" class="compact-breathe-dot" />
-        <span class="compact-icon">+</span>
+        <span class="compact-icon"><AppIcon name="square-pen" :size="12" /></span>
         <span class="compact-label">{{ callLabel(call.name) }}</span>
         <span class="compact-target">{{ callTarget(call) }}</span>
         <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
@@ -160,7 +162,7 @@ function resultCommand(call: ToolCallContent): string | undefined {
     <!-- Subagent -->
     <div v-for="call in subagentCalls" :key="call.id" class="compact-line" :class="callStatusClass(call)">
       <span v-if="call.status === 'running'" class="compact-breathe-dot" />
-      <span class="compact-icon">@</span>
+      <span class="compact-icon"><AppIcon name="bot" :size="12" /></span>
       <span class="compact-label">{{ callLabel(call.name) }}</span>
       <span class="compact-target">{{ callTarget(call) }}</span>
       <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
@@ -169,7 +171,7 @@ function resultCommand(call: ToolCallContent): string | undefined {
     <!-- Other -->
     <div v-for="call in otherCalls" :key="call.id" class="compact-line" :class="callStatusClass(call)">
       <span v-if="call.status === 'running'" class="compact-breathe-dot" />
-      <span class="compact-icon">*</span>
+      <span class="compact-icon"><AppIcon name="wrench" :size="12" /></span>
       <span class="compact-label">{{ call.name }}</span>
       <span class="compact-status">{{ call.status === 'running' ? '执行中...' : call.result?.success === false ? '失败' : '完成' }}</span>
     </div>
@@ -187,7 +189,13 @@ function resultCommand(call: ToolCallContent): string | undefined {
 .compact-line.status-running { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
 .compact-line.status-failed  { color: var(--color-red); }
 
-.compact-icon   { flex-shrink: 0; font-size: 11px; }
+.compact-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
 .compact-label  { flex-shrink: 0; font-size: 10px; padding: 0 4px; border-radius: 2px; background: var(--color-surface); color: var(--color-text-muted); }
 .compact-target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-family: var(--font-mono); font-size: 10px; color: var(--color-text-secondary); }
 .compact-status { flex-shrink: 0; font-size: 10px; color: var(--color-text-muted); }

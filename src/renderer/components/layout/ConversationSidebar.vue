@@ -5,6 +5,8 @@ import { bridge } from '../../api/bridge';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
 import { useSettingsStore } from '../../stores/settings';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 import { getVisibleSessionGroups } from './session-list';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import UpdateNotification from './UpdateNotification.vue';
@@ -254,7 +256,7 @@ function formatTime(value: string): string {
 
       <div class="command-stack">
         <button class="command-row" @click="handleCreateSession()">
-          <span class="command-icon command-plus">＋</span>
+          <span class="command-icon command-plus"><AppIcon name="plus" :size="15" /></span>
           <span class="command-label">新建任务</span>
           <span class="command-shortcut">Ctrl+N</span>
         </button>
@@ -264,12 +266,12 @@ function formatTime(value: string): string {
           title="搜索对话"
           @click="searchOpen = !searchOpen"
         >
-          <span class="command-icon">⌕</span>
+          <span class="command-icon"><AppIcon name="search" :size="15" /></span>
           <span class="command-label">搜索</span>
           <span class="command-shortcut">Ctrl+K</span>
         </button>
         <button class="command-row" @click="emit('openSettings', 'skills')">
-          <span class="command-icon">✣</span>
+          <span class="command-icon"><AppIcon name="sparkles" :size="15" /></span>
           <span class="command-label">技能</span>
           <span v-if="settingsStore.settings.skills.length > 0" class="command-shortcut">
             {{ settingsStore.settings.skills.length }}
@@ -278,14 +280,16 @@ function formatTime(value: string): string {
       </div>
 
       <div v-if="searchOpen" class="search-row">
-        <span class="search-icon">⌕</span>
+        <span class="search-icon"><AppIcon name="search" :size="14" /></span>
         <input
           ref="searchInputRef"
           v-model="searchQuery"
           placeholder="搜索对话..."
           @keyup.escape="searchOpen = false; searchQuery = ''"
         />
-        <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">×</button>
+        <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">
+          <AppIcon name="x" :size="14" />
+        </button>
       </div>
 
       <div class="scope-toolbar">
@@ -295,7 +299,7 @@ function formatTime(value: string): string {
           type="button"
           @click="groupByFolder = !groupByFolder"
         >
-          <span>#</span>
+          <AppIcon name="folder" :size="13" />
           <span>{{ groupByFolder ? '分组' : '时间' }}</span>
         </button>
         <span class="scope-spacer" />
@@ -305,7 +309,7 @@ function formatTime(value: string): string {
           title="批量管理"
           @click="enterSelectMode()"
         >
-          ▱
+          <AppIcon name="list-checks" :size="14" />
         </button>
         <button v-else class="scope-text" @click="exitSelectMode()">取消 {{ selectedIds.size }}</button>
       </div>
@@ -339,16 +343,18 @@ function formatTime(value: string): string {
             :title="group.path"
             @click="toggleGroup(group.path)"
           >
-            <span class="project-icon">#</span>
+            <span class="project-icon"><AppIcon name="folder" :size="13" /></span>
             <span class="project-name">{{ projectName(group.path) }}</span>
-            <span class="project-chevron">{{ collapsedGroups.has(group.path) ? '›' : '⌄' }}</span>
+            <span class="project-chevron">
+              <AppIcon :name="collapsedGroups.has(group.path) ? 'chevron-right' : 'chevron-down'" :size="13" />
+            </span>
             <span class="project-count">{{ group.totalCount }}</span>
             <button
               class="project-add"
               title="在此项目中新建任务"
               @click.stop="createSessionInGroup(group.path)"
             >
-              ⊕
+              <AppIcon name="plus" :size="13" />
             </button>
           </div>
 
@@ -388,7 +394,7 @@ function formatTime(value: string): string {
                 title="删除对话"
                 @click.stop="deleteSingle(session.id)"
               >
-                ×
+                <AppIcon name="x" :size="13" />
               </button>
             </div>
 
@@ -445,7 +451,7 @@ function formatTime(value: string): string {
             title="删除对话"
             @click.stop="deleteSingle(session.id)"
           >
-            ×
+            <AppIcon name="x" :size="13" />
           </button>
         </div>
 
@@ -589,8 +595,10 @@ function formatTime(value: string): string {
 }
 
 .search-icon {
-  font-size: 14px;
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
 }
 
 .search-row input {
@@ -929,7 +937,7 @@ function formatTime(value: string): string {
   height: 23px;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: var(--border-radius-sm);
   background: var(--color-bg-tertiary);
   color: var(--color-text);
   font-size: 14px;
@@ -1035,7 +1043,7 @@ function formatTime(value: string): string {
   height: 34px;
   padding: 0 9px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   background: var(--sidebar-panel-surface);
 }
 
@@ -1079,7 +1087,7 @@ function formatTime(value: string): string {
   justify-content: center;
   padding: 0 6px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--border-radius-sm);
   background: transparent;
   color: var(--sidebar-panel-secondary);
   font-size: 14px;
@@ -1121,6 +1129,7 @@ function formatTime(value: string): string {
   gap: 8px;
   min-height: 34px;
   padding: 0 7px 0 2px;
+  border-radius: var(--border-radius-sm);
   color: var(--sidebar-panel-text);
   font-size: 14px;
   font-weight: 450;
@@ -1228,7 +1237,7 @@ function formatTime(value: string): string {
 
 .conversation-row {
   min-width: 0;
-  border-radius: 7px;
+  border-radius: var(--border-radius-sm);
 }
 
 .conversation-row + .conversation-row {
@@ -1251,7 +1260,7 @@ function formatTime(value: string): string {
   min-height: 34px;
   padding: 0 10px 0 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--border-radius-sm);
   color: var(--sidebar-panel-text);
 }
 

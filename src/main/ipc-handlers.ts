@@ -51,6 +51,7 @@ import {
   loadSession,
   saveSession,
 } from './session-store';
+import { applyWindowChrome, setCustomWindowChrome } from './window-chrome';
 import type { WindowManager } from './window-manager';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -954,8 +955,22 @@ export function registerIpcHandlers(wm: WindowManager): void {
   // Sync window chrome colors and return the actual resolved theme.
   ipcMain.handle('window:setTheme', (_event, theme: AppSettings['theme']) => {
     nativeTheme.themeSource = theme;
+    // Re-apply chrome so title-bar buttons stay aligned with theme or custom bg.
+    applyWindowChrome(windowManager.getMainWindow());
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   });
+
+  /**
+   * Override native window chrome (title-bar min/max/close strip + window bg).
+   * Pass null to restore theme-default chrome colors.
+   */
+  ipcMain.on(
+    'window:setChromeColors',
+    (_event, colors: { background: string; foreground: string } | null) => {
+      setCustomWindowChrome(colors);
+      applyWindowChrome(windowManager.getMainWindow());
+    },
+  );
 
   // ===== Git Info =====
   ipcMain.handle('git:getInfo', async (_event, workingDir: string) => {

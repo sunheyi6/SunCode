@@ -3,6 +3,8 @@ import type { ToolCallContent } from '@shared/types';
 import { computed, nextTick, ref, watch } from 'vue';
 import { commandSummary, parseToolArguments } from '../../utils/tool-presentation';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 const props = defineProps<{
@@ -76,7 +78,7 @@ const exitCodeLabel = computed(() => {
 <template>
   <details class="command-operation" :class="{ 'command-failed': isFailed, 'command-running': isRunning }" :open="isRunning">
     <summary class="command-summary">
-      <span class="command-icon">&gt;</span>
+      <span class="command-icon"><AppIcon name="terminal" :size="13" /></span>
       <span v-if="isRunning" class="command-breathe-dot" />
       <span class="command-title">{{ title }}</span>
       <span class="command-status">{{ isRunning ? '执行中' : isFailed ? '失败' : '完成' }}</span>
@@ -186,14 +188,11 @@ const exitCodeLabel = computed(() => {
 }
 
 .command-icon {
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
-  font-size: 10px;
-  transition: transform 0.15s ease;
-}
-
-details[open] .command-icon {
-  transform: rotate(90deg);
 }
 
 .command-title {

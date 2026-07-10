@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { useFilesStore } from '../../stores/files';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const filesStore = useFilesStore();
 
@@ -14,7 +16,7 @@ onMounted(() => {
     <div class="file-tree-header">
       <span class="header-title">文件</span>
       <button class="refresh-btn" title="刷新" @click="filesStore.loadFileTree()">
-        ⟳
+        <AppIcon name="refresh" :size="14" />
       </button>
     </div>
 
@@ -41,11 +43,14 @@ onMounted(() => {
 </template>
 
 <script lang="ts">
-import { defineComponent, type PropType } from 'vue';
 import type { FileNode } from '@shared/types';
+import { defineComponent, type PropType } from 'vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const FileTreeNode = defineComponent({
   name: 'FileTreeNode',
+  components: { AppIcon },
   props: {
     node: { type: Object as PropType<FileNode>, required: true },
     depth: { type: Number, default: 0 },
@@ -62,13 +67,17 @@ const FileTreeNode = defineComponent({
           emit('select', props.node.path);
         }
       },
+      treeIconName(): string {
+        if (props.node.type !== 'directory') return 'file';
+        return props.expanded.has(props.node.path) ? 'folder-open' : 'folder';
+      },
     };
   },
   template: `
     <div class="tree-node" :style="{ paddingLeft: (depth * 16 + 8) + 'px' }">
       <div class="tree-row" @click="handleClick">
         <span class="tree-icon">
-          {{ node.type === 'directory' ? (isExpanded() ? '▾' : '▸') : '📄' }}
+          <AppIcon :name="treeIconName()" :size="14" />
         </span>
         <span class="tree-name" :class="{ selected: false }">{{ node.name }}</span>
       </div>
@@ -79,8 +88,8 @@ const FileTreeNode = defineComponent({
           :node="child"
           :depth="depth + 1"
           :expanded="expanded"
-          @toggle="(path: string) => emit('toggle', path)"
-          @select="(path: string) => emit('select', path)"
+          @toggle="(path) => emit('toggle', path)"
+          @select="(path) => emit('select', path)"
         />
       </template>
     </div>
@@ -97,82 +106,76 @@ const FileTreeNode = defineComponent({
 
 .file-tree-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 10px 12px;
+  justify-content: space-between;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
 }
 
 .header-title {
   font-size: 12px;
   font-weight: 600;
+  color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--color-text-secondary);
+  letter-spacing: 0.04em;
 }
 
 .refresh-btn {
-  padding: 2px 6px;
-  font-size: 14px;
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--border-radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
 }
 
 .refresh-btn:hover {
-  color: var(--color-text);
   background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
 .file-tree-list {
   flex: 1;
-  overflow-y: auto;
+  overflow: auto;
   padding: 4px 0;
 }
 
 .empty-state {
-  padding: 20px 12px;
+  padding: 16px 12px;
   color: var(--color-text-muted);
   font-size: 13px;
-  text-align: center;
 }
 
-.tree-node {
-  cursor: default;
-}
-
-.tree-row {
+:deep(.tree-row) {
   display: flex;
   align-items: center;
-  padding: 3px 0;
-  font-size: 13px;
+  gap: 6px;
+  min-height: 26px;
+  padding-right: 8px;
   cursor: pointer;
-  border-radius: 3px;
-  margin: 0 4px;
-  padding: 3px 4px;
+  color: var(--color-text-secondary);
 }
 
-.tree-row:hover {
+:deep(.tree-row:hover) {
   background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
-.tree-row.selected {
-  background: var(--color-accent);
-  color: var(--color-bg);
-}
-
-.tree-icon {
-  width: 16px;
-  text-align: center;
-  flex-shrink: 0;
-  font-size: 11px;
+:deep(.tree-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
-  margin-right: 4px;
 }
 
-.tree-name {
+:deep(.tree-name) {
+  min-width: 0;
   overflow: hidden;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

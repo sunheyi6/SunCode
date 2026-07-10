@@ -3,6 +3,8 @@ import type { ToolCallContent } from '@shared/types';
 import { computed, ref } from 'vue';
 import { parseToolArguments } from '../../utils/tool-presentation';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 const props = defineProps<{
@@ -82,7 +84,9 @@ const isRunning = computed(() => props.call.status === 'running');
 <template>
   <details class="file-inspect" :class="{ 'inspect-failed': isFailed, 'inspect-running': isRunning }">
     <summary class="inspect-summary">
-      <span class="inspect-icon">{{ isFailed ? '✗' : '▤' }}</span>
+      <span class="inspect-icon">
+        <AppIcon :name="isFailed ? 'x' : 'file'" :size="13" />
+      </span>
       <span v-if="isRunning" class="inspect-breathe-dot" />
       <span class="inspect-label">{{ label }}</span>
       <span class="inspect-path" :title="target">{{ target || '等待参数...' }}</span>
@@ -92,7 +96,8 @@ const isRunning = computed(() => props.call.status === 'running');
       <!-- Args (collapsed toggle) -->
       <div v-if="argsEntries.length > 0" class="inspect-args">
         <button class="args-toggle" @click="showArgs = !showArgs">
-          {{ showArgs ? '▼' : '▶' }} 参数 ({{ argsEntries.length }})
+          <AppIcon :name="showArgs ? 'chevron-down' : 'chevron-right'" :size="12" />
+          参数 ({{ argsEntries.length }})
         </button>
         <div v-if="showArgs" class="args-list">
           <div v-for="e in argsEntries" :key="e.key" class="args-row">
@@ -142,7 +147,13 @@ const isRunning = computed(() => props.call.status === 'running');
 }
 .inspect-summary::-webkit-details-marker { display: none; }
 
-.inspect-icon { flex-shrink: 0; color: var(--color-text-muted); font-size: 11px; }
+.inspect-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
 
 .inspect-label {
   flex-shrink: 0; font-size: 11px; padding: 1px 6px;

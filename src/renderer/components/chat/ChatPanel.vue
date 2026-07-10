@@ -7,6 +7,8 @@ import { useAgentStore } from '../../stores/agent';
 import { useChatStore } from '../../stores/chat';
 import { useSettingsStore } from '../../stores/settings';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ChatHeader from './ChatHeader.vue';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ChatInput from './ChatInput.vue';
@@ -97,9 +99,11 @@ onUnmounted(() => {
         v-if="chatStore.modelSwitchNotice"
         class="model-switch-notice"
       >
-        <span class="notice-icon">🔄</span>
+        <span class="notice-icon"><AppIcon name="refresh" :size="14" /></span>
         <span class="notice-text">{{ chatStore.modelSwitchNotice }}</span>
-        <button class="notice-dismiss" @click="chatStore.dismissModelSwitchNotice()">✕</button>
+        <button class="notice-dismiss" @click="chatStore.dismissModelSwitchNotice()">
+          <AppIcon name="x" :size="13" />
+        </button>
       </div>
 
       <MessageList />

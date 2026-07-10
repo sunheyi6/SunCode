@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue';
 import { useAgentStore } from '../../stores/agent';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const emit = defineEmits<{
@@ -96,7 +98,7 @@ function onEditKeydown(e: KeyboardEvent): void {
             title="从队列中移除"
             @click="emit('remove', prompt.id)"
           >
-            ✕
+            <AppIcon name="x" :size="13" />
           </button>
         </template>
       </div>

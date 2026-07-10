@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = defineProps<{
   code: string;
@@ -32,7 +34,8 @@ async function copyCode(): Promise<void> {
       <span class="code-lang">{{ language || 'code' }}</span>
       <span v-if="filename" class="code-filename">{{ filename }}</span>
       <button class="copy-btn" @click="copyCode">
-        {{ copied ? '✓ 已复制' : '复制' }}
+        <AppIcon :name="copied ? 'check' : 'copy'" :size="12" />
+        {{ copied ? '已复制' : '复制' }}
       </button>
     </div>
     <pre class="code-block"><code :class="language ? `language-${language}` : ''">{{ code }}</code></pre>
@@ -70,6 +73,9 @@ async function copyCode(): Promise<void> {
 }
 
 .copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   padding: 2px 8px;
   background: transparent;

@@ -2,6 +2,8 @@
 import type { TokenUsageSummary } from '@shared/types';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useStatsStore } from '../../stores/stats';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 import { buildUsageViewModel } from './token-usage-view-model';
 
 const statsStore = useStatsStore();
@@ -76,27 +78,27 @@ function shouldShowAxisLabel(index: number): boolean {
     <template v-else>
       <section class="metric-grid">
         <div class="metric-card">
-          <span class="metric-label"><span class="metric-icon">♨</span> tokens 用量</span>
+          <span class="metric-label"><span class="metric-icon"><AppIcon name="zap" :size="15" /></span> tokens 用量</span>
           <strong>{{ viewModel.totalTokensLabel }}</strong>
         </div>
         <div class="metric-card">
-          <span class="metric-label"><span class="metric-icon">▱</span> 会话数量</span>
+          <span class="metric-label"><span class="metric-icon"><AppIcon name="message" :size="15" /></span> 会话数量</span>
           <strong>{{ viewModel.runs }}</strong>
         </div>
         <div class="metric-card">
-          <span class="metric-label"><span class="metric-icon">▭</span> 消息数量</span>
+          <span class="metric-label"><span class="metric-icon"><AppIcon name="layers" :size="15" /></span> 消息数量</span>
           <strong>{{ viewModel.messageCount }}</strong>
         </div>
         <div class="metric-card">
-          <span class="metric-label"><span class="metric-icon">▦</span> 活跃天数</span>
+          <span class="metric-label"><span class="metric-icon"><AppIcon name="activity" :size="15" /></span> 活跃天数</span>
           <strong>{{ viewModel.activeDays }}</strong>
         </div>
         <div class="metric-card">
-          <span class="metric-label"><span class="metric-icon">▣</span> 当前连续天数</span>
+          <span class="metric-label"><span class="metric-icon"><AppIcon name="flame" :size="15" /></span> 当前连续天数</span>
           <strong>{{ viewModel.currentStreak }}</strong>
         </div>
         <div class="metric-card">
-          <span class="metric-label"><span class="metric-icon">⌁</span> 最常用模型</span>
+          <span class="metric-label"><span class="metric-icon"><AppIcon name="bot" :size="15" /></span> 最常用模型</span>
           <strong class="model-title">{{ viewModel.topModel?.modelName ?? '-' }}</strong>
           <small>占比 {{ viewModel.topModel?.percentLabel ?? '0%' }}</small>
         </div>
@@ -111,14 +113,19 @@ function shouldShowAxisLabel(index: number): boolean {
             <span>较多</span>
           </div>
         </div>
-        <div class="heatmap">
+        <div class="heatmap" :class="{ animate: animateReady }">
           <span
-            v-for="day in viewModel.days"
+            v-for="(day, index) in viewModel.days"
             :key="day.date"
-            class="heat-cell"
-            :class="`heat-${day.intensity}`"
+            class="heat-cell-wrap"
+            :style="{ '--heat-index': index }"
             :title="`${day.label}: ${day.total} tokens`"
-          />
+          >
+            <span
+              class="heat-cell"
+              :class="[`heat-${day.intensity}`, { lit: day.intensity > 0 }]"
+            />
+          </span>
         </div>
       </section>
 
@@ -195,14 +202,14 @@ function shouldShowAxisLabel(index: number): boolean {
   gap: 2px;
   padding: 4px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 10px;
+  border-radius: var(--border-radius-pill);
   background: var(--color-bg);
 }
 
 .range-switch button {
   height: 30px;
   padding: 0 14px;
-  border-radius: 7px;
+  border-radius: var(--border-radius-pill);
   background: transparent;
   color: var(--color-text-muted);
   font-size: 14px;
@@ -226,7 +233,7 @@ function shouldShowAxisLabel(index: number): boolean {
 .usage-state.empty {
   flex-direction: column;
   gap: 8px;
-  border-radius: 8px;
+  border-radius: var(--border-radius-lg);
   background: var(--color-surface);
 }
 
@@ -249,7 +256,7 @@ function shouldShowAxisLabel(index: number): boolean {
   justify-content: center;
   gap: 10px;
   padding: 18px;
-  border-radius: 8px;
+  border-radius: var(--border-radius-lg);
   background: var(--color-surface);
 }
 
@@ -262,10 +269,11 @@ function shouldShowAxisLabel(index: number): boolean {
 }
 
 .metric-icon {
+  display: inline-flex;
   width: 18px;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-secondary);
-  font-size: 15px;
-  text-align: center;
 }
 
 .metric-card strong {
@@ -291,7 +299,7 @@ function shouldShowAxisLabel(index: number): boolean {
 }
 
 .usage-card {
-  border-radius: 8px;
+  border-radius: var(--border-radius-lg);
   background: var(--color-surface);
   padding: 20px;
 }
@@ -325,7 +333,7 @@ function shouldShowAxisLabel(index: number): boolean {
   display: block;
   width: 16px;
   height: 16px;
-  border-radius: 5px;
+  border-radius: 4px;
 }
 
 .heatmap {
@@ -335,7 +343,52 @@ function shouldShowAxisLabel(index: number): boolean {
   justify-content: start;
   gap: 7px;
   overflow-x: auto;
-  padding: 0 2px;
+  padding: 2px 2px 4px;
+}
+
+.heat-cell-wrap {
+  display: block;
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+  transform: scale(0.55);
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.heatmap.animate .heat-cell-wrap {
+  animation: heat-pop-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(var(--heat-index, 0) * 18ms);
+}
+
+.heat-cell {
+  background: color-mix(in srgb, var(--color-bg) 72%, var(--color-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 6%, transparent);
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.18s ease;
+}
+
+.heat-cell.lit {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #177fe8 18%, transparent),
+    0 0 0 0 transparent;
+}
+
+.heatmap.animate .heat-cell.lit {
+  animation: heat-glow-pulse 1.6s ease-in-out calc(var(--heat-index, 0) * 18ms + 0.35s) 1;
+}
+
+.heat-cell-wrap:hover {
+  z-index: 1;
+}
+
+.heat-cell-wrap:hover .heat-cell {
+  transform: scale(1.28);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-bg) 70%, #fff),
+    0 0 12px color-mix(in srgb, #177fe8 35%, transparent);
 }
 
 .heat-0 { background: color-mix(in srgb, var(--color-bg) 72%, var(--color-surface)); }
@@ -344,6 +397,56 @@ function shouldShowAxisLabel(index: number): boolean {
 .heat-3 { background: #7cb7ef; }
 .heat-4 { background: #459bea; }
 .heat-5 { background: #177fe8; }
+
+@keyframes heat-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes heat-glow-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, #177fe8 18%, transparent),
+      0 0 0 0 transparent;
+  }
+  45% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, #177fe8 28%, transparent),
+      0 0 10px color-mix(in srgb, #177fe8 42%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heat-cell-wrap {
+    opacity: 1;
+    transform: none;
+    will-change: auto;
+  }
+
+  .heatmap.animate .heat-cell-wrap,
+  .heatmap.animate .heat-cell.lit {
+    animation: none;
+  }
+
+  .heat-cell {
+    transition: none;
+  }
+
+  .heat-cell-wrap:hover .heat-cell {
+    transform: none;
+  }
+}
 
 .trend-card {
   display: flex;
@@ -355,7 +458,7 @@ function shouldShowAxisLabel(index: number): boolean {
   position: relative;
   height: 330px;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   background: var(--color-bg);
   padding: 24px 24px 30px;
 }

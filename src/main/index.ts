@@ -9,6 +9,7 @@ import { registerIpcHandlers } from './ipc-handlers';
 import { getLogPath, logger } from './logger';
 import { migrateLegacyDataDir } from './paths';
 import { recoverInterruptedSessions } from './recovery';
+import { applyWindowChrome, resolveWindowChromeColors } from './window-chrome';
 import { WindowManager } from './window-manager';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,7 +18,7 @@ const __dirname = dirname(__filename);
 // ── GPU / hardware acceleration workaround (Windows) ───────────────
 // On some Windows machines, GPU acceleration causes hard crashes that
 // kill the entire process without firing any error events. This is the
-// most reliable way to disable it �?must be called before app.whenReady().
+// most reliable way to disable it �?must be called before app.whenReady().
 // The app is fully functional without GPU acceleration; only CSS
 // transforms/animations will fall back to software rendering.
 app.disableHardwareAcceleration();
@@ -26,7 +27,7 @@ app.disableHardwareAcceleration();
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
-  // Another instance is already running �?quit immediately
+  // Another instance is already running �?quit immediately
   app.quit();
 } else {
   // Focus the existing window when a second instance is launched
@@ -43,14 +44,9 @@ let windowManager: WindowManager;
 
 const isMac = process.platform === 'darwin';
 
-function getWindowChromeColors(): { background: string; foreground: string } {
-  return nativeTheme.shouldUseDarkColors
-    ? { background: '#1c1c1e', foreground: '#98989d' }
-    : { background: '#ececf0', foreground: '#aeaeb2' };
-}
-
 function createMainWindow(): BrowserWindow {
-  const chromeColors = getWindowChromeColors();
+  // Prefer any previously-applied custom chrome; otherwise theme defaults.
+  const chromeColors = resolveWindowChromeColors();
   const win = new BrowserWindow({
     width: 1200,
     height: 750,
@@ -77,14 +73,9 @@ function createMainWindow(): BrowserWindow {
   win.setMenuBarVisibility(false);
 
   nativeTheme.on('updated', () => {
-    if (!win.isDestroyed()) {
-      const nextChromeColors = getWindowChromeColors();
-      win.setBackgroundColor(nextChromeColors.background);
-      win.setTitleBarOverlay({
-        color: nextChromeColors.background,
-        symbolColor: nextChromeColors.foreground,
-      });
-    }
+    // Keep custom global background on the title-bar buttons when set;
+    // otherwise follow system/theme chrome colors.
+    if (!win.isDestroyed()) applyWindowChrome(win);
   });
 
   // ── Safety: if ready-to-show never fires (e.g. renderer crash during
@@ -93,7 +84,7 @@ function createMainWindow(): BrowserWindow {
   const READY_TIMEOUT_MS = 12_000;
   const readyTimeout = setTimeout(() => {
     if (!win.isDestroyed() && !win.isVisible()) {
-      logger.warn('[Window] ready-to-show timed out after %d ms �?forcing show', READY_TIMEOUT_MS);
+      logger.warn('[Window] ready-to-show timed out after %d ms �?forcing show', READY_TIMEOUT_MS);
       win.show();
     }
   }, READY_TIMEOUT_MS);
@@ -124,7 +115,7 @@ function createMainWindow(): BrowserWindow {
   });
 
   win.on('unresponsive', () => {
-    logger.warn('[Window] Unresponsive �?page may be hung');
+    logger.warn('[Window] Unresponsive �?page may be hung');
   });
 
   // Capture renderer console errors (only errors, not all logs)
@@ -234,7 +225,7 @@ app
   })
   .then(() => {
     logger.info('[App] Init complete');
-    // Startup marker �?used by parent processes to detect when SunCode is fully ready.
+    // Startup marker �?used by parent processes to detect when SunCode is fully ready.
     // Format: [SunCode] STARTUP_COMPLETE project=<name> ts=<ISO timestamp>
     // The bash tool's startup_marker parameter scans stdout/stderr for this line.
     const marker = `[SunCode] STARTUP_COMPLETE project=SunCode ts=${new Date().toISOString()}`;

@@ -3,6 +3,8 @@ import type { ToolCallContent } from '@shared/types';
 import { computed } from 'vue';
 import { fileOperationView } from '../../utils/tool-presentation';
 import DiffViewer from '../code/DiffViewer.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = defineProps<{
   call: ToolCallContent;
@@ -44,7 +46,7 @@ const isEditing = computed(() => view.value.label === '编辑中');
 <template>
   <details class="file-operation-details" :class="statusClass">
     <summary class="file-summary">
-      <span class="file-icon">▤</span>
+      <span class="file-icon"><AppIcon name="file" :size="13" /></span>
       <span v-if="isEditing" class="file-breathe-dot" />
       <span class="file-path" :title="view.filePath">{{ view.filePath }}</span>
       <span class="file-status">{{ view.label }}</span>
@@ -90,7 +92,10 @@ const isEditing = computed(() => view.value.label === '编辑中');
 }
 
 .file-icon {
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
 }
 

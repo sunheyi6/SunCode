@@ -7,6 +7,8 @@
 
 import { type CommandMatch, matchCommands, type SlashCommand } from '@shared/commands';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = defineProps<{
   inputText: string;
@@ -139,7 +141,7 @@ function highlightName(cmd: SlashCommand, indices: number[]): string {
           @click="onItemClick(m.command)"
           @mouseenter="selectedIndex = idx"
         >
-          <span class="cmd-icon">{{ m.command.icon }}</span>
+          <span class="cmd-icon"><AppIcon :name="m.command.icon" :size="15" /></span>
           <span class="cmd-body">
             <span class="cmd-name" v-html="highlightName(m.command, m.matchIndices)" />
             <span v-if="m.command.argsLabel" class="cmd-args">{{ m.command.argsLabel }}</span>
@@ -161,9 +163,10 @@ function highlightName(cmd: SlashCommand, indices: number[]): string {
   flex-direction: column;
   max-height: 220px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 12px;
-  background: var(--color-bg);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  border-radius: var(--border-radius-lg);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 
@@ -180,7 +183,7 @@ function highlightName(cmd: SlashCommand, indices: number[]): string {
   width: 100%;
   padding: 7px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--border-radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 13px;
@@ -195,7 +198,14 @@ function highlightName(cmd: SlashCommand, indices: number[]): string {
   color: var(--color-accent);
 }
 
-.cmd-icon { width: 20px; flex-shrink: 0; font-size: 15px; text-align: center; }
+.cmd-icon {
+  display: inline-flex;
+  width: 20px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
 
 .cmd-body {
   display: flex;

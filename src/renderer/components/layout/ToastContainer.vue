@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const { toasts, dismissToast } = useToast();
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function iconFor(type: 'info' | 'success' | 'warning' | 'error'): string {
   switch (type) {
     case 'success':
-      return '✓';
+      return 'check';
     case 'warning':
-      return '⚠';
+      return 'alert-triangle';
     case 'error':
-      return '✕';
+      return 'x';
     default:
-      return 'ℹ';
+      return 'info';
   }
 }
 </script>
@@ -27,13 +30,15 @@ function iconFor(type: 'info' | 'success' | 'warning' | 'error'): string {
         class="toast-item"
         :class="`toast-${toast.type}`"
       >
-        <span class="toast-icon">{{ iconFor(toast.type) }}</span>
+        <span class="toast-icon"><AppIcon :name="iconFor(toast.type)" :size="13" /></span>
         <span class="toast-message">{{ toast.message }}</span>
         <button
           class="toast-dismiss"
-          @click="dismissToast(toast.id)"
           aria-label="关闭提示"
-        >✕</button>
+          @click="dismissToast(toast.id)"
+        >
+          <AppIcon name="x" :size="13" />
+        </button>
       </div>
     </TransitionGroup>
   </Teleport>
@@ -95,8 +100,6 @@ function iconFor(type: 'info' | 'success' | 'warning' | 'error'): string {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  font-size: 11px;
-  font-weight: 700;
 }
 
 .toast-info .toast-icon {
@@ -132,7 +135,6 @@ function iconFor(type: 'info' | 'success' | 'warning' | 'error'): string {
   border-radius: 6px;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 11px;
   cursor: pointer;
   display: flex;
   align-items: center;

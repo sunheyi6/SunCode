@@ -189,6 +189,7 @@ declare global {
       // Window
       setTitleBarOverlayText(text: string): void;
       setTheme(theme: AppSettings['theme']): Promise<'light' | 'dark'>;
+      setChromeColors(colors: { background: string; foreground: string } | null): void;
       // Subagent
       onSubagentProgress(callback: (data: SessionSubagentProgressEvent) => void): () => void;
       // Goal

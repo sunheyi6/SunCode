@@ -4,6 +4,8 @@ import { computed, ref, watch } from 'vue';
 import { bridge } from '../../api/bridge';
 import type { ChatMessage } from '../../stores/chat';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import CommandOperationCard from '../tools/CommandOperationCard.vue';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import FileInspectCard from '../tools/FileInspectCard.vue';
@@ -257,7 +259,9 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
           @click="openTraceFolder"
         >
           打开文件夹        </button>
-        <button class="trace-close" title="关闭" @click="$emit('close')">×</button>
+        <button class="trace-close" title="关闭" @click="$emit('close')">
+          <AppIcon name="x" :size="14" />
+        </button>
       </div>
     </div>
 

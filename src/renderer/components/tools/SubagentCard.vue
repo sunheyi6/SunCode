@@ -5,6 +5,8 @@ import { buildSubagentInlineTrace } from '../chat/call-trace-view-model';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import InlineCallTrace from '../chat/InlineCallTrace.vue';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 const props = defineProps<{
@@ -76,7 +78,7 @@ watch(
     <!-- Header -->
     <div class="card-header" @click="toggleExpand()">
       <span class="status-dot" />
-      <span class="agent-icon">🤖</span>
+      <span class="agent-icon"><AppIcon name="bot" :size="14" /></span>
       <span class="agent-label">
         <template v-if="results.length === 0">子 Agent 执行中...</template>
         <template v-else>
@@ -88,7 +90,9 @@ watch(
       <span v-else-if="isDone" class="status-badge done-badge">
         {{ results.filter(r => r.success).length }}/{{ results.length }} 完成
       </span>
-      <span class="expand-icon">{{ expanded ? '▾' : '▸' }}</span>
+      <span class="expand-icon">
+        <AppIcon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
+      </span>
     </div>
 
     <!-- Expanded body: one section per sub-agent result -->

@@ -311,6 +311,11 @@ const suncodeAPI = {
   async setTheme(theme: AppSettings['theme']): Promise<'light' | 'dark'> {
     return ipcRenderer.invoke('window:setTheme', theme);
   },
+
+  /** Override native title-bar button strip colors (null = theme default). */
+  setChromeColors(colors: { background: string; foreground: string } | null): void {
+    ipcRenderer.send('window:setChromeColors', colors);
+  },
   async getWorkingDir(): Promise<string> {
     return ipcRenderer.invoke('app:getWorkingDir');
   },

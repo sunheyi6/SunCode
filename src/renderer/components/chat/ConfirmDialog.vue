@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = defineProps<{
   /** 工具名称 */
@@ -30,12 +32,12 @@ const toolLabel = computed(() => {
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const toolIcon = computed(() => {
   const icons: Record<string, string> = {
-    bash: '💻',
-    write: '📝',
-    edit: '✏️',
-    subagent: '🤖',
+    bash: 'terminal',
+    write: 'file',
+    edit: 'pencil',
+    subagent: 'bot',
   };
-  return icons[props.toolName] || '🔧';
+  return icons[props.toolName] || 'wrench';
 });
 </script>
 
@@ -45,7 +47,7 @@ const toolIcon = computed(() => {
       <div v-if="visible" class="confirm-backdrop" @click.self="emit('deny')">
         <div class="confirm-dialog">
           <div class="confirm-header">
-            <span class="confirm-icon">{{ toolIcon }}</span>
+            <span class="confirm-icon"><AppIcon :name="toolIcon" :size="16" /></span>
             <span class="confirm-title">确认执行 {{ toolLabel }}</span>
           </div>
           <div class="confirm-body">
@@ -57,10 +59,12 @@ const toolIcon = computed(() => {
           </div>
           <div class="confirm-actions">
             <button class="confirm-btn deny" @click="emit('deny')">
-              ✕ 取消
+              <AppIcon name="x" :size="14" />
+              取消
             </button>
             <button class="confirm-btn allow" @click="emit('confirm')">
-              ✓ 允许执行
+              <AppIcon name="check" :size="14" />
+              允许执行
             </button>
           </div>
         </div>
@@ -74,7 +78,7 @@ const toolIcon = computed(() => {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(12px) saturate(120%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -84,10 +88,11 @@ const toolIcon = computed(() => {
 .confirm-dialog {
   width: 460px;
   max-width: 90vw;
-  background: var(--color-bg);
+  background: color-mix(in srgb, var(--color-bg) 92%, transparent);
+  backdrop-filter: blur(28px) saturate(150%);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28);
+  border-radius: var(--border-radius-xl);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 
@@ -101,7 +106,10 @@ const toolIcon = computed(() => {
 }
 
 .confirm-icon {
-  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
 }
 
 .confirm-title {
@@ -125,7 +133,7 @@ const toolIcon = computed(() => {
   padding: 10px 12px;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--border-radius);
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text);
@@ -151,8 +159,11 @@ const toolIcon = computed(() => {
 }
 
 .confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 20px;
-  border-radius: 6px;
+  border-radius: var(--border-radius-pill);
   border: 1px solid var(--border-color);
   font-size: 13px;
   font-weight: 500;

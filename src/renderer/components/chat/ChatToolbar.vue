@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const modelsStore = useModelsStore();
 const settingsStore = useSettingsStore();
@@ -86,10 +88,15 @@ function selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'):
 
 // ── permission mode ──
 const permissionModes = [
-  { value: 'plan' as const, label: '计划模式', icon: '📋', desc: '仅规划，不修改文件' },
-  { value: 'full_access' as const, label: '完全访问', icon: '🔓', desc: '无限制访问' },
-  { value: 'auto_edit' as const, label: '自动编辑', icon: '✏️', desc: '自动编辑文件' },
-  { value: 'confirm_changes' as const, label: '变更前确认', icon: '✅', desc: '修改前需确认' },
+  { value: 'plan' as const, label: '计划模式', icon: 'list-checks', desc: '仅规划，不修改文件' },
+  { value: 'full_access' as const, label: '完全访问', icon: 'unlock', desc: '无限制访问' },
+  { value: 'auto_edit' as const, label: '自动编辑', icon: 'pencil', desc: '自动编辑文件' },
+  {
+    value: 'confirm_changes' as const,
+    label: '变更前确认',
+    icon: 'shield-check',
+    desc: '修改前需确认',
+  },
 ];
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
@@ -112,7 +119,7 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
     <div class="toolbar-dropdown" :class="{ open: modelOpen }">
       <button class="toolbar-btn model-btn" @click="toggleModel">
         <span class="btn-label">{{ currentModelLabel }}</span>
-        <span class="btn-caret">▾</span>
+        <span class="btn-caret"><AppIcon name="chevron-down" :size="14" /></span>
       </button>
       <div v-if="modelOpen" class="dropdown-menu model-menu">
         <button
@@ -132,7 +139,7 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
     <div class="toolbar-dropdown" :class="{ open: thinkingOpen }">
       <button class="toolbar-btn" @click="toggleThinking">
         <span class="btn-label">思考: {{ currentThinking.label }}</span>
-        <span class="btn-caret">▾</span>
+        <span class="btn-caret"><AppIcon name="chevron-down" :size="14" /></span>
       </button>
       <div v-if="thinkingOpen" class="dropdown-menu">
         <button
@@ -151,8 +158,11 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
     <!-- Permission mode -->
     <div class="toolbar-dropdown" :class="{ open: permOpen }">
       <button class="toolbar-btn perm-btn" @click="togglePerm">
-        <span class="btn-label">{{ currentPerm.icon }} {{ currentPerm.label }}</span>
-        <span class="btn-caret">▾</span>
+        <span class="btn-label">
+          <AppIcon :name="currentPerm.icon" :size="14" />
+          {{ currentPerm.label }}
+        </span>
+        <span class="btn-caret"><AppIcon name="chevron-down" :size="14" /></span>
       </button>
       <div v-if="permOpen" class="dropdown-menu">
         <button
@@ -162,7 +172,7 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
           :class="{ active: p.value === settingsStore.settings.permissionMode }"
           @click="selectPerm(p.value)"
         >
-          <span class="item-icon">{{ p.icon }}</span>
+          <span class="item-icon"><AppIcon :name="p.icon" :size="14" /></span>
           <div class="item-info">
             <span class="item-label">{{ p.label }}</span>
             <span class="item-desc">{{ p.desc }}</span>
@@ -219,7 +229,10 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
 }
 
 .btn-label {
+  display: inline-flex;
   max-width: 140px;
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -235,7 +248,7 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
 }
 
 .btn-caret {
-  font-size: 10px;
+  display: inline-flex;
   opacity: 0.5;
 }
 
@@ -286,8 +299,10 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
 }
 
 .item-icon {
-  font-size: 14px;
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
 }
 
 .item-info {

@@ -6,6 +6,8 @@ import {
   useDropdown,
 } from '../../composables/useDropdown';
 import { useSettingsStore } from '../../stores/settings';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -22,10 +24,15 @@ const dropdown = computed<DropdownState>(() => props.dropdown ?? ownDropdown);
 const isOpen = computed(() => getDropdownOpenState(dropdown.value));
 
 const permissionModes = [
-  { value: 'plan' as const, label: '计划模式', icon: '◇', desc: '仅规划，不修改文件' },
-  { value: 'full_access' as const, label: '完全访问', icon: '♢', desc: '无限制访问' },
-  { value: 'auto_edit' as const, label: '自动编辑', icon: '✎', desc: '自动编辑文件' },
-  { value: 'confirm_changes' as const, label: '变更前确认', icon: '✓', desc: '修改前需确认' },
+  { value: 'plan' as const, label: '计划模式', icon: 'list-checks', desc: '仅规划，不修改文件' },
+  { value: 'full_access' as const, label: '完全访问', icon: 'unlock', desc: '无限制访问' },
+  { value: 'auto_edit' as const, label: '自动编辑', icon: 'pencil', desc: '自动编辑文件' },
+  {
+    value: 'confirm_changes' as const,
+    label: '变更前确认',
+    icon: 'shield-check',
+    desc: '修改前需确认',
+  },
 ];
 
 const currentPerm = computed(
@@ -66,9 +73,11 @@ defineExpose({
       aria-haspopup="menu"
       @click="toggle"
     >
-      <span class="permission-icon" aria-hidden="true">{{ currentPerm.icon }}</span>
+      <span class="permission-icon" aria-hidden="true">
+        <AppIcon :name="currentPerm.icon" :size="14" />
+      </span>
       <span class="btn-label">{{ currentPerm.label }}</span>
-      <span class="chevron" aria-hidden="true">⌄</span>
+      <span class="chevron" aria-hidden="true"><AppIcon name="chevron-down" :size="14" /></span>
     </button>
     <div v-if="isOpen" class="dropdown-menu permission-menu" role="menu">
       <button
@@ -80,7 +89,7 @@ defineExpose({
         role="menuitem"
         @click="selectPerm(permission.value)"
       >
-        <span class="item-icon">{{ permission.icon }}</span>
+        <span class="item-icon"><AppIcon :name="permission.icon" :size="14" /></span>
         <span class="item-info">
           <span class="item-label">{{ permission.label }}</span>
           <span class="item-desc">{{ permission.desc }}</span>
@@ -103,7 +112,7 @@ defineExpose({
   height: 34px;
   padding: 0 9px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--border-radius-pill);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -132,7 +141,9 @@ defineExpose({
 }
 
 .permission-icon {
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .dropdown-menu {
@@ -143,9 +154,11 @@ defineExpose({
   max-height: 280px;
   overflow-y: auto;
   border: 1px solid var(--border-color-strong);
-  border-radius: 12px;
-  background: var(--color-bg);
-  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
+  border-radius: var(--border-radius-lg);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
   z-index: 100;
 }
 
@@ -154,9 +167,11 @@ defineExpose({
 }
 
 .permission-menu .item-icon {
+  display: inline-flex;
   width: 16px;
   flex-shrink: 0;
-  text-align: center;
+  align-items: center;
+  justify-content: center;
 }
 
 .permission-menu .item-desc {
@@ -171,7 +186,7 @@ defineExpose({
   width: 100%;
   padding: 8px 11px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--border-radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px;

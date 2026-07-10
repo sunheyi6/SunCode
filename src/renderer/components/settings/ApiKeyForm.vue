@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { bridge } from '../../api/bridge';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 interface KeyEntry {
   provider: string;
@@ -146,15 +148,21 @@ async function addCustomKey(): Promise<void> {
         <div class="key-actions">
           <!-- Has key, not editing -->
           <template v-if="entry.hasKey && !entry.editing">
-            <span class="key-status configured">✓ 已配置</span>
+            <span class="key-status configured">
+              <AppIcon name="check" :size="13" /> 已配置
+            </span>
             <button class="key-btn edit" @click="startEdit(entry)">修改</button>
-            <button class="key-btn remove" @click="removeKey(entry)">✕</button>
+            <button class="key-btn remove" @click="removeKey(entry)" aria-label="移除密钥">
+              <AppIcon name="x" :size="13" />
+            </button>
           </template>
 
           <!-- No key, not editing -->
           <template v-else-if="!entry.hasKey && !entry.editing">
             <span class="key-status missing">未设置</span>
-            <button class="key-btn add" @click="startEdit(entry)">+ 添加</button>
+            <button class="key-btn add" @click="startEdit(entry)">
+              <AppIcon name="plus" :size="13" /> 添加
+            </button>
           </template>
 
           <!-- Editing -->
@@ -275,7 +283,7 @@ async function addCustomKey(): Promise<void> {
 .key-status {
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--border-radius-pill);
 }
 
 .key-status.configured {
@@ -291,7 +299,7 @@ async function addCustomKey(): Promise<void> {
   font-size: 11px;
   padding: 3px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--border-radius-pill);
   cursor: pointer;
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
@@ -334,7 +342,7 @@ async function addCustomKey(): Promise<void> {
   padding: 4px 8px;
   font-size: 12px;
   font-family: var(--font-mono);
-  border-radius: 3px;
+  border-radius: var(--border-radius);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--border-color);
   color: var(--color-text);
@@ -371,7 +379,7 @@ async function addCustomKey(): Promise<void> {
 .custom-key-input {
   padding: 4px 8px;
   font-size: 12px;
-  border-radius: 3px;
+  border-radius: var(--border-radius);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--border-color);
   color: var(--color-text);

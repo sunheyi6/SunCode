@@ -3,6 +3,8 @@ import type { CustomEndpoint } from '@shared/types';
 import { computed, onMounted, ref } from 'vue';
 import { BUILTIN_PROVIDERS, useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 import CustomEndpoints from './CustomEndpoints.vue';
 
 const modelsStore = useModelsStore();
@@ -198,7 +200,12 @@ function providerLabel(id: string): string {
             class="active-key-status"
             :class="{ configured: modelsStore.hasKey(currentModel.provider) }"
           >
-            {{ modelsStore.hasKey(currentModel.provider) ? '✓ 密钥已配置' : '⚠ 缺少密钥' }}
+            <template v-if="modelsStore.hasKey(currentModel.provider)">
+              <AppIcon name="check" :size="12" /> 密钥已配置
+            </template>
+            <template v-else>
+              <AppIcon name="alert-triangle" :size="12" /> 缺少密钥
+            </template>
           </span>
           <button class="manage-key-btn" @click="openKeyInput(currentModel.provider)">
             {{ modelsStore.hasKey(currentModel.provider) ? '修改密钥' : '配置密钥' }}
@@ -210,15 +217,22 @@ function providerLabel(id: string): string {
     <!-- ====== 内联 Key 输入框（紧跟在当前模型卡片下方） ====== -->
     <div v-if="keyInputProvider" class="inline-key-input">
       <div class="inline-key-header">
-        <span>🔑 配置 {{ providerLabel(keyInputProvider) }} API Key</span>
-        <button class="close-btn-sm" @click="cancelKeyInput">✕</button>
+        <span>
+          <AppIcon name="key" :size="13" />
+          配置 {{ providerLabel(keyInputProvider) }} API Key
+        </span>
+        <button class="close-btn-sm" @click="cancelKeyInput" aria-label="关闭">
+          <AppIcon name="x" :size="13" />
+        </button>
       </div>
       <p class="inline-key-hint">
         使用此模型需要 API Key，Key 仅保存在本地。
       </p>
 
       <!-- 成功提示 -->
-      <div v-if="keyInputSaved" class="key-saved-msg">✓ Key 已保存，正在切换模型...</div>
+      <div v-if="keyInputSaved" class="key-saved-msg">
+        <AppIcon name="check" :size="13" /> Key 已保存，正在切换模型...
+      </div>
 
       <!-- 错误提示 -->
       <div v-if="keyInputError" class="key-error-msg">{{ keyInputError }}</div>
@@ -256,7 +270,7 @@ function providerLabel(id: string): string {
           <strong>{{ provider.label }}</strong>
           <span>{{ provider.id }} · {{ provider.modelCount }} 个模型</span>
         </div>
-        <span class="model-key-badge has">✓ Key</span>
+        <span class="model-key-badge has"><AppIcon name="check" :size="12" /> Key</span>
       </div>
       <div v-if="enabledProviders.length === 0" class="empty-hint">尚未启用供应商。</div>
     </div>
@@ -315,11 +329,18 @@ function providerLabel(id: string): string {
             <div class="model-meta">
               <span class="model-provider">{{ providerLabel(opt.provider) }}</span>
               <span class="model-key-badge" :class="{ has: modelsStore.hasKey(opt.provider) }">
-                {{ modelsStore.hasKey(opt.provider) ? '✓' : '⚠ 需 Key' }}
+                <template v-if="modelsStore.hasKey(opt.provider)">
+                  <AppIcon name="check" :size="12" /> Key
+                </template>
+                <template v-else>
+                  <AppIcon name="alert-triangle" :size="12" /> 需 Key
+                </template>
               </span>
             </div>
           </div>
-          <span v-if="isActive(opt.provider, opt.model)" class="check-icon">✓</span>
+          <span v-if="isActive(opt.provider, opt.model)" class="check-icon">
+            <AppIcon name="check" :size="14" />
+          </span>
         </div>
 
         <div v-if="otherModels.length === 0" class="empty-hint">暂无其他模型</div>
@@ -352,10 +373,12 @@ function providerLabel(id: string): string {
               <span class="model-name">{{ m.name || m.id }}</span>
               <div class="model-meta">
                 <span class="model-provider">{{ ep.id }} · {{ m.id }}</span>
-                <span class="model-key-badge has">✓</span>
+                <span class="model-key-badge has"><AppIcon name="check" :size="12" /></span>
               </div>
             </div>
-            <span v-if="isActive(ep.id, m.id)" class="check-icon">✓</span>
+            <span v-if="isActive(ep.id, m.id)" class="check-icon">
+              <AppIcon name="check" :size="14" />
+            </span>
           </div>
         </div>
       </div>
@@ -373,7 +396,7 @@ function providerLabel(id: string): string {
   padding: 14px;
   margin-bottom: 18px;
   border: 1px solid var(--color-accent);
-  border-radius: 10px;
+  border-radius: var(--border-radius-lg);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 70%),
     var(--color-surface);
@@ -436,6 +459,9 @@ function providerLabel(id: string): string {
   gap: 8px;
 }
 .active-key-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--color-red);
   font-size: 11px;
 }
@@ -504,7 +530,7 @@ function providerLabel(id: string): string {
   display: flex; align-items: center; gap: 4px;
   padding: 3px 8px; font-size: 11px;
   background: var(--color-surface);
-  border: 1px solid var(--border-color); border-radius: 10px;
+  border: 1px solid var(--border-color); border-radius: var(--border-radius-pill);
   color: var(--color-text-secondary); cursor: pointer; transition: all 0.15s;
 }
 .provider-chip:hover { background: var(--color-surface-hover); color: var(--color-text); }
@@ -568,14 +594,25 @@ function providerLabel(id: string): string {
 .model-meta { display: flex; align-items: center; gap: 6px; }
 .model-provider { font-size: 10px; color: var(--color-text-muted); }
 .model-key-badge {
-  font-size: 10px; padding: 1px 6px; border-radius: 6px;
-  color: var(--color-red); background: color-mix(in srgb, var(--color-red) 12%, transparent);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: var(--color-red);
+  background: color-mix(in srgb, var(--color-red) 12%, transparent);
 }
 .model-key-badge.has {
   color: var(--color-green); background: color-mix(in srgb, var(--color-green) 12%, transparent);
 }
 
-.check-icon { color: var(--color-accent); font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.check-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  color: var(--color-accent);
+}
 .empty-hint { padding: 20px; text-align: center; color: var(--color-text-muted); font-size: 13px; }
 
 /* ===== 内联 Key 输入 ===== */
@@ -590,7 +627,7 @@ function providerLabel(id: string): string {
 }
 .close-btn-sm {
   width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
-  border: none; border-radius: 4px; background: transparent;
+  border: none; border-radius: 50%; background: transparent;
   color: var(--color-text-muted); font-size: 12px; cursor: pointer;
 }
 .close-btn-sm:hover { background: var(--color-surface-hover); color: var(--color-text); }
@@ -599,12 +636,12 @@ function providerLabel(id: string): string {
 .key-saved-msg {
   padding: 6px 10px; margin-bottom: 8px;
   background: color-mix(in srgb, var(--color-green) 15%, transparent);
-  color: var(--color-green); border-radius: 4px; font-size: 13px;
+  color: var(--color-green); border-radius: var(--border-radius-sm); font-size: 13px;
 }
 .key-error-msg {
   padding: 6px 10px; margin-bottom: 8px;
   background: color-mix(in srgb, var(--color-red) 15%, transparent);
-  color: var(--color-red); border-radius: 4px; font-size: 13px;
+  color: var(--color-red); border-radius: var(--border-radius-sm); font-size: 13px;
 }
 
 .inline-key-row { display: flex; gap: 6px; }

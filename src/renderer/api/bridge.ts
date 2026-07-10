@@ -303,6 +303,10 @@ export const bridge = {
     return api().setTheme(theme);
   },
 
+  setChromeColors(colors: { background: string; foreground: string } | null): void {
+    api().setChromeColors(colors);
+  },
+
   // ===== Auto Update =====
   checkForUpdates(): void {
     api().checkForUpdates();

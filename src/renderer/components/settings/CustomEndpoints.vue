@@ -4,6 +4,8 @@ import type { CustomApiFormat, CustomEndpoint } from '@shared/types';
 import { computed, ref } from 'vue';
 import { BUILTIN_PROVIDERS, useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 import { type EndpointForm, generateEndpointId, validateEndpoint } from './custom-endpoints';
 
 const settingsStore = useSettingsStore();
@@ -215,9 +217,13 @@ function submitLabel(): string {
           <input v-model="m.id" placeholder="模型 ID *" class="ce-m-id" />
           <input v-model="m.name" placeholder="显示名（可选）" class="ce-m-name" />
           <input v-model="m.contextWindow" placeholder="上下文（可选）" class="ce-m-ctx" />
-          <button class="ce-btn danger" @click="removeModelRow(i)">✕</button>
+          <button class="ce-btn danger" @click="removeModelRow(i)" aria-label="移除模型">
+            <AppIcon name="x" :size="13" />
+          </button>
         </div>
-        <button class="ce-add-sm" @click="addModelRow">+ 添加模型</button>
+        <button class="ce-add-sm" @click="addModelRow">
+          <AppIcon name="plus" :size="13" /> 添加模型
+        </button>
       </div>
 
       <div v-if="errors.length" class="ce-errors">
@@ -274,7 +280,7 @@ function submitLabel(): string {
   align-self: flex-start;
   padding: 8px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--border-radius-pill);
   background: var(--color-accent);
   color: var(--color-bg);
   cursor: pointer;
@@ -296,7 +302,7 @@ function submitLabel(): string {
   height: 40px;
   padding: 0 14px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   background: var(--color-surface);
   color: var(--color-text);
   outline: none;
@@ -312,7 +318,7 @@ function submitLabel(): string {
   height: 36px;
   padding: 0 10px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   background: var(--color-surface);
   color: var(--color-text);
   outline: none;
@@ -323,7 +329,7 @@ function submitLabel(): string {
   align-self: flex-start;
   padding: 8px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--border-radius-pill);
   background: var(--color-surface-hover);
   color: var(--color-text);
   cursor: pointer;
@@ -331,7 +337,7 @@ function submitLabel(): string {
 }
 .ce-errors { color: var(--color-red); font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
 .ce-form-actions { display: flex; gap: 6px; }
-.ce-btn { padding: 8px 12px; font-size: 13px; border: 1px solid var(--border-color); background: var(--color-bg-tertiary); color: var(--color-text-secondary); border-radius: 8px; cursor: pointer; }
+.ce-btn { padding: 8px 14px; font-size: 13px; border: 1px solid var(--border-color); background: var(--color-bg-tertiary); color: var(--color-text-secondary); border-radius: var(--border-radius-pill); cursor: pointer; }
 .ce-btn:hover { background: var(--color-surface-hover); color: var(--color-text); }
 .ce-btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-bg); }
 .ce-btn.danger { color: var(--color-red); border-color: transparent; background: transparent; }

@@ -5,6 +5,10 @@ import { bridge } from '../../api/bridge';
 import { useSettingsStore } from '../../stores/settings';
 import { useStatsStore } from '../../stores/stats';
 import { useUpdateStore } from '../../stores/update';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
+import type { IconName } from '../icons/icons';
+import BackgroundColorPicker from './BackgroundColorPicker.vue';
 import ModelSelector from './ModelSelector.vue';
 import TokenUsage from './TokenUsage.vue';
 
@@ -28,17 +32,70 @@ const appVersion = ref('');
 const logPath = ref('');
 const loadedSkills = ref<Array<{ name: string; path: string; description: string }>>([]);
 
-type Section = 'general' | 'models' | 'behavior' | 'mcp' | 'skills' | 'usage' | 'about';
+type Section =
+  | 'general'
+  | 'appearance'
+  | 'models'
+  | 'behavior'
+  | 'mcp'
+  | 'skills'
+  | 'usage'
+  | 'about';
 const activeSection = ref<Section>(props.initialSection as Section);
 
-const navItems: { key: Section; label: string; icon: string }[] = [
-  { key: 'general', label: '常规', icon: '⌘' },
-  { key: 'models', label: '模型设置', icon: '▤' },
-  { key: 'behavior', label: '行为', icon: '⌁' },
-  { key: 'mcp', label: 'MCP 服务器', icon: '⌬' },
-  { key: 'skills', label: '技能', icon: '✧' },
-  { key: 'usage', label: '使用统计', icon: '▥' },
-  { key: 'about', label: '关于', icon: 'ⓘ' },
+const navItems: { key: Section; label: string; icon: IconName }[] = [
+  { key: 'general', label: '常规', icon: 'command' },
+  { key: 'appearance', label: '外观', icon: 'palette' },
+  { key: 'models', label: '模型设置', icon: 'layers' },
+  { key: 'behavior', label: '行为', icon: 'zap' },
+  { key: 'mcp', label: 'MCP 服务器', icon: 'plug' },
+  { key: 'skills', label: '技能', icon: 'sparkles' },
+  { key: 'usage', label: '使用统计', icon: 'activity' },
+  { key: 'about', label: '关于', icon: 'info' },
+];
+
+/**
+ * Popular open-source editor/app background colors (GitHub community themes).
+ * Hex values are the official base/canvas backgrounds of each theme.
+ */
+const BACKGROUND_PRESETS: ReadonlyArray<{ color: string; label: string }> = [
+  // Neutrals
+  { color: '#000000', label: 'Pure Black' },
+  { color: '#FFFFFF', label: 'Pure White' },
+  { color: '#1E1E1E', label: 'VS Code Dark+' },
+  { color: '#F5F5F7', label: 'Apple Light' },
+  // GitHub (primer / github-vscode-theme)
+  { color: '#0D1117', label: 'GitHub Dark' },
+  { color: '#22272E', label: 'GitHub Dimmed' },
+  { color: '#010409', label: 'GitHub Dark HC' },
+  { color: '#F6F8FA', label: 'GitHub Light' },
+  // Tokyo Night — enkia/tokyo-night-vscode-theme
+  { color: '#1A1B26', label: 'Tokyo Night' },
+  { color: '#24283B', label: 'Tokyo Night Storm' },
+  // Catppuccin — catppuccin/catppuccin
+  { color: '#1E1E2E', label: 'Catppuccin Mocha' },
+  { color: '#24273A', label: 'Catppuccin Macchiato' },
+  { color: '#303446', label: 'Catppuccin Frappé' },
+  { color: '#EFF1F5', label: 'Catppuccin Latte' },
+  // Classics
+  { color: '#282A36', label: 'Dracula' },
+  { color: '#282C34', label: 'One Dark' },
+  { color: '#2E3440', label: 'Nord' },
+  { color: '#272822', label: 'Monokai' },
+  { color: '#002B36', label: 'Solarized Dark' },
+  { color: '#FDF6E3', label: 'Solarized Light' },
+  { color: '#282828', label: 'Gruvbox Dark' },
+  { color: '#FBF1C7', label: 'Gruvbox Light' },
+  // Rosé Pine — rose-pine/rose-pine-theme
+  { color: '#191724', label: 'Rosé Pine' },
+  { color: '#232136', label: 'Rosé Pine Moon' },
+  { color: '#FAF4ED', label: 'Rosé Pine Dawn' },
+  // Ayu — ayu-theme
+  { color: '#0B0E14', label: 'Ayu Dark' },
+  { color: '#1F2430', label: 'Ayu Mirage' },
+  // Night Owl — sdras/night-owl-vscode-theme
+  { color: '#011627', label: 'Night Owl' },
+  { color: '#FBFBFB', label: 'Night Owl Light' },
 ];
 
 const activeTitle = computed(
@@ -173,6 +230,37 @@ function themeLabel(theme: AppSettings['theme']): string {
   if (theme === 'light') return '浅色';
   return '深色';
 }
+
+const activeBackgroundColor = computed(() => {
+  const color = settingsStore.settings.backgroundColor?.trim();
+  return color || '';
+});
+
+const activePresetLabel = computed(() => {
+  const current = activeBackgroundColor.value.toUpperCase();
+  if (!current) return '';
+  return BACKGROUND_PRESETS.find((p) => p.color.toUpperCase() === current)?.label ?? '';
+});
+
+const pickerFallback = computed(() =>
+  settingsStore.resolvedTheme === 'light' ? '#F5F5F7' : '#000000',
+);
+
+function isPresetActive(color: string): boolean {
+  return activeBackgroundColor.value.toUpperCase() === color.toUpperCase();
+}
+
+function selectBackgroundPreset(color: string): void {
+  settingsStore.setBackgroundColor(color);
+}
+
+function updateBackgroundFromPicker(color: string): void {
+  settingsStore.setBackgroundColor(color);
+}
+
+function resetBackgroundColor(): void {
+  settingsStore.setBackgroundColor('');
+}
 </script>
 
 <template>
@@ -182,7 +270,7 @@ function themeLabel(theme: AppSettings['theme']): string {
         <div class="settings-brand">Z</div>
 
         <button class="back-button" type="button" @click="emit('close')">
-          <span aria-hidden="true">‹</span>
+          <span aria-hidden="true"><AppIcon name="chevron-left" :size="16" /></span>
           <span>返回工作区</span>
         </button>
 
@@ -195,37 +283,80 @@ function themeLabel(theme: AppSettings['theme']): string {
             type="button"
             @click="activeSection = item.key"
           >
-            <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+            <span class="nav-icon" aria-hidden="true">
+              <AppIcon :name="item.icon" :size="15" />
+            </span>
             <span class="nav-label">{{ item.label }}</span>
           </button>
         </nav>
 
         <div class="sidebar-footer">
           <button class="account-button" type="button">
-            <span class="account-avatar" aria-hidden="true">◌</span>
+            <span class="account-avatar" aria-hidden="true">
+              <AppIcon name="plug" :size="14" />
+            </span>
             <span>连接使用</span>
           </button>
-          <button class="footer-gear" type="button" title="设置">⚙</button>
+          <button class="footer-gear" type="button" title="设置">
+            <AppIcon name="settings" :size="15" />
+          </button>
         </div>
       </aside>
 
       <main class="settings-main">
         <header class="settings-topbar">
           <button class="window-action close" type="button" title="关闭设置" @click="emit('close')">
-            ×
+            <AppIcon name="x" :size="14" />
           </button>
         </header>
 
         <div class="settings-page">
           <section class="page-heading">
             <h1>{{ activeTitle }}</h1>
-            <div v-if="activeSection === 'general'" class="heading-pills">
+            <div v-if="activeSection === 'appearance'" class="heading-pills">
               <span>{{ themeLabel(settingsStore.settings.theme) }}</span>
-              <span>系统默认</span>
+              <span>{{ activeBackgroundColor ? activeBackgroundColor : '主题默认' }}</span>
             </div>
           </section>
 
           <section v-if="activeSection === 'general'" class="settings-stack">
+            <div class="settings-card">
+              <label class="setting-row">
+                <span class="setting-copy">
+                  <strong>自动上下文压缩</strong>
+                  <small>对话接近上下文限制时，自动总结较早内容。</small>
+                </span>
+                <span class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.settings.autoCompact"
+                    @change="updateAutoCompact"
+                  />
+                  <span />
+                </span>
+              </label>
+
+              <label class="setting-row">
+                <span class="setting-copy">
+                  <strong>压缩触发阈值</strong>
+                  <small>达到模型上下文窗口的指定比例后触发压缩。</small>
+                </span>
+                <span class="range-control">
+                  <input
+                    type="range"
+                    min="50"
+                    max="95"
+                    step="5"
+                    :value="Math.round(settingsStore.settings.compactThreshold * 100)"
+                    @input="updateCompactThreshold"
+                  />
+                  <span>{{ Math.round(settingsStore.settings.compactThreshold * 100) }}%</span>
+                </span>
+              </label>
+            </div>
+          </section>
+
+          <section v-else-if="activeSection === 'appearance'" class="settings-stack">
             <div class="settings-card">
               <label class="setting-row">
                 <span class="setting-copy">
@@ -263,38 +394,48 @@ function themeLabel(theme: AppSettings['theme']): string {
             </div>
 
             <div class="settings-card">
-              <label class="setting-row">
+              <div class="setting-row static bg-color-row">
                 <span class="setting-copy">
-                  <strong>自动上下文压缩</strong>
-                  <small>对话接近上下文限制时，自动总结较早内容。</small>
+                  <strong>全局背景色</strong>
+                  <small>自定义应用主背景。选择「主题默认」可恢复当前主题配色。</small>
                 </span>
-                <span class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.settings.autoCompact"
-                    @change="updateAutoCompact"
+                <span class="bg-color-actions">
+                  <BackgroundColorPicker
+                    :model-value="activeBackgroundColor || pickerFallback"
+                    :fallback="pickerFallback"
+                    @update:model-value="updateBackgroundFromPicker"
                   />
-                  <span />
+                  <button
+                    class="save-button"
+                    type="button"
+                    :disabled="!activeBackgroundColor"
+                    @click="resetBackgroundColor"
+                  >
+                    主题默认
+                  </button>
                 </span>
-              </label>
+              </div>
 
-              <label class="setting-row">
-                <span class="setting-copy">
-                  <strong>压缩触发阈值</strong>
-                  <small>达到模型上下文窗口的指定比例后触发压缩。</small>
-                </span>
-                <span class="range-control">
-                  <input
-                    type="range"
-                    min="50"
-                    max="95"
-                    step="5"
-                    :value="Math.round(settingsStore.settings.compactThreshold * 100)"
-                    @input="updateCompactThreshold"
-                  />
-                  <span>{{ Math.round(settingsStore.settings.compactThreshold * 100) }}%</span>
-                </span>
-              </label>
+              <div class="bg-palette">
+                <button
+                  v-for="preset in BACKGROUND_PRESETS"
+                  :key="preset.color"
+                  type="button"
+                  class="bg-swatch"
+                  :class="{ active: isPresetActive(preset.color) }"
+                  :style="{ background: preset.color }"
+                  :title="`${preset.label} · ${preset.color}`"
+                  :aria-label="`背景色 ${preset.label}`"
+                  :aria-pressed="isPresetActive(preset.color)"
+                  @click="selectBackgroundPreset(preset.color)"
+                />
+              </div>
+
+              <div v-if="activeBackgroundColor" class="bg-color-meta">
+                当前：
+                <strong v-if="activePresetLabel">{{ activePresetLabel }}</strong>
+                <code>{{ activeBackgroundColor }}</code>
+              </div>
             </div>
           </section>
 
@@ -610,6 +751,9 @@ function themeLabel(theme: AppSettings['theme']): string {
   overflow: hidden;
   background: var(--color-bg);
   color: var(--color-text);
+  /* Frameless window: prevent slider/switch drag from moving the window. */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .settings-sidebar {
@@ -628,7 +772,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   align-items: center;
   justify-content: center;
   margin: 0 0 42px 6px;
-  border-radius: 5px;
+  border-radius: var(--border-radius-sm);
   background: var(--color-bg-tertiary);
   color: var(--color-text);
   font-size: 14px;
@@ -640,7 +784,16 @@ function themeLabel(theme: AppSettings['theme']): string {
 .nav-item,
 .account-button,
 .footer-gear,
-.window-action {
+.window-action,
+.settings-page,
+.settings-page input,
+.settings-page button,
+.settings-page select,
+.settings-page label,
+.settings-page .switch,
+.settings-page .toggle-switch,
+.settings-page .range-control,
+.settings-sidebar {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
@@ -699,10 +852,11 @@ function themeLabel(theme: AppSettings['theme']): string {
 }
 
 .nav-icon {
+  display: inline-flex;
   width: 22px;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-secondary);
-  font-size: 14px;
-  text-align: center;
 }
 
 .nav-label {
@@ -765,7 +919,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border-top-left-radius: 12px;
+  border-top-left-radius: var(--border-radius-lg);
   background: var(--color-bg);
 }
 
@@ -831,7 +985,7 @@ function themeLabel(theme: AppSettings['theme']): string {
 
 .heading-pills span {
   padding: 7px 14px;
-  border-radius: 10px;
+  border-radius: var(--border-radius-pill);
   background: var(--color-surface-hover);
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -847,7 +1001,7 @@ function themeLabel(theme: AppSettings['theme']): string {
 .settings-card {
   overflow: hidden;
   border: 1px solid var(--border-color-strong);
-  border-radius: 12px;
+  border-radius: var(--border-radius-lg);
   background: var(--color-surface);
 }
 
@@ -894,7 +1048,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   width: 240px;
   height: 34px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 10px;
+  border-radius: var(--border-radius);
   background: var(--color-surface);
   color: var(--color-text);
   font-size: 14px;
@@ -908,6 +1062,8 @@ function themeLabel(theme: AppSettings['theme']): string {
   padding: 0 12px;
 }
 
+/* ── Range slider (modern track + thumb, common open-source pattern) ── */
+
 .range-control {
   display: flex;
   width: min(320px, 40vw);
@@ -915,9 +1071,86 @@ function themeLabel(theme: AppSettings['theme']): string {
   gap: 14px;
 }
 
-.range-control input {
+.range-control input[type='range'] {
   flex: 1;
-  accent-color: var(--color-text);
+  height: 22px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+  /* Must stay no-drag or thumb drag moves the frameless window. */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.range-control input[type='range']:focus {
+  outline: none;
+}
+
+.range-control input[type='range']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+
+/* Track — WebKit */
+.range-control input[type='range']::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 28%, var(--color-bg-tertiary));
+}
+
+/* Thumb — WebKit */
+.range-control input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.range-control input[type='range']:hover::-webkit-slider-thumb {
+  transform: scale(1.06);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.24),
+    0 0 0 4px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.range-control input[type='range']:active::-webkit-slider-thumb {
+  transform: scale(0.98);
+}
+
+/* Track / thumb — Firefox */
+.range-control input[type='range']::-moz-range-track {
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 28%, var(--color-bg-tertiary));
+}
+
+.range-control input[type='range']::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .range-control span {
@@ -928,46 +1161,77 @@ function themeLabel(theme: AppSettings['theme']): string {
   text-align: right;
 }
 
+/*
+ * iOS-style toggle switch (widely used open-source pattern).
+ * Soft track, elevated white knob, green when on.
+ */
 .switch {
   position: relative;
   display: inline-flex;
-  width: 42px;
-  height: 24px;
+  width: 51px;
+  height: 31px;
   flex: 0 0 auto;
+  cursor: pointer;
 }
 
+/* Invisible hit target covering the whole control (must not be 0×0). */
 .switch input {
   position: absolute;
   inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   opacity: 0;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .switch span {
   position: absolute;
   inset: 0;
+  z-index: 1;
   border-radius: 999px;
-  background: var(--color-overlay);
-  transition: background 0.15s ease;
+  background: color-mix(in srgb, var(--color-text-muted) 55%, var(--color-overlay));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+  transition: background 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .switch span::after {
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
   border-radius: 50%;
-  background: var(--color-surface);
+  background: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.16),
+    0 2px 6px rgba(0, 0, 0, 0.14);
   content: '';
-  transition: transform 0.15s ease;
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .switch input:checked + span {
-  background: var(--color-text);
+  background: var(--color-green, #34c759);
+  box-shadow: none;
 }
 
 .switch input:checked + span::after {
-  transform: translateX(18px);
+  transform: translateX(20px);
+}
+
+.switch input:focus-visible + span {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+  outline-offset: 2px;
+}
+
+.switch:hover span::after {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.2),
+    0 3px 8px rgba(0, 0, 0, 0.16);
 }
 
 .level-grid {
@@ -985,6 +1249,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   gap: 6px;
   padding: 12px;
   border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
   background: var(--color-bg);
   color: var(--color-text);
   text-align: left;
@@ -1086,7 +1351,7 @@ function themeLabel(theme: AppSettings['theme']): string {
   height: 34px;
   flex: 0 0 auto;
   padding: 0 16px;
-  border-radius: 10px;
+  border-radius: var(--border-radius-pill);
   background: var(--color-overlay);
   color: var(--color-text);
   font-weight: 600;
@@ -1120,7 +1385,74 @@ function themeLabel(theme: AppSettings['theme']): string {
   }
 }
 
-/* ── Toggle Switch ── */
+/* ── Background color palette ── */
+
+.bg-color-row {
+  align-items: flex-start;
+}
+
+.bg-color-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.bg-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 20px 18px;
+}
+
+.bg-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--border-color-strong);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.bg-swatch:hover {
+  transform: scale(1.1);
+  border-color: var(--color-text-secondary);
+}
+
+.bg-swatch.active {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+.bg-color-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 20px 18px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.bg-color-meta strong {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.bg-color-meta code {
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* ── Toggle Switch (same iOS-style as .switch) ── */
 
 .toggle-row {
   cursor: default;
@@ -1129,43 +1461,69 @@ function themeLabel(theme: AppSettings['theme']): string {
 .toggle-switch {
   position: relative;
   display: inline-block;
-  width: 44px;
-  height: 24px;
+  width: 51px;
+  height: 31px;
   flex-shrink: 0;
   cursor: pointer;
 }
 
+/* Invisible hit target covering the whole control (must not be 0×0). */
 .toggle-switch input {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   opacity: 0;
-  width: 0;
-  height: 0;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .toggle-slider {
   position: absolute;
   inset: 0;
-  border-radius: 24px;
-  background: var(--color-text-muted);
-  transition: background 0.2s;
+  z-index: 1;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 55%, var(--color-overlay));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+  transition: background 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .toggle-slider::before {
   position: absolute;
-  left: 3px;
-  bottom: 3px;
-  width: 18px;
-  height: 18px;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
   border-radius: 50%;
-  background: var(--color-bg);
+  background: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.16),
+    0 2px 6px rgba(0, 0, 0, 0.14);
   content: '';
-  transition: transform 0.2s;
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .toggle-switch input:checked + .toggle-slider {
-  background: var(--color-accent);
+  background: var(--color-green, #34c759);
+  box-shadow: none;
 }
 
 .toggle-switch input:checked + .toggle-slider::before {
   transform: translateX(20px);
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+  outline-offset: 2px;
+}
+
+.toggle-switch:hover .toggle-slider::before {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.2),
+    0 3px 8px rgba(0, 0, 0, 0.16);
 }
 </style>

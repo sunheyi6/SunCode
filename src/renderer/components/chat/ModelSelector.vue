@@ -8,6 +8,8 @@ import {
 } from '../../composables/useDropdown';
 import { useChatStore } from '../../stores/chat';
 import { useModelsStore } from '../../stores/models';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -84,7 +86,7 @@ defineExpose({
       @click="toggle"
     >
       <span class="btn-label">{{ currentModelLabel }}</span>
-      <span class="chevron" aria-hidden="true">⌄</span>
+      <span class="chevron" aria-hidden="true"><AppIcon name="chevron-down" :size="14" /></span>
     </button>
     <div v-if="isOpen" class="dropdown-menu model-menu" role="menu">
       <button
@@ -123,7 +125,7 @@ defineExpose({
   height: 34px;
   padding: 0 9px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--border-radius-pill);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 14px;
@@ -170,9 +172,11 @@ defineExpose({
   max-height: 280px;
   overflow-y: auto;
   border: 1px solid var(--border-color-strong);
-  border-radius: 12px;
-  background: var(--color-bg);
-  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
+  border-radius: var(--border-radius-lg);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
   z-index: 100;
 }
 
@@ -199,7 +203,7 @@ defineExpose({
   width: 100%;
   padding: 8px 11px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--border-radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px;

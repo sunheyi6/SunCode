@@ -18,7 +18,7 @@ export interface SlashCommand {
   description: string;
   /** Longer hint text shown as subtitle. */
   hint?: string;
-  /** Icon (emoji or unicode). */
+  /** Lucide icon name rendered by AppIcon. */
   icon: string;
   /**
    * Where the command is handled.
@@ -38,7 +38,7 @@ export const BUILTIN_COMMANDS: SlashCommand[] = [
     name: 'goal',
     description: '自主目标模式',
     hint: '系统将自动验证并重试直到目标完成。用法: /goal 任务描述 --verify "验证命令"',
-    icon: '🎯',
+    icon: 'target',
     handler: 'text',
     argsLabel: '任务描述 [--verify "验证命令"]',
   },
@@ -46,28 +46,28 @@ export const BUILTIN_COMMANDS: SlashCommand[] = [
     name: 'clear',
     description: '清空当前对话',
     hint: '清除所有历史消息，开始新对话',
-    icon: '🗑',
+    icon: 'trash',
     handler: 'local',
   },
   {
     name: 'compact',
     description: '压缩对话历史',
     hint: '将旧的对话轮次折叠为摘要，释放上下文空间',
-    icon: '📦',
+    icon: 'package',
     handler: 'text',
   },
   {
     name: 'help',
     description: '显示帮助信息',
     hint: '显示可用命令和使用说明',
-    icon: '❓',
+    icon: 'help',
     handler: 'text',
   },
   {
     name: 'init',
     description: '为当前项目初始化 AGENTS.md 项目约束',
     hint: 'AI 自动扫描项目结构，生成项目约束文件 AGENTS.md。核心是项目约束，不要将实现细节写入——详细文档请放在 docs/ 目录。',
-    icon: '🚀',
+    icon: 'rocket',
     handler: 'text',
   },
 ];

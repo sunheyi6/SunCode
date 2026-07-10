@@ -244,6 +244,11 @@ export interface AppSettings {
   autoCompact: boolean;
   compactThreshold: number; // 0-1 fraction of context window
   theme: 'system' | 'light' | 'dark';
+  /**
+   * Optional global background color override (hex, e.g. `#1a1a2e`).
+   * When unset/empty, the active theme palette is used.
+   */
+  backgroundColor?: string;
   /** Agent permission mode */
   permissionMode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes';
   /** Shell preference for command execution on Windows. */

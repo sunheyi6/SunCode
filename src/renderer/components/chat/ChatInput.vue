@@ -7,6 +7,8 @@ import { bridge } from '../../api/bridge';
 import { useDropdownGroup } from '../../composables/useDropdown';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 import CommandDropdown from './CommandDropdown.vue';
 import {
   COLLAPSED_TEXTAREA_HEIGHT,
@@ -469,7 +471,7 @@ watch(
 
       <!-- Goal mode indicator -->
       <div v-if="isGoalInput" class="goal-indicator">
-        <span class="goal-icon">🎯</span>
+        <span class="goal-icon"><AppIcon name="target" :size="14" /></span>
         <span class="goal-label">Goal 自主模式</span>
         <span class="goal-hint">系统将自动验证并重试直到目标完成</span>
       </div>
@@ -489,13 +491,14 @@ watch(
         class="input-expand-btn"
         @click="toggleInputExpand"
       >
-        {{ inputExpanded ? '收起 ▲' : `展开更多 ▼` }}
+        <AppIcon :name="inputExpanded ? 'chevron-up' : 'chevron-down'" :size="13" />
+        {{ inputExpanded ? '收起' : '展开更多' }}
       </button>
 
       <div class="composer-toolbar">
         <div class="toolbar-group toolbar-left">
           <button class="icon-btn add-btn" type="button" aria-label="添加上下文" disabled>
-            <span aria-hidden="true">＋</span>
+            <span aria-hidden="true"><AppIcon name="plus" :size="15" /></span>
           </button>
 
           <PermissionSelector :dropdown="permissionDropdown" />
@@ -573,7 +576,7 @@ watch(
   margin: 0 auto;
   padding: 0;
   overflow: visible;
-  border-radius: 20px;
+  border-radius: var(--border-radius-xl);
   background: var(--color-bg-secondary);
 }
 
@@ -650,11 +653,9 @@ watch(
   padding: 14px 16px;
   overflow: visible;
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
+  border-radius: var(--border-radius-lg);
   background: var(--color-bg);
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.04),
-    0 4px 16px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
@@ -663,9 +664,9 @@ watch(
 .chat-input-empty .composer {
   padding: 14px 16px;
   border-color: var(--border-color-strong);
-  border-radius: 18px;
+  border-radius: var(--border-radius-xl);
   background: var(--color-surface);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-md);
 }
 
 .composer:has(.goal-indicator) {
@@ -713,8 +714,10 @@ watch(
 }
 
 .goal-icon {
-  font-size: 16px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-orange);
 }
 
 .goal-label {
@@ -837,7 +840,7 @@ watch(
 }
 
 .chat-input-empty .send-btn {
-  border-radius: 10px;
+  border-radius: 50%;
 }
 
 .chat-input-empty :deep(.workspace-bar) {
@@ -877,6 +880,7 @@ watch(
   height: 34px;
   gap: 6px;
   padding: 0 7px;
+  border-radius: var(--border-radius-pill);
   color: var(--color-text-secondary);
   font-size: 14px;
   white-space: nowrap;
@@ -1000,7 +1004,7 @@ watch(
     background: linear-gradient(135deg, #1a1a1a 0%, #000 100%);
     color: #fff;
     border: 0;
-    border-radius: 10px;
+    border-radius: 50%;
     cursor: pointer;
     box-shadow: 0 2px 10px color-mix(in srgb, #000 25%, transparent);
     transition:
@@ -1028,9 +1032,9 @@ watch(
   max-height: 280px;
   overflow-y: auto;
   border: 1px solid var(--border-color-strong);
-  border-radius: 14px;
+  border-radius: var(--border-radius-lg);
   background: var(--color-bg);
-  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
   z-index: 100;
 }
 

@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
 import { useConfirmDialog } from '../../composables/useConfirmDialog';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
 import CallTracePanel from '../chat/CallTracePanel.vue';
 import ChatPanel from '../chat/ChatPanel.vue';
 import ConfirmDialog from '../chat/ConfirmDialog.vue';
-import SettingsPanel from '../settings/SettingsPanel.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 import ConversationSidebar from './ConversationSidebar.vue';
 import GitPanel from './GitPanel.vue';
 import ToastContainer from './ToastContainer.vue';
+
+// Lazy-load settings (and vanilla-colorful) only when the panel opens.
+const SettingsPanel = defineAsyncComponent(() => import('../settings/SettingsPanel.vue'));
 
 const chatStore = useChatStore();
 const sessionsStore = useSessionsStore();
@@ -106,7 +110,7 @@ const traceSystemPrompt = computed(() => {
         <!-- Settings button at bottom of sidebar (hidden when collapsed) -->
         <div v-if="!sidebarCollapsed" class="sidebar-footer">
           <button class="settings-btn" title="设置 (Ctrl+,)" @click="showSettings = true">
-            <span class="settings-icon">⚙️</span>
+            <span class="settings-icon"><AppIcon name="settings" :size="16" /></span>
             <span class="settings-label">设置</span>
           </button>
         </div>
@@ -130,7 +134,8 @@ const traceSystemPrompt = computed(() => {
           :title="chatStore.showCallTrace ? '关闭调用轨迹' : '打开调用轨迹'"
           @click="chatStore.toggleCallTrace()"
         >
-          {{ chatStore.showCallTrace ? '◀' : '调用轨迹' }}
+          <AppIcon v-if="chatStore.showCallTrace" name="chevron-left" :size="14" />
+          <template v-else>调用轨迹</template>
         </div>
       </main>
 
@@ -219,7 +224,7 @@ const traceSystemPrompt = computed(() => {
   padding: 8px 10px;
   background: transparent;
   border: none;
-  border-radius: var(--border-radius-sm);
+  border-radius: var(--border-radius-pill);
   color: var(--sidebar-text-secondary);
   font-size: 13px;
   cursor: pointer;
@@ -232,7 +237,9 @@ const traceSystemPrompt = computed(() => {
 }
 
 .settings-icon {
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .settings-label {
@@ -297,7 +304,7 @@ const traceSystemPrompt = computed(() => {
   background: var(--color-bg-secondary);
   border: 1px solid var(--border-color);
   border-right: none;
-  border-radius: 8px 0 0 8px;
+  border-radius: var(--border-radius) 0 0 var(--border-radius);
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: 12px;

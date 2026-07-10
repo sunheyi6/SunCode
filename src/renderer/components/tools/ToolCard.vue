@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { ToolExecution } from '../../stores/agent';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import ToolMarkdownOutput from './ToolMarkdownOutput.vue';
 
 defineProps<{
@@ -13,7 +15,10 @@ defineProps<{
     <div class="tool-header">
       <span v-if="execution.status === 'running'" class="tool-breathe-dot" />
       <span class="tool-icon">
-        {{ execution.status === 'running' ? '⏳' : execution.status === 'done' ? '✅' : '❌' }}
+        <AppIcon
+          :name="execution.status === 'running' ? 'loader' : execution.status === 'done' ? 'check-circle' : 'x'"
+          :size="14"
+        />
       </span>
       <span class="tool-name">{{ execution.toolName }}</span>
       <span class="tool-duration">
@@ -78,7 +83,9 @@ defineProps<{
 }
 
 .tool-icon {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tool-name {

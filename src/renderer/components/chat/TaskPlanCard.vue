@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { TaskPlan } from '@shared/types';
 import { computed } from 'vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = defineProps<{
   taskPlan: TaskPlan;
@@ -11,10 +13,18 @@ const totalCount = computed(() => props.taskPlan.steps.length);
 const doneCount = computed(() => props.taskPlan.steps.filter((s) => s.status === 'done').length);
 const allDone = computed(() => doneCount.value === totalCount.value);
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function stepIcon(status: string): string {
-  if (status === 'done') return '✓';
-  if (status === 'in_progress') return '◉';
-  return '○';
+  if (status === 'done') return 'check';
+  if (status === 'in_progress') return 'circle-dot';
+  return 'circle';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function planBadgeIcon(): string {
+  if (props.isStreaming) return 'loader';
+  if (allDone.value) return 'check-circle';
+  return 'list-checks';
 }
 </script>
 
@@ -23,7 +33,7 @@ function stepIcon(status: string): string {
     <!-- Header -->
     <div class="plan-header">
       <span class="plan-badge">
-        {{ isStreaming ? '🔄' : allDone ? '✅' : '📋' }}
+        <AppIcon :name="planBadgeIcon()" :size="13" />
         {{ taskPlan.taskType === 'execution' ? '执行计划' : '查询' }}
       </span>
       <span class="plan-progress">
@@ -42,7 +52,7 @@ function stepIcon(status: string): string {
         :class="`step-${step.status}`"
       >
         <span class="step-icon" :class="`icon-${step.status}`">
-          {{ stepIcon(step.status) }}
+          <AppIcon :name="stepIcon(step.status)" :size="13" />
         </span>
         <span class="step-desc">{{ step.description }}</span>
         <span v-if="step.result" class="step-result">{{ step.result }}</span>
@@ -76,6 +86,9 @@ function stepIcon(status: string): string {
 }
 
 .plan-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text);

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const props = defineProps<{
   message: ChatMessage;
@@ -62,7 +64,8 @@ async function copyContent(text: string) {
         class="expand-btn"
         @click="toggleExpand"
       >
-        {{ expanded ? '收起 ▲' : `展开更多 ${message.content.split('\n').length} 行 ▼` }}
+        <AppIcon :name="expanded ? 'chevron-up' : 'chevron-down'" :size="12" />
+        {{ expanded ? '收起' : `展开更多 ${message.content.split('\n').length} 行` }}
       </button>
     </div>
     <div class="message-footer">
@@ -73,7 +76,8 @@ async function copyContent(text: string) {
         title="复制消息"
         @click="copyContent(message.content)"
       >
-        {{ copied ? '✓ 已复制' : '📋' }}
+        <AppIcon :name="copied ? 'check' : 'copy'" :size="12" />
+        {{ copied ? '已复制' : '' }}
       </button>
     </div>
   </div>
@@ -140,6 +144,9 @@ async function copyContent(text: string) {
 }
 
 .copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 1px 4px;
   background: none;
   border: none;

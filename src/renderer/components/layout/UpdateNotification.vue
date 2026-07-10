@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useUpdateStore } from '../../stores/update';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const store = useUpdateStore();
 
@@ -30,17 +32,19 @@ const speedLabel = computed(() => {
 
       <!-- Update available -->
       <div v-else-if="store.status.state === 'update-available'" class="banner-content">
-        <span class="banner-icon">&#x1F4E6;</span>
+        <span class="banner-icon"><AppIcon name="package" :size="15" /></span>
         <span class="banner-text">
           新版本 <strong>{{ store.status.version }}</strong> 可用
         </span>
         <button class="btn-primary" @click="store.startUpdate()">下载更新</button>
-        <button class="btn-dismiss" title="跳过此版本" @click="store.dismiss()">&times;</button>
+        <button class="btn-dismiss" title="跳过此版本" @click="store.dismiss()">
+          <AppIcon name="x" :size="14" />
+        </button>
       </div>
 
       <!-- Downloading -->
       <div v-else-if="store.status.state === 'downloading'" class="banner-content">
-        <span class="banner-icon">&#x2B07;</span>
+        <span class="banner-icon"><AppIcon name="download" :size="15" /></span>
         <div class="progress-wrapper">
           <div class="progress-bar">
             <div class="progress-fill" :style="{ width: progressPercent + '%' }" />
@@ -50,12 +54,14 @@ const speedLabel = computed(() => {
             <span v-if="speedLabel" class="speed">&middot; {{ speedLabel }}</span>
           </span>
         </div>
-        <button class="btn-dismiss" title="隐藏" @click="store.dismiss()">&times;</button>
+        <button class="btn-dismiss" title="隐藏" @click="store.dismiss()">
+          <AppIcon name="x" :size="14" />
+        </button>
       </div>
 
       <!-- Downloaded -->
       <div v-else-if="store.status.state === 'downloaded'" class="banner-content">
-        <span class="banner-icon">&#x2705;</span>
+        <span class="banner-icon"><AppIcon name="check-circle" :size="15" /></span>
         <span class="banner-text">
           更新已就绪，重启以安装 <strong>{{ store.status.version }}</strong>
         </span>
@@ -65,10 +71,12 @@ const speedLabel = computed(() => {
 
       <!-- Error -->
       <div v-else-if="store.status.state === 'error'" class="banner-content">
-        <span class="banner-icon">&#x26A0;</span>
+        <span class="banner-icon"><AppIcon name="alert-triangle" :size="15" /></span>
         <span class="banner-text">检查更新失败：{{ store.status.error }}</span>
         <button class="btn-primary" @click="store.checkForUpdates()">重试</button>
-        <button class="btn-dismiss" title="关闭" @click="store.dismiss()">&times;</button>
+        <button class="btn-dismiss" title="关闭" @click="store.dismiss()">
+          <AppIcon name="x" :size="14" />
+        </button>
       </div>
     </div>
   </Transition>
@@ -93,8 +101,10 @@ const speedLabel = computed(() => {
 }
 
 .banner-icon {
-  font-size: 15px;
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
 }
 
 .banner-text {

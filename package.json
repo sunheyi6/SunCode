@@ -52,10 +52,12 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9",
+    "lucide-vue-next": "^1.0.0",
     "markstream-vue": "^1.0.5",
     "pinia": "^3.0.4",
     "shiki": "^4.3.1",
     "stream-markdown": "^0.0.16",
+    "vanilla-colorful": "^0.7.2",
     "vue": "^3.5.0",
     "yaml": "^2.6.0"
   },

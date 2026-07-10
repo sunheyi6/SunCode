@@ -7,6 +7,8 @@ import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses
 import { useToast } from '../../composables/useToast';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 
 const sessionsStore = useSessionsStore();
 const chatStore = useChatStore();
@@ -125,10 +127,25 @@ const visiblePlanSteps = computed(() => {
 
 const hiddenPlanCount = computed(() => Math.max(0, planSteps.value.length - 5));
 
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function planStepIcon(status: string): string {
-  if (status === 'done') return '✓';
-  if (status === 'in_progress') return '◉';
-  return '○';
+  if (status === 'done') return 'check';
+  if (status === 'in_progress') return 'circle-dot';
+  return 'circle';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function pillPlanIcon(): string {
+  if (chatStore.isStreaming) return 'circle-dot';
+  if (planAllDone.value) return 'check';
+  return 'circle';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function processStatusIcon(status: string): string {
+  if (status === 'running') return 'loader';
+  if (status === 'completed') return 'check';
+  return 'x';
 }
 
 const showPanel = computed(
@@ -267,7 +284,7 @@ async function doCommit(): Promise<void> {
   // Auto-generate if empty
   if (!msg) {
     generatingCommitMsg.value = true;
-    commitFeedback.value = '🤖 AI 正在生成提交信息...';
+    commitFeedback.value = 'AI 正在生成提交信息...';
     try {
       const result = await bridge.generateCommitMessage(dir);
       msg = result.message;
@@ -285,7 +302,7 @@ async function doCommit(): Promise<void> {
   try {
     const result = await bridge.gitCommit(dir, msg);
     if (result.success) {
-      commitFeedback.value = '✓ 提交成功';
+      commitFeedback.value = '提交成功';
       commitMessage.value = '';
       showCommitForm.value = false;
       void refreshGit();
@@ -433,19 +450,19 @@ watch(collapsed, (isCollapsed) => {
     >
       <!-- Plan summary in pill -->
       <template v-if="hasPlan">
-        <span class="pill-icon" aria-hidden="true">{{ chatStore.isStreaming ? '◉' : planAllDone ? '✓' : '○' }}</span>
+        <span class="pill-icon" aria-hidden="true"><AppIcon :name="pillPlanIcon()" :size="14" /></span>
         <span class="pill-label pill-task-label">{{ currentPlanStep?.description ?? currentPlanLabel }}</span>
         <span class="pill-progress">{{ planDone }}/{{ planTotal }}</span>
       </template>
       <!-- Running task summary in pill -->
       <template v-else-if="currentRunningProcess">
-        <span class="pill-icon" aria-hidden="true">◉</span>
+        <span class="pill-icon" aria-hidden="true"><AppIcon name="circle-dot" :size="14" /></span>
         <span class="pill-label pill-task-label">{{ currentRunningProcess.command }}</span>
         <span class="pill-progress">{{ formatProcessTime(currentRunningProcess) }}</span>
       </template>
       <!-- Git summary in pill -->
       <template v-else-if="gitStatus.isRepo">
-        <span class="pill-icon" aria-hidden="true">▣</span>
+        <span class="pill-icon" aria-hidden="true"><AppIcon name="git-commit" :size="14" /></span>
         <span class="pill-label">更改</span>
         <span class="pill-count">
           <strong class="added">+{{ gitStatus.addedLines }}</strong>
@@ -465,8 +482,12 @@ watch(collapsed, (isCollapsed) => {
       <header class="card-top" @mousedown="onHandleMouseDown">
         <span class="panel-title">{{ panelTitle }}</span>
         <span class="panel-actions">
-          <button type="button" class="icon-button" aria-label="刷新 Git 信息" @mousedown.stop @click="refreshGit">•••</button>
-          <button type="button" class="icon-button" aria-label="收起 Git 面板" @mousedown.stop @click="togglePanel">↙</button>
+          <button type="button" class="icon-button" aria-label="刷新 Git 信息" @mousedown.stop @click="refreshGit">
+            <AppIcon name="refresh" :size="14" />
+          </button>
+          <button type="button" class="icon-button" aria-label="收起 Git 面板" @mousedown.stop @click="togglePanel">
+            <AppIcon name="panel-bottom" :size="14" />
+          </button>
         </span>
       </header>
 
@@ -476,35 +497,53 @@ watch(collapsed, (isCollapsed) => {
         class="conversation-row"
         :class="{ streaming: isConversationStreaming }"
       >
-        <span class="row-label"><span aria-hidden="true">⏱</span>{{ isConversationStreaming ? '对话中' : '对话耗时' }}</span>
+        <span class="row-label">
+          <span aria-hidden="true"><AppIcon name="timer" :size="13" /></span>
+          {{ isConversationStreaming ? '对话中' : '对话耗时' }}
+        </span>
         <span class="conversation-time">{{ conversationElapsed }}</span>
       </div>
 
       <!-- ═══ Git Section ═══ -->
       <template v-if="gitStatus.isRepo">
         <div class="info-row">
-          <span class="row-label"><span aria-hidden="true">▣</span>更改</span>
+          <span class="row-label">
+            <span aria-hidden="true"><AppIcon name="git-commit" :size="13" /></span>
+            更改
+          </span>
           <span class="line-stats">
             <strong class="added">+{{ gitStatus.addedLines }}</strong>
             <strong class="deleted">-{{ gitStatus.deletedLines }}</strong>
           </span>
         </div>
         <div class="branch-row">
-          <span class="row-label"><span aria-hidden="true">⑂</span>{{ gitStatus.branch || 'HEAD' }}</span>
-          <span aria-hidden="true">⌄</span>
+          <span class="row-label">
+            <span aria-hidden="true"><AppIcon name="git-branch" :size="13" /></span>
+            {{ gitStatus.branch || 'HEAD' }}
+          </span>
+          <span aria-hidden="true"><AppIcon name="chevron-down" :size="13" /></span>
         </div>
         <button type="button" class="commit-row" title="创建提交" @click="toggleCommitForm">
-          <span class="row-label"><span aria-hidden="true">─</span>提交</span><span>{{ showCommitForm ? '收起' : '•••' }}</span>
+          <span class="row-label">
+            <span aria-hidden="true"><AppIcon name="git-commit" :size="13" /></span>
+            提交
+          </span>
+          <span>
+            <template v-if="showCommitForm">收起</template>
+            <AppIcon v-else name="more" :size="14" />
+          </span>
         </button>
 
         <div v-if="showCommitForm" class="commit-form">
           <textarea v-model="commitMessage" class="commit-textarea" placeholder="输入提交信息（留空可点 AI 生成）" rows="3" />
           <div class="commit-actions">
             <button type="button" class="ai-gen-btn" :disabled="generatingCommitMsg" @click="generateCommitMessage">
-              {{ generatingCommitMsg ? '⚡ 生成中...' : '🤖 AI 生成' }}
+              <AppIcon :name="generatingCommitMsg ? 'loader' : 'sparkles'" :size="13" />
+              {{ generatingCommitMsg ? '生成中...' : 'AI 生成' }}
             </button>
             <button type="button" class="commit-submit-btn" :disabled="committing" @click="doCommit">
-              {{ committing ? '⏳ 提交中...' : '提交' }}
+              <AppIcon v-if="committing" name="loader" :size="13" />
+              {{ committing ? '提交中...' : '提交' }}
             </button>
           </div>
           <div v-if="commitFeedback" class="commit-feedback">{{ commitFeedback }}</div>
@@ -530,7 +569,9 @@ watch(collapsed, (isCollapsed) => {
             class="step-row"
             :class="`step-${step.status}`"
           >
-            <span class="step-icon" :class="`icon-${step.status}`">{{ planStepIcon(step.status) }}</span>
+            <span class="step-icon" :class="`icon-${step.status}`">
+              <AppIcon :name="planStepIcon(step.status)" :size="13" />
+            </span>
             <span class="step-desc">{{ step.description }}</span>
             <span v-if="step.result" class="step-result">{{ step.result }}</span>
           </div>
@@ -560,7 +601,7 @@ watch(collapsed, (isCollapsed) => {
             :title="proc.command"
           >
             <span :class="['status-dot', proc.status]">
-              {{ proc.status === 'running' ? '●' : proc.status === 'completed' ? '✓' : '×' }}
+              <AppIcon :name="processStatusIcon(proc.status)" :size="12" />
             </span>
             <span class="process-command-text">{{ proc.command }}</span>
             <span
@@ -654,10 +695,10 @@ watch(collapsed, (isCollapsed) => {
   max-height: min(520px, calc(100vh - 144px));
   overflow: hidden;
   border: 1px solid var(--border-color-strong);
-  border-radius: 20px;
+  border-radius: var(--border-radius-xl);
   background: color-mix(in srgb, var(--color-surface) 98%, transparent);
   color: var(--color-text);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-lg);
   backdrop-filter: blur(14px);
   overflow-y: auto;
 }
@@ -760,7 +801,7 @@ watch(collapsed, (isCollapsed) => {
   height: 18px;
   padding: 0;
   border: 1px solid var(--color-red);
-  border-radius: 4px;
+  border-radius: 50%;
   background: transparent;
   color: var(--color-red);
   font-size: 9px;
@@ -815,7 +856,7 @@ watch(collapsed, (isCollapsed) => {
   height: 26px;
   padding: 0;
   border: none;
-  border-radius: 7px;
+  border-radius: 50%;
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -838,7 +879,7 @@ watch(collapsed, (isCollapsed) => {
   margin: 2px 10px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   background: var(--color-bg-secondary);
   color: var(--color-text);
 }
@@ -896,7 +937,7 @@ watch(collapsed, (isCollapsed) => {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   background: var(--color-bg-tertiary);
   color: var(--color-text);
   font-size: 13px;
@@ -921,10 +962,14 @@ watch(collapsed, (isCollapsed) => {
 
 .ai-gen-btn,
 .commit-submit-btn {
+  display: inline-flex;
   flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 6px 12px;
   border: 1px solid var(--border-color-strong);
-  border-radius: 8px;
+  border-radius: var(--border-radius-pill);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
@@ -966,7 +1011,11 @@ watch(collapsed, (isCollapsed) => {
 
 /* ── Plan section ── */
 
-.pill-icon { font-size: 15px; }
+.pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .pill-label { font-weight: 600; }
 .pill-task-label {
   min-width: 0;
