@@ -5,6 +5,7 @@ import { bridge } from '../../api/bridge';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
 import { useAgentStore } from '../../stores/agent';
 import { useSessionsStore } from '../../stores/sessions';
+import { formatHeaderTokenUsage } from './header-token-usage';
 
 const agentStore = useAgentStore();
 const sessionsStore = useSessionsStore();
@@ -22,6 +23,9 @@ const { processes: bgProcesses } = useBackgroundProcesses();
 const runningBgCount = computed(
   () => bgProcesses.value.filter((p) => p.status === 'running').length,
 );
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const tokenUsageLabel = computed(() => formatHeaderTokenUsage(agentStore.status.tokenUsage.total));
 
 const activeSession = computed(() =>
   sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId),
@@ -214,6 +218,10 @@ onBeforeUnmount(() => {
           </template>
           <div v-if="branchMenuError" class="branch-menu-error">{{ branchMenuError }}</div>
         </div>
+
+        <span v-if="tokenUsageLabel" class="header-token-usage">
+          {{ tokenUsageLabel }}
+        </span>
       </div>
     </div>
 
@@ -337,6 +345,9 @@ onBeforeUnmount(() => {
 
 .header-git-dropdown {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
 }
 
@@ -349,7 +360,6 @@ onBeforeUnmount(() => {
   border-radius: var(--border-radius-sm);
   background: transparent;
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
@@ -366,6 +376,18 @@ onBeforeUnmount(() => {
 
 .header-git-dropdown.no-repo {
   opacity: 0.3;
+}
+
+.header-token-usage {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+}
+
+.header-git,
+.header-token-usage {
+  font-size: 11px;
 }
 
 .git-chevron {

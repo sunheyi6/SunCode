@@ -10,6 +10,7 @@ import { useSessionsStore } from '../../stores/sessions';
 import CommandDropdown from './CommandDropdown.vue';
 import {
   COLLAPSED_TEXTAREA_HEIGHT,
+  chatInputSessionDrafts,
   getChatInputClasses,
   getComposerTextareaHeight,
   isInsideControlDropdown,
@@ -205,6 +206,7 @@ watch(commandQueryActive, (active) => {
 
 // Track input changes to update dropdown position
 watch(inputText, () => {
+  chatInputSessionDrafts.save(sessionsStore.activeSessionId, inputText.value);
   if (showCommandDropdown.value) {
     updateComposerRect();
   }
@@ -239,6 +241,14 @@ function resizeTextarea(): void {
 
   textarea.style.height = 'auto';
   textarea.style.height = `${getComposerTextareaHeight(textarea.scrollHeight)}px`;
+}
+
+function resetInputState(text: string): void {
+  inputText.value = text;
+  historyIndex = -1;
+  draftBeforeHistory = '';
+  inputExpanded.value = false;
+  void nextTick(() => resizeTextarea());
 }
 
 async function handleSend(): Promise<void> {
@@ -284,6 +294,15 @@ const inputHistory: string[] = JSON.parse(localStorage.getItem(HISTORY_STORAGE_K
 let historyIndex = -1;
 // Saved draft so the user can return to what they typed after browsing history
 let draftBeforeHistory = '';
+
+watch(
+  () => sessionsStore.activeSessionId,
+  (sessionId, previousSessionId) => {
+    chatInputSessionDrafts.save(previousSessionId, inputText.value);
+    resetInputState(chatInputSessionDrafts.load(sessionId));
+  },
+  { immediate: true },
+);
 
 function persistHistory(): void {
   try {
@@ -397,6 +416,7 @@ onMounted(() => {
   focusInput();
 });
 onUnmounted(() => {
+  chatInputSessionDrafts.save(sessionsStore.activeSessionId, inputText.value);
   document.removeEventListener('pointerdown', onDocumentPointerDown, true);
   syncChatInputDropdownBodyClass(false, document.body.classList);
 });

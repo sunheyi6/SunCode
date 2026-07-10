@@ -182,7 +182,7 @@ async function mapWithConcurrency<T, R>(
 
 /**
  * Load a full session including messages.
- *
+
  * If maxMessages is specified AND the file is large, only the last N messages
  * are extracted from the pretty-printed JSON (written by JSON.stringify with
  * 2-space indent), avoiding the O(n) cost of parsing the full message array.
@@ -354,6 +354,13 @@ function extractTailMessages(arrayContent: string, count: number): Message[] {
   }
 
   return messages;
+}
+
+/** Return a bounded tail without changing the source message array. */
+export function limitMessages(messages: Message[], maxMessages?: number): Message[] {
+  if (maxMessages === undefined || messages.length <= maxMessages) return messages;
+  if (maxMessages <= 0) return [];
+  return messages.slice(-maxMessages);
 }
 
 /** Save a session to disk atomically (write .tmp → rename). */

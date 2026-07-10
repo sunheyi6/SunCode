@@ -46,6 +46,7 @@ import {
   deleteSessions,
   getSessionFilePath,
   initSessionStore,
+  limitMessages,
   loadAllSessions,
   loadSession,
   saveSession,
@@ -553,7 +554,10 @@ export function registerIpcHandlers(wm: WindowManager): void {
       let meta = sessions.get(id);
 
       const memCount = messages?.length ?? -1;
-      const disk = await loadSession(id, maxMessages);
+      // Always hydrate the main-process/worker state from the complete session.
+      // The renderer-facing result is bounded below, so large histories never
+      // cross IPC during the fast snapshot phase.
+      const disk = await loadSession(id);
       const diskCount = disk?.messages.length ?? -1;
 
       if (disk) {
@@ -580,16 +584,17 @@ export function registerIpcHandlers(wm: WindowManager): void {
         sessionMessages.set(id, messages);
       }
 
-      const resultCount = messages?.length ?? 0;
+      messages = messages || [];
+      const rendererMessages = limitMessages(messages, maxMessages);
+      const resultCount = rendererMessages.length;
       console.log(
         `[Main] session:load id=${id.slice(-8)} mem=${memCount} disk=${diskCount} result=${resultCount} diskExists=${!!disk}`,
       );
-      messages = messages || [];
       sendToWorker({ type: 'setMessages', sessionId: id, messages });
       if (meta) {
         sendToWorker({ type: 'setWorkingDir', sessionId: id, path: meta.workingDirectory });
       }
-      return messages;
+      return rendererMessages;
     } catch (err) {
       console.error('[Main] session:load failed:', (err as Error).message);
       return [];

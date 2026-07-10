@@ -3,6 +3,32 @@ const MAX_TEXTAREA_HEIGHT = 200;
 export const COLLAPSED_TEXTAREA_HEIGHT = 120;
 const DROPDOWN_OPEN_BODY_CLASS = 'chat-input-dropdown-open';
 
+export interface SessionDrafts {
+  load: (sessionId: string | null) => string;
+  save: (sessionId: string | null, text: string) => void;
+}
+
+export function createSessionDrafts(): SessionDrafts {
+  const drafts = new Map<string, string>();
+
+  return {
+    load(sessionId) {
+      if (!sessionId) return '';
+      return drafts.get(sessionId) ?? '';
+    },
+    save(sessionId, text) {
+      if (!sessionId) return;
+      if (text.length === 0) {
+        drafts.delete(sessionId);
+        return;
+      }
+      drafts.set(sessionId, text);
+    },
+  };
+}
+
+export const chatInputSessionDrafts = createSessionDrafts();
+
 export function getComposerTextareaHeight(scrollHeight: number): number {
   return Math.min(Math.max(scrollHeight, MIN_TEXTAREA_HEIGHT), MAX_TEXTAREA_HEIGHT);
 }

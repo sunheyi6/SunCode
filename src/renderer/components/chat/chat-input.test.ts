@@ -1,6 +1,7 @@
 // @ts-expect-error Bun provides this module at test runtime; the repo has no Bun type package.
 import { describe, expect, test } from 'bun:test';
 import {
+  createSessionDrafts,
   getChatInputClasses,
   getComposerTextareaHeight,
   isInsideControlDropdown,
@@ -89,3 +90,15 @@ class FakeTokenList {
     return this.values.has(token);
   }
 }
+
+describe('createSessionDrafts', () => {
+  test('keeps unsent input isolated per session while switching conversations', () => {
+    const drafts = createSessionDrafts();
+
+    drafts.save('new-session', '还没发送的内容');
+    drafts.save('other-session', '另一个对话的草稿');
+
+    expect(drafts.load('new-session')).toBe('还没发送的内容');
+    expect(drafts.load('other-session')).toBe('另一个对话的草稿');
+  });
+});

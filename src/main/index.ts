@@ -17,7 +17,7 @@ const __dirname = dirname(__filename);
 // ── GPU / hardware acceleration workaround (Windows) ───────────────
 // On some Windows machines, GPU acceleration causes hard crashes that
 // kill the entire process without firing any error events. This is the
-// most reliable way to disable it — must be called before app.whenReady().
+// most reliable way to disable it �?must be called before app.whenReady().
 // The app is fully functional without GPU acceleration; only CSS
 // transforms/animations will fall back to software rendering.
 app.disableHardwareAcceleration();
@@ -26,7 +26,7 @@ app.disableHardwareAcceleration();
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
-  // Another instance is already running — quit immediately
+  // Another instance is already running �?quit immediately
   app.quit();
 } else {
   // Focus the existing window when a second instance is launched
@@ -93,7 +93,7 @@ function createMainWindow(): BrowserWindow {
   const READY_TIMEOUT_MS = 12_000;
   const readyTimeout = setTimeout(() => {
     if (!win.isDestroyed() && !win.isVisible()) {
-      logger.warn('[Window] ready-to-show timed out after %d ms — forcing show', READY_TIMEOUT_MS);
+      logger.warn('[Window] ready-to-show timed out after %d ms �?forcing show', READY_TIMEOUT_MS);
       win.show();
     }
   }, READY_TIMEOUT_MS);
@@ -124,7 +124,7 @@ function createMainWindow(): BrowserWindow {
   });
 
   win.on('unresponsive', () => {
-    logger.warn('[Window] Unresponsive — page may be hung');
+    logger.warn('[Window] Unresponsive �?page may be hung');
   });
 
   // Capture renderer console errors (only errors, not all logs)
@@ -234,7 +234,7 @@ app
   })
   .then(() => {
     logger.info('[App] Init complete');
-    // Startup marker — used by parent processes to detect when SunCode is fully ready.
+    // Startup marker �?used by parent processes to detect when SunCode is fully ready.
     // Format: [SunCode] STARTUP_COMPLETE project=<name> ts=<ISO timestamp>
     // The bash tool's startup_marker parameter scans stdout/stderr for this line.
     const marker = `[SunCode] STARTUP_COMPLETE project=SunCode ts=${new Date().toISOString()}`;
