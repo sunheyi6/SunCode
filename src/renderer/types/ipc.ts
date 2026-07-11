@@ -6,6 +6,7 @@ import type {
   AgentStatus,
   AppSettings,
   BackgroundProcess,
+  DiscoveredSkill,
   FileNode,
   GitBranch,
   GitCheckoutResult,
@@ -165,7 +166,7 @@ declare global {
       openPath(targetPath: string): Promise<void>;
       showItemInFolder(fullPath: string): void;
       getTokenUsage(): Promise<TokenUsageSummary>;
-      getSkills(): Promise<Array<{ name: string; path: string; description: string }>>;
+      getSkills(): Promise<DiscoveredSkill[]>;
 
       // Git
       getGitInfo(workingDir: string): Promise<GitInfo>;

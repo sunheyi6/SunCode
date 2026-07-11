@@ -37,7 +37,7 @@ import {
   saveSessionSnapshot,
 } from './memory';
 
-import { createSkillsLoader } from './skills';
+import { createSkillsLoader, preloadSkills } from './skills';
 import { createDefaultStopHookRegistry } from './stop-hooks';
 import { SubagentDispatcher } from './subagent';
 
@@ -120,6 +120,9 @@ export class Agent {
     this.requestConfirmation = requestConfirmation;
     this.sessionId = sessionId ?? randomUUID();
 
+    // Skill discovery performs filesystem I/O. Start it in the background so
+    // constructing an agent never delays the project startup path.
+    preloadSkills(this.workingDir, this.settings.skills, this.settings.disabledSkills);
     void this.initialize();
   }
 
@@ -156,12 +159,8 @@ export class Agent {
       const mcpTools = await mcpManager.connectAll();
       this.tools.push(...mcpTools);
 
-      // Load skills
-      const skillsLoader = createSkillsLoader(this.workingDir, this.settings.skills);
-      const skillsContent = await skillsLoader.loadAll();
-
       console.log(
-        `Agent initialized: ${this.tools.length} tools (incl. subagent), ${definitions.size} sub-agents, ${skillsContent.length} skills chars`,
+        `Agent initialized: ${this.tools.length} tools (incl. subagent), ${definitions.size} sub-agents`,
       );
     } catch (error) {
       console.error('Agent initialization error:', error);
@@ -182,6 +181,7 @@ export class Agent {
       this.dispatcher.updateOptions({ settings });
     }
     this.replaceBuiltInTools();
+    preloadSkills(this.workingDir, settings.skills, settings.disabledSkills);
   }
 
   /**
@@ -192,6 +192,7 @@ export class Agent {
   async setWorkingDir(path: string): Promise<void> {
     if (this.workingDir === path) return;
     this.workingDir = path;
+    preloadSkills(this.workingDir, this.settings.skills, this.settings.disabledSkills);
 
     // Reload sub-agent definitions for the new working directory
     const definitions = await loadAgentDefinitions(path);
@@ -518,7 +519,11 @@ export class Agent {
       return;
     }
 
-    const skillsLoader = createSkillsLoader(this.workingDir, this.settings.skills);
+    const skillsLoader = createSkillsLoader(
+      this.workingDir,
+      this.settings.skills,
+      this.settings.disabledSkills,
+    );
     const skillsContent = await skillsLoader.loadAll();
 
     // Load .agents.md (Codex convention): project-level, then user-level
@@ -693,7 +698,11 @@ export class Agent {
       return;
     }
 
-    const skillsLoader = createSkillsLoader(this.workingDir, this.settings.skills);
+    const skillsLoader = createSkillsLoader(
+      this.workingDir,
+      this.settings.skills,
+      this.settings.disabledSkills,
+    );
     const skillsContent = await skillsLoader.loadAll();
     const agentsMdContent = await loadAgentsMd(this.workingDir);
     const memoryContent = await loadMemories(this.workingDir, goalDef.description, this.sessionId);

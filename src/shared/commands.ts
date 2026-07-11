@@ -1,3 +1,5 @@
+import type { DiscoveredSkill } from './types';
+
 /**
  * Slash Command Registry
  *
@@ -14,6 +16,8 @@
 export interface SlashCommand {
   /** Command name without leading slash, e.g. "goal". */
   name: string;
+  /** Optional human-readable label; the command text still uses `name`. */
+  label?: string;
   /** Short description shown in the dropdown. */
   description: string;
   /** Longer hint text shown as subtitle. */
@@ -29,6 +33,8 @@ export interface SlashCommand {
   handler: 'local' | 'worker' | 'text';
   /** Argument label shown after the command name, e.g. "task description". */
   argsLabel?: string;
+  /** Whether this command was generated from an Agent Skill. */
+  isSkill?: boolean;
 }
 
 // ===== Built-in Commands =====
@@ -86,12 +92,15 @@ export interface CommandMatch {
  * Fuzzy-match a query against registered commands.
  * Returns matches sorted by relevance (best first).
  */
-export function matchCommands(query: string): CommandMatch[] {
+export function matchCommands(
+  query: string,
+  commands: readonly SlashCommand[] = BUILTIN_COMMANDS,
+): CommandMatch[] {
   // Remove leading slash
   const q = query.replace(/^\/\s*/, '').toLowerCase();
   if (!q) {
     // Empty query: show all commands
-    return BUILTIN_COMMANDS.map((cmd) => ({
+    return commands.map((cmd) => ({
       command: cmd,
       score: 99,
       matchIndices: [],
@@ -100,7 +109,7 @@ export function matchCommands(query: string): CommandMatch[] {
 
   const matches: CommandMatch[] = [];
 
-  for (const cmd of BUILTIN_COMMANDS) {
+  for (const cmd of commands) {
     const nameLower = cmd.name.toLowerCase();
     const match = fuzzyMatch(q, nameLower);
     if (match !== null) {
@@ -120,9 +129,49 @@ export function matchCommands(query: string): CommandMatch[] {
 /**
  * Find a single command by exact name match (case-insensitive).
  */
-export function findCommand(name: string): SlashCommand | undefined {
+export function findCommand(
+  name: string,
+  commands: readonly SlashCommand[] = BUILTIN_COMMANDS,
+): SlashCommand | undefined {
   const lower = name.replace(/^\/\s*/, '').toLowerCase();
-  return BUILTIN_COMMANDS.find((c) => c.name.toLowerCase() === lower);
+  return commands.find((c) => c.name.toLowerCase() === lower);
+}
+
+/** Turn enabled Agent Skills into commands without overriding built-in commands. */
+export function createSkillCommands(
+  skills: readonly DiscoveredSkill[],
+  disabledSkillPaths: readonly string[] = [],
+): SlashCommand[] {
+  const disabled = new Set(disabledSkillPaths);
+  const usedNames = new Set(BUILTIN_COMMANDS.map((command) => command.name.toLowerCase()));
+  const commands: SlashCommand[] = [];
+
+  for (const skill of skills) {
+    if (disabled.has(skill.path)) continue;
+    const name = toSkillCommandName(skill.name);
+    if (!name || usedNames.has(name)) continue;
+
+    usedNames.add(name);
+    commands.push({
+      name,
+      label: skill.name,
+      description: skill.description || `Use ${skill.name}`,
+      hint: `Load and follow ${skill.name} from ${skill.path}`,
+      icon: 'package',
+      handler: 'text',
+      isSkill: true,
+    });
+  }
+
+  return commands;
+}
+
+export function toSkillCommandName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 // ===== Fuzzy Matching Algorithm =====

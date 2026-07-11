@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS = {
   fontSize: 14,
   mcpServers: [],
   skills: [],
+  disabledSkills: [],
   envApiKeys: {},
   customEndpoints: [],
   goalMaxTurns: 5,

@@ -2,6 +2,7 @@
   AgentStatus,
   AppSettings,
   BackgroundProcess,
+  DiscoveredSkill,
   FileNode,
   GitBranch,
   GitCheckoutResult,
@@ -218,8 +219,8 @@ const suncodeAPI = {
     return () => ipcRenderer.removeListener('agent:subagent-progress', handler);
   },
 
-  /** List built-in skills for display in settings UI */
-  async getSkills(): Promise<Array<{ name: string; path: string; description: string }>> {
+  /** List built-in and compatible user-level skills for display in settings UI. */
+  async getSkills(): Promise<DiscoveredSkill[]> {
     return ipcRenderer.invoke('skills:list');
   },
 

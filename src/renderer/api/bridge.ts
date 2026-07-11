@@ -4,6 +4,7 @@
  */
 import type {
   AppSettings,
+  DiscoveredSkill,
   FileNode,
   GitBranch,
   GitCheckoutResult,
@@ -216,7 +217,7 @@ export const bridge = {
     return api().getTokenUsage();
   },
 
-  async getSkills(): Promise<Array<{ name: string; path: string; description: string }>> {
+  async getSkills(): Promise<DiscoveredSkill[]> {
     return api().getSkills();
   },
 

@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import type { SlashCommand } from '@shared/commands';
-import { parseCommandFromInput } from '@shared/commands';
-import type { GitInfo } from '@shared/types';
+import {
+  BUILTIN_COMMANDS,
+  createSkillCommands,
+  findCommand,
+  parseCommandFromInput,
+  type SlashCommand,
+} from '@shared/commands';
+import type { DiscoveredSkill, GitInfo } from '@shared/types';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { bridge } from '../../api/bridge';
 import { useDropdownGroup } from '../../composables/useDropdown';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
+import { useSettingsStore } from '../../stores/settings';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
 import CommandDropdown from './CommandDropdown.vue';
@@ -40,6 +46,7 @@ const emit = defineEmits<{
 
 const sessionsStore = useSessionsStore();
 const chatStore = useChatStore();
+const settingsStore = useSettingsStore();
 
 const inputText = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -62,18 +69,24 @@ function toggleInputExpand() {
 // --- Slash Command Dropdown ---
 const showCommandDropdown = ref(false);
 const composerRect = ref<DOMRect | null>(null);
+const discoveredSkills = ref<DiscoveredSkill[]>([]);
+const COMMAND_INPUT_SPACER = '   ';
+const availableCommands = computed(() => [
+  ...BUILTIN_COMMANDS,
+  ...createSkillCommands(discoveredSkills.value, settingsStore.settings.disabledSkills),
+]);
 
-/** The currently recognized command name (for chip display). */
-const activeCommandName = computed(() => {
+/** The currently recognized command for the compact command-match display. */
+const activeCommand = computed(() => {
   const text = inputText.value;
   const lines = text.split('\n');
   const lastLine = lines[lines.length - 1] ?? '';
   const m = lastLine.match(/^\s*\/(\S+)/);
-  if (!m) return null;
+  if (!m) return undefined;
   const cmd = m[1];
   // Don't show chip for paths
-  if (cmd.includes('/') || cmd.includes('\\')) return null;
-  return cmd;
+  if (cmd.includes('/') || cmd.includes('\\')) return undefined;
+  return findCommand(cmd, availableCommands.value);
 });
 
 /** Detect whether the cursor is in a position where commands should be suggested. */
@@ -98,6 +111,15 @@ function updateComposerRect(): void {
   }
 }
 
+async function loadSkillCommands(): Promise<void> {
+  try {
+    discoveredSkills.value = await bridge.getSkills();
+  } catch (error) {
+    console.error('Failed to load skill commands:', error);
+    discoveredSkills.value = [];
+  }
+}
+
 function onCommandSelect(cmd: SlashCommand): void {
   const text = inputText.value;
   const lines = text.split('\n');
@@ -105,7 +127,9 @@ function onCommandSelect(cmd: SlashCommand): void {
 
   // Replace "/..." with "/commandName "
   const replaced = lastLine.replace(/^(\s*)\/\S*/, `$1/${cmd.name}`);
-  lines[lines.length - 1] = replaced + (cmd.argsLabel ? ` ${cmd.argsLabel} ` : ' ');
+  // Reserve visual space for the icon + display label, then place the cursor
+  // after it so subsequently typed text is never covered by the command overlay.
+  lines[lines.length - 1] = `${replaced}${COMMAND_INPUT_SPACER}`;
   inputText.value = lines.join('\n');
 
   showCommandDropdown.value = false;
@@ -215,7 +239,6 @@ watch(inputText, () => {
 });
 
 const hasInput = computed(() => inputText.value.trim().length > 0);
-const isGoalInput = computed(() => inputText.value.trim().startsWith('/goal'));
 const chatInputClasses = computed(() => getChatInputClasses(props.isEmptyConversation));
 const placeholderText = computed(() =>
   props.isEmptyConversation
@@ -352,7 +375,7 @@ function handleKeydown(event: KeyboardEvent): void {
   // When command dropdown is open, let it handle navigation keys
   if (showCommandDropdown.value) {
     // If user typed a complete command (e.g. "/help"), let Enter pass through to send
-    const isExactCommand = activeCommandName.value != null;
+    const isExactCommand = activeCommand.value != null;
     if (event.key === 'Enter' && isExactCommand) {
       // Close dropdown and let Enter send the message naturally
       showCommandDropdown.value = false;
@@ -415,6 +438,7 @@ function focusInput(): void {
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown, true);
   void refreshGitInfo();
+  void loadSkillCommands();
   focusInput();
 });
 onUnmounted(() => {
@@ -459,22 +483,11 @@ watch(
         :input-text="inputText"
         :visible="showCommandDropdown"
         :anchor-rect="composerRect"
+        :commands="availableCommands"
         @select="onCommandSelect"
         @close="closeCommandDropdown"
       />
 
-      <!-- Command indicator chip -->
-      <div v-if="activeCommandName" class="cmd-chip">
-        <span class="cmd-chip-icon">/</span>
-        <span class="cmd-chip-name">{{ activeCommandName }}</span>
-      </div>
-
-      <!-- Goal mode indicator -->
-      <div v-if="isGoalInput" class="goal-indicator">
-        <span class="goal-icon"><AppIcon name="target" :size="14" /></span>
-        <span class="goal-label">Goal 自主模式</span>
-        <span class="goal-hint">系统将自动验证并重试直到目标完成</span>
-      </div>
       <textarea
         ref="textareaRef"
         v-model="inputText"
@@ -485,6 +498,15 @@ watch(
         @input="resizeTextarea"
         @keydown="handleKeydown"
       />
+      <span
+        v-if="activeCommand"
+        class="cmd-inline-match"
+        :style="{ minWidth: `${activeCommand.name.length + 1}ch` }"
+        aria-hidden="true"
+      >
+        <AppIcon :name="activeCommand.icon" :size="14" />
+        {{ activeCommand.label ?? activeCommand.name }}
+      </span>
 
       <button
         v-if="isInputLong"
@@ -669,66 +691,24 @@ watch(
   box-shadow: var(--shadow-md);
 }
 
-.composer:has(.goal-indicator) {
-  border-color: color-mix(in srgb, var(--color-orange) 35%, var(--border-color-strong));
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.04),
-    0 4px 16px color-mix(in srgb, var(--color-orange) 12%, transparent);
-}
-
-/* Command indicator chip */
-.cmd-chip {
+/* Overlay only the command text in its original input line. */
+.cmd-inline-match {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  left: 17px;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px 10px;
-  margin: -6px 0 8px 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg));
-  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
-  font-size: 12px;
-  font-family: var(--font-mono);
-}
-
-.cmd-chip-icon {
-  color: var(--color-accent);
-  font-weight: 700;
-  font-size: 13px;
-}
-
-.cmd-chip-name {
-  color: var(--color-accent);
-  font-weight: 600;
-}
-
-.goal-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  margin: -6px 0 8px 0;
-  border-radius: var(--border-radius-sm);
-  background: color-mix(in srgb, var(--color-orange) 10%, var(--color-bg));
-  border: 1px solid color-mix(in srgb, var(--color-orange) 20%, transparent);
-  font-size: 13px;
-}
-
-.goal-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-orange);
-}
-
-.goal-label {
-  font-weight: 700;
-  color: var(--color-orange);
-}
-
-.goal-hint {
-  color: var(--color-text-muted);
-  font-size: 12px;
-  margin-left: auto;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: var(--color-bg);
+  color: #0067e8;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: inherit;
+  line-height: 1.55;
+  pointer-events: none;
 }
 
 .composer:focus-within {

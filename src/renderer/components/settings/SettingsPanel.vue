@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AppSettings } from '@shared/types';
+import type { AppSettings, DiscoveredSkill } from '@shared/types';
 import { computed, onMounted, ref } from 'vue';
 import { bridge } from '../../api/bridge';
 import { useSettingsStore } from '../../stores/settings';
@@ -30,7 +30,13 @@ const updateStore = useUpdateStore();
 const statsStore = useStatsStore();
 const appVersion = ref('');
 const logPath = ref('');
-const loadedSkills = ref<Array<{ name: string; path: string; description: string }>>([]);
+const loadedSkills = ref<DiscoveredSkill[]>([]);
+const enabledSkillCount = computed(
+  () =>
+    loadedSkills.value.filter(
+      (skill) => !settingsStore.settings.disabledSkills?.includes(skill.path),
+    ).length,
+);
 
 type Section =
   | 'general'
@@ -148,6 +154,22 @@ async function loadSkills(): Promise<void> {
     console.error('[SettingsPanel] loadSkills() failed:', err);
     loadedSkills.value = [];
   }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function isSkillEnabled(path: string): boolean {
+  return !settingsStore.settings.disabledSkills?.includes(path);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function updateSkillEnabled(path: string, enabled: boolean): void {
+  const disabled = new Set(settingsStore.settings.disabledSkills ?? []);
+  if (enabled) {
+    disabled.delete(path);
+  } else {
+    disabled.add(path);
+  }
+  void settingsStore.update({ disabledSkills: [...disabled] });
 }
 
 function openLogFile(): void {
@@ -643,16 +665,24 @@ function resetBackgroundColor(): void {
                 <div class="setting-row static">
                   <span class="setting-copy">
                     <strong>内置技能</strong>
-                    <small>{{ loadedSkills.length }} 个可用技能。</small>
+                    <small>{{ loadedSkills.length }} 个已检测技能，{{ enabledSkillCount }} 个已启用。</small>
                   </span>
                 </div>
                 <div v-if="loadedSkills.length > 0" class="simple-list">
-                  <div v-for="skill in loadedSkills" :key="skill.name" class="simple-item">
+                  <div v-for="skill in loadedSkills" :key="skill.path" class="simple-item">
                     <span>
                       <strong>{{ skill.name }}</strong>
                       <small>{{ skill.description || '无描述' }}</small>
+                      <small>{{ skill.source }} · {{ skill.path }}</small>
                     </span>
-                    <span class="badge">已加载</span>
+                    <label class="switch" :title="isSkillEnabled(skill.path) ? '已启用' : '已停用'">
+                      <input
+                        type="checkbox"
+                        :checked="isSkillEnabled(skill.path)"
+                        @change="updateSkillEnabled(skill.path, ($event.target as HTMLInputElement).checked)"
+                      />
+                      <span></span>
+                    </label>
                   </div>
                 </div>
                 <p v-else class="empty-text">正在加载…</p>

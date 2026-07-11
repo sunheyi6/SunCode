@@ -17,6 +17,7 @@ export const useSettingsStore = defineStore('settings', () => {
     fontSize: 14,
     mcpServers: [],
     skills: [],
+    disabledSkills: [],
     envApiKeys: {},
     customEndpoints: [],
     maxLessons: 200,

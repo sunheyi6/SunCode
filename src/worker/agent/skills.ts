@@ -1,6 +1,10 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { toSkillCommandName } from '@shared/commands';
+import { getVendorSkillDirectories } from '@shared/skill-directories';
+
+const preloadedSkillContents = new Map<string, Promise<string>>();
 
 /**
  * Skills system: loads .md skill files from project and user directories.
@@ -20,73 +24,47 @@ export interface Skill {
   };
 }
 
-export function createSkillsLoader(workingDir: string, additionalPaths: string[] = []) {
+export function preloadSkills(
+  workingDir: string,
+  additionalPaths: string[] = [],
+  disabledSkillPaths: string[] = [],
+): void {
+  const cacheKey = getSkillsCacheKey(workingDir, additionalPaths, disabledSkillPaths);
+  if (!preloadedSkillContents.has(cacheKey)) {
+    preloadedSkillContents.set(
+      cacheKey,
+      loadAllSkills(workingDir, additionalPaths, disabledSkillPaths, getBuiltinSkillsDir()),
+    );
+  }
+}
+
+export function createSkillsLoader(
+  workingDir: string,
+  additionalPaths: string[] = [],
+  disabledSkillPaths: string[] = [],
+) {
   /**
    * Resolve the built-in skills directory shipped with SunCode.
    * In dev: __dirname is dist-electron/worker/, go up 2 levels to project root.
    * In production (packaged Electron): __dirname is app.asar/..., go up to resources/.
    */
-  const builtinSkillsDir = (() => {
-    // Check for Electron production path first
-    if (typeof process !== 'undefined' && process.resourcesPath) {
-      return join(process.resourcesPath, 'skills');
-    }
-    // Development: resolve relative to worker directory
-    return join(__dirname, '..', '..', 'skills');
-  })();
+  const builtinSkillsDir = getBuiltinSkillsDir();
 
   return {
     /**
      * Load all skills from configured paths.
      * Searches: built-in (shipped with SunCode), .suncode/skills/ (project),
-     * ~/.suncode/skills/ (user), and any additional configured paths.
+     * ~/.suncode/skills/ (user), Codex user skills, and any additional configured paths.
      * Built-in skills load first so project/user skills can override them by name.
      */
     async loadAll(): Promise<string> {
-      const skills: Skill[] = [];
-
-      // Built-in skills (shipped with SunCode)
-      if (existsSync(builtinSkillsDir)) {
-        const builtinSkills = await loadSkillsFromDir(builtinSkillsDir, 'builtin');
-        skills.push(...builtinSkills);
+      const cacheKey = getSkillsCacheKey(workingDir, additionalPaths, disabledSkillPaths);
+      const preloaded = preloadedSkillContents.get(cacheKey);
+      if (preloaded) {
+        preloadedSkillContents.delete(cacheKey);
+        return preloaded;
       }
-
-      // Project-level skills (can override built-in by name)
-      const projectSkillsDir = join(workingDir, '.suncode', 'skills');
-      if (existsSync(projectSkillsDir)) {
-        const projectSkills = await loadSkillsFromDir(projectSkillsDir, 'project');
-        skills.push(...projectSkills);
-      }
-
-      // User-level skills
-      const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
-      const userSkillsDir = join(homeDir, '.suncode', 'skills');
-      if (existsSync(userSkillsDir)) {
-        const userSkills = await loadSkillsFromDir(userSkillsDir, 'user');
-        skills.push(...userSkills);
-      }
-
-      // Additional configured paths
-      for (const path of additionalPaths) {
-        if (existsSync(path)) {
-          const extraSkills = await loadSkillsFromDir(path, 'extra');
-          skills.push(...extraSkills);
-        }
-      }
-
-      // Deduplicate: later sources (project/user/extra) override built-in by name
-      const deduped = new Map<string, Skill>();
-      for (const skill of skills) {
-        deduped.set(skill.name, skill);
-      }
-
-      // Sort by priority (higher first)
-      const sorted = [...deduped.values()].sort(
-        (a, b) => (b.metadata?.priority || 0) - (a.metadata?.priority || 0),
-      );
-
-      // Format skills into system prompt content
-      return formatSkillsForPrompt(sorted);
+      return loadAllSkills(workingDir, additionalPaths, disabledSkillPaths, builtinSkillsDir);
     },
 
     /**
@@ -112,6 +90,64 @@ export function createSkillsLoader(workingDir: string, additionalPaths: string[]
       }
     },
   };
+}
+
+function getBuiltinSkillsDir(): string {
+  // Check for Electron production path first.
+  if (typeof process !== 'undefined' && process.resourcesPath) {
+    return join(process.resourcesPath, 'skills');
+  }
+  // Development: resolve relative to worker directory.
+  return join(__dirname, '..', '..', 'skills');
+}
+
+function getSkillsCacheKey(
+  workingDir: string,
+  additionalPaths: string[],
+  disabledSkillPaths: string[],
+): string {
+  return JSON.stringify([workingDir, additionalPaths, disabledSkillPaths]);
+}
+
+async function loadAllSkills(
+  workingDir: string,
+  additionalPaths: string[],
+  disabledSkillPaths: string[],
+  builtinSkillsDir?: string,
+): Promise<string> {
+  const skills: Skill[] = [];
+  const resolvedBuiltinSkillsDir = builtinSkillsDir || join(__dirname, '..', '..', 'skills');
+
+  if (existsSync(resolvedBuiltinSkillsDir)) {
+    skills.push(...(await loadSkillsFromDir(resolvedBuiltinSkillsDir, 'builtin')));
+  }
+
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
+  for (const { path, source } of getVendorSkillDirectories(homeDir)) {
+    if (existsSync(path)) skills.push(...(await loadSkillsFromDir(path, source)));
+  }
+
+  const projectSkillsDir = join(workingDir, '.suncode', 'skills');
+  if (existsSync(projectSkillsDir))
+    skills.push(...(await loadSkillsFromDir(projectSkillsDir, 'project')));
+
+  const userSkillsDir = join(homeDir, '.suncode', 'skills');
+  if (existsSync(userSkillsDir)) skills.push(...(await loadSkillsFromDir(userSkillsDir, 'user')));
+
+  for (const path of additionalPaths) {
+    if (existsSync(path)) skills.push(...(await loadSkillsFromDir(path, 'extra')));
+  }
+
+  const disabled = new Set(disabledSkillPaths);
+  const deduped = new Map<string, Skill>();
+  for (const skill of skills) {
+    if (!disabled.has(skill.path)) deduped.set(skill.name, skill);
+  }
+
+  const sorted = [...deduped.values()].sort(
+    (a, b) => (b.metadata?.priority || 0) - (a.metadata?.priority || 0),
+  );
+  return formatSkillsForPrompt(sorted);
 }
 
 async function loadSingleSkillFile(
@@ -230,12 +266,15 @@ function formatSkillsForPrompt(skills: Skill[]): string {
   const lines: string[] = [
     'The following skills are available. When a task matches a skill description,',
     'use the **read** tool to load the skill file at the listed path BEFORE starting work.',
+    'If the user invokes a listed /skill-command, load that exact skill before replying.',
     'Do not guess the skill content — always read it first.',
     '',
   ];
 
   for (const skill of skills) {
-    lines.push(`- **${skill.name}**: ${skill.metadata?.description || 'No description'}`);
+    lines.push(
+      `- **${skill.name}** (command: \`/${toSkillCommandName(skill.name)}\`): ${skill.metadata?.description || 'No description'}`,
+    );
     lines.push(`  Path: \`${skill.path}\``);
   }
 

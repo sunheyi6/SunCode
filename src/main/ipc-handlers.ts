@@ -10,9 +10,11 @@ import {
   RECOMMENDED_MODELS,
   TITLE_GENERATION_PROMPT,
 } from '@shared/constants';
+import { getVendorSkillDirectories } from '@shared/skill-directories';
 import type {
   AppSettings,
   DayStats,
+  DiscoveredSkill,
   FileNode,
   Message,
   ModelStats,
@@ -764,7 +766,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
-  // Skills listing --- scan built-in skill files for display in UI
+  // Skills listing --- scan built-in and compatible user-level skill files for the settings UI.
   ipcMain.handle('skills:list', async () => {
     try {
       const { existsSync } = await import('node:fs');
@@ -779,46 +781,44 @@ export function registerIpcHandlers(wm: WindowManager): void {
         ? join(process.resourcesPath, 'skills')
         : join(__dirname, '..', '..', 'skills');
 
-      console.log('[Main] skills:list - app.isPackaged:', app.isPackaged);
-      console.log('[Main] skills:list - builtinSkillsDir:', builtinSkillsDir);
-      console.log('[Main] skills:list - exists:', existsSync(builtinSkillsDir));
-      console.log('[Main] skills:list - __dirname:', __dirname);
-      console.log('[Main] skills:list - process.resourcesPath:', process.resourcesPath);
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
+      const directories = [
+        { path: builtinSkillsDir, source: 'SunCode' },
+        ...getVendorSkillDirectories(homeDir),
+      ];
+      const skills: DiscoveredSkill[] = [];
 
-      if (!existsSync(builtinSkillsDir)) {
-        console.warn('[Main] skills:list - skills directory not found, returning empty');
-        return [];
-      }
+      for (const directory of directories) {
+        if (!existsSync(directory.path)) continue;
+        const entries = await readdir(directory.path, { withFileTypes: true });
 
-      const entries = await readdir(builtinSkillsDir, { withFileTypes: true });
-      const skills: Array<{ name: string; path: string; description: string }> = [];
-
-      for (const entry of entries) {
-        if (entry.isFile() && extname(entry.name).toLowerCase() === '.md') {
-          // Flat .md file
-          const filePath = join(builtinSkillsDir, entry.name);
-          const name = entry.name.replace('.md', '');
-          let description = '';
-          try {
-            const content = await readFile(filePath, 'utf-8');
-            const match = content.match(/^---\n[\s\S]*?description:\s*(.*?)\n/);
-            if (match) {
-              description = match[1]!.replace(/^["']|["']$/g, '').trim();
+        for (const entry of entries) {
+          if (entry.isFile() && extname(entry.name).toLowerCase() === '.md') {
+            // Flat .md file
+            const filePath = join(directory.path, entry.name);
+            const name = entry.name.replace('.md', '');
+            let description = '';
+            try {
+              const content = await readFile(filePath, 'utf-8');
+              const match = content.match(/^---\n[\s\S]*?description:\s*(.*?)\n/);
+              if (match) {
+                description = match[1]?.replace(/^["']|["']$/g, '').trim() ?? '';
+              }
+            } catch {}
+            skills.push({ name, path: filePath, description, source: directory.source });
+          } else if (entry.isDirectory()) {
+            // Subdirectory with SKILL.md convention
+            const skillFile = join(directory.path, entry.name, 'SKILL.md');
+            try {
+              const content = await readFile(skillFile, 'utf-8');
+              const nameMatch = content.match(/^---\n[\s\S]*?name:\s*(.*?)\n/);
+              const descMatch = content.match(/^---\n[\s\S]*?description:\s*(.*?)\n/);
+              const name = nameMatch?.[1]?.trim() || entry.name;
+              const description = descMatch?.[1]?.replace(/^["']|["']$/g, '').trim() ?? '';
+              skills.push({ name, path: skillFile, description, source: directory.source });
+            } catch {
+              // No readable SKILL.md --- skip
             }
-          } catch {}
-          skills.push({ name, path: filePath, description });
-        } else if (entry.isDirectory()) {
-          // Subdirectory with SKILL.md convention
-          const skillFile = join(builtinSkillsDir, entry.name, 'SKILL.md');
-          try {
-            const content = await readFile(skillFile, 'utf-8');
-            const nameMatch = content.match(/^---\n[\s\S]*?name:\s*(.*?)\n/);
-            const descMatch = content.match(/^---\n[\s\S]*?description:\s*(.*?)\n/);
-            const name = nameMatch ? nameMatch[1]!.trim() : entry.name;
-            const description = descMatch ? descMatch[1]!.replace(/^["']|["']$/g, '').trim() : '';
-            skills.push({ name, path: skillFile, description });
-          } catch {
-            // No readable SKILL.md --- skip
           }
         }
       }

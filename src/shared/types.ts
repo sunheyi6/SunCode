@@ -258,6 +258,8 @@ export interface AppSettings {
   fontSize: number; // base font size in px, default 14
   mcpServers: McpServerConfig[];
   skills: string[]; // paths to skill directories
+  /** Absolute SKILL.md paths that should not be included in the agent prompt. */
+  disabledSkills?: string[];
   envApiKeys: Record<string, string>;
   /** 自定义端点列表（仅全局存储）。 */
   customEndpoints: CustomEndpoint[];
@@ -273,6 +275,14 @@ export interface AppSettings {
   createGitWorktree?: boolean;
   /** Whether to show the model's thinking/reasoning process in the UI. Default true. */
   showThinking?: boolean;
+}
+
+/** A skill discovered from SunCode or a compatible coding agent installation. */
+export interface DiscoveredSkill {
+  name: string;
+  path: string;
+  description: string;
+  source: string;
 }
 
 /** MCP server configuration */
