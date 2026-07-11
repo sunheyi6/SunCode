@@ -14,6 +14,7 @@
 | [会话标题生成](session-title-generation.md) | AI 自动生成会话标题：轻量模型选取、TITLE_GENERATION_PROMPT、fallback 规则 |
 | [流式输出渲染](streaming-output-design.md) | 聊天流式时间轴：blocks/InlineCallTraceEntry 模型、中间文本一行预览、showThinking 开关、流式期间不标“最终回答” |
 | [运行中引导注入](guidance-injection-design.md) | 引导注入通道：guidanceQueue/drainGuidance 模型、两个 drain 点位置策略、IPC 通道与持久化、UI 呈现（流式 chip + 重载时 user 气泡）、双 drain 末轮保护 |
+| [记忆系统设计](memory-system-design.md) | 双向记忆（自动记录 + 手动添加）、混合检索（关键词 + 向量相似度）、时间有效性管理、场景聚类、用户交互界面（设置管理 + 聊天引用展示） |
 
 ## 2026-06～07 架构变更摘要
 

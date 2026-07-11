@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Bot,
   Box,
+  Brain,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -68,6 +69,7 @@ export type LucideIcon = FunctionalComponent<LucideProps>;
 export const ICONS = {
   activity: Activity,
   'alert-triangle': AlertTriangle,
+  brain: Brain,
   bot: Bot,
   box: Box,
   check: Check,

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Type-safe wrapper around the window.suncode API.
  * Provides a clean interface for Vue components to interact with the agent.
  */
@@ -331,5 +331,45 @@ export const bridge = {
 
   onUpdateStatus(callback: (status: UpdateStatus) => void): () => void {
     return api().onUpdateStatus(callback);
+  },
+
+  // ===== Memory Management =====
+
+  async getMemories(workingDir?: string, sessionId?: string): Promise<unknown[]> {
+    return api().getMemories(workingDir, sessionId);
+  },
+
+  async saveMemory(
+    workingDir: string,
+    memory: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<void> {
+    return api().saveMemory(workingDir, memory, sessionId);
+  },
+
+  async deleteMemory(
+    workingDir: string,
+    date: string,
+    slug: string,
+    sessionId?: string,
+  ): Promise<void> {
+    return api().deleteMemory(workingDir, date, slug, sessionId);
+  },
+
+  async searchMemories(workingDir: string, query: string, sessionId?: string): Promise<unknown[]> {
+    return api().searchMemories(workingDir, query, sessionId);
+  },
+
+  async getMemoryDetail(
+    workingDir: string,
+    date: string,
+    slug: string,
+    sessionId?: string,
+  ): Promise<unknown | null> {
+    return api().getMemoryDetail(workingDir, date, slug, sessionId);
+  },
+
+  async getMemoryScenes(workingDir?: string, sessionId?: string): Promise<unknown[]> {
+    return api().getMemoryScenes(workingDir, sessionId);
   },
 };

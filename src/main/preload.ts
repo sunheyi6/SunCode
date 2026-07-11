@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   AgentStatus,
   AppSettings,
   BackgroundProcess,
@@ -504,6 +504,52 @@ const suncodeAPI = {
       callback(status);
     ipcRenderer.on('updater:status', handler);
     return () => ipcRenderer.removeListener('updater:status', handler);
+  },
+
+  // ===== Memory Management =====
+
+  /** Get all memories for the current session/workspace */
+  async getMemories(workingDir?: string, sessionId?: string): Promise<unknown[]> {
+    return ipcRenderer.invoke('memory:get', workingDir, sessionId);
+  },
+
+  /** Save a new memory */
+  async saveMemory(
+    workingDir: string,
+    memory: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<void> {
+    return ipcRenderer.invoke('memory:save', workingDir, memory, sessionId);
+  },
+
+  /** Delete a memory */
+  async deleteMemory(
+    workingDir: string,
+    date: string,
+    slug: string,
+    sessionId?: string,
+  ): Promise<void> {
+    return ipcRenderer.invoke('memory:delete', workingDir, date, slug, sessionId);
+  },
+
+  /** Search memories */
+  async searchMemories(workingDir: string, query: string, sessionId?: string): Promise<unknown[]> {
+    return ipcRenderer.invoke('memory:search', workingDir, query, sessionId);
+  },
+
+  /** Get memory detail by date and slug */
+  async getMemoryDetail(
+    workingDir: string,
+    date: string,
+    slug: string,
+    sessionId?: string,
+  ): Promise<unknown | null> {
+    return ipcRenderer.invoke('memory:getDetail', workingDir, date, slug, sessionId);
+  },
+
+  /** Get memory scenes */
+  async getMemoryScenes(workingDir?: string, sessionId?: string): Promise<unknown[]> {
+    return ipcRenderer.invoke('memory:getScenes', workingDir, sessionId);
   },
 };
 

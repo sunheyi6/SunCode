@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import type { AppSettings, DiscoveredSkill } from '@shared/types';
-import { computed, onMounted, ref } from 'vue';
+import type { AppSettings, DiscoveredSkill, MemoryEntry } from '@shared/types';
+import { computed, onMounted, ref, watch } from 'vue';
 import { bridge } from '../../api/bridge';
+import { useToast } from '../../composables/useToast';
+import { useSessionsStore } from '../../stores/sessions';
 import { useSettingsStore } from '../../stores/settings';
 import { useStatsStore } from '../../stores/stats';
 import { useUpdateStore } from '../../stores/update';
+import MemoryDetail from '../chat/MemoryDetail.vue';
+import MemoryReference from '../chat/MemoryReference.vue';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
 import type { IconName } from '../icons/icons';
@@ -26,17 +30,58 @@ const props = withDefaults(
 );
 
 const settingsStore = useSettingsStore();
+const sessionsStore = useSessionsStore();
 const updateStore = useUpdateStore();
 const statsStore = useStatsStore();
+const { showToast } = useToast();
 const appVersion = ref('');
 const logPath = ref('');
 const loadedSkills = ref<DiscoveredSkill[]>([]);
-const enabledSkillCount = computed(
-  () =>
-    loadedSkills.value.filter(
-      (skill) => !settingsStore.settings.disabledSkills?.includes(skill.path),
-    ).length,
-);
+
+const memories = ref<MemoryEntry[]>([]);
+const memorySearchQuery = ref('');
+const selectedMemory = ref<MemoryEntry | null>(null);
+const showMemoryDetail = ref(false);
+const isAddingMemory = ref(false);
+const newMemory = ref({
+  userRequest: '',
+  summary: '',
+  kind: 'task_summary' as MemoryEntry['kind'],
+  scope: 'project' as MemoryEntry['scope'],
+  importance: 1,
+  tags: '',
+});
+
+const kindLabels: Record<string, string> = {
+  task_summary: '任务摘要',
+  project_fact: '项目事实',
+  decision: '决策',
+  preference: '偏好',
+  lesson: '经验教训',
+  ephemeral: '临时',
+};
+
+const filteredMemories = computed(() => {
+  if (!memorySearchQuery.value.trim()) return memories.value;
+  const query = memorySearchQuery.value.toLowerCase();
+  return memories.value.filter(
+    (m) =>
+      m.userRequest.toLowerCase().includes(query) ||
+      m.summary.toLowerCase().includes(query) ||
+      m.tags?.some((t) => t.toLowerCase().includes(query)),
+  );
+});
+
+async function loadMemories(): Promise<void> {
+  try {
+    const workingDir = await bridge.getWorkingDir();
+    const result = await bridge.getMemories(workingDir, sessionsStore.activeSessionId ?? undefined);
+    memories.value = result as MemoryEntry[];
+  } catch (e) {
+    console.error('[SettingsPanel] loadMemories failed:', e);
+    memories.value = [];
+  }
+}
 
 type Section =
   | 'general'
@@ -45,9 +90,97 @@ type Section =
   | 'behavior'
   | 'mcp'
   | 'skills'
+  | 'memory'
   | 'usage'
   | 'about';
 const activeSection = ref<Section>(props.initialSection as Section);
+
+watch([() => activeSection.value, () => sessionsStore.activeSessionId], ([section]) => {
+  if (section === 'memory') {
+    void loadMemories();
+  }
+});
+
+async function handleAddMemory(): Promise<void> {
+  if (!newMemory.value.userRequest.trim()) {
+    showToast('请输入记忆内容', 'error');
+    return;
+  }
+
+  isAddingMemory.value = true;
+  try {
+    const workingDir = await bridge.getWorkingDir();
+    const memory: MemoryEntry = {
+      date: new Date().toISOString().slice(0, 10),
+      slug: `manual-${Date.now()}`,
+      userRequest: newMemory.value.userRequest,
+      toolsUsed: {},
+      summary: newMemory.value.summary,
+      kind: newMemory.value.kind,
+      scope: newMemory.value.scope,
+      importance: newMemory.value.importance,
+      tags: newMemory.value.tags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean),
+    };
+    await bridge.saveMemory(workingDir, memory);
+    showToast('记忆已添加', 'success');
+    newMemory.value = {
+      userRequest: '',
+      summary: '',
+      kind: 'task_summary',
+      scope: 'project',
+      importance: 1,
+      tags: '',
+    };
+    await loadMemories();
+  } catch (e) {
+    showToast('添加记忆失败', 'error');
+    console.error('[SettingsPanel] addMemory failed:', e);
+  } finally {
+    isAddingMemory.value = false;
+  }
+}
+
+function handleMemoryClick(memory: MemoryEntry): void {
+  selectedMemory.value = memory;
+  showMemoryDetail.value = true;
+}
+
+function handleCloseDetail(): void {
+  showMemoryDetail.value = false;
+  selectedMemory.value = null;
+}
+
+async function handleDeleteMemory(): Promise<void> {
+  if (!selectedMemory.value) return;
+  try {
+    const workingDir = await bridge.getWorkingDir();
+    const sessionId =
+      selectedMemory.value.scope === 'session'
+        ? (sessionsStore.activeSessionId ?? undefined)
+        : undefined;
+    await bridge.deleteMemory(
+      workingDir,
+      selectedMemory.value.date,
+      selectedMemory.value.slug,
+      sessionId,
+    );
+    showToast('记忆已删除', 'success');
+    await loadMemories();
+    handleCloseDetail();
+  } catch (e) {
+    showToast('删除记忆失败', 'error');
+    console.error('[SettingsPanel] deleteMemory failed:', e);
+  }
+}
+const enabledSkillCount = computed(
+  () =>
+    loadedSkills.value.filter(
+      (skill) => !settingsStore.settings.disabledSkills?.includes(skill.path),
+    ).length,
+);
 
 const navItems: { key: Section; label: string; icon: IconName }[] = [
   { key: 'general', label: '常规', icon: 'command' },
@@ -56,6 +189,7 @@ const navItems: { key: Section; label: string; icon: IconName }[] = [
   { key: 'behavior', label: '行为', icon: 'zap' },
   { key: 'mcp', label: 'MCP 服务器', icon: 'plug' },
   { key: 'skills', label: '技能', icon: 'sparkles' },
+  { key: 'memory', label: '记忆管理', icon: 'brain' },
   { key: 'usage', label: '使用统计', icon: 'activity' },
   { key: 'about', label: '关于', icon: 'info' },
 ];
@@ -707,6 +841,98 @@ function resetBackgroundColor(): void {
               </div>
             </section>
 
+          <section v-else-if="activeSection === 'memory'" class="settings-stack memory-page">
+            <div class="memory-intro">
+              <span class="memory-intro-icon" aria-hidden="true"><AppIcon name="brain" :size="18" /></span>
+              <div>
+                <strong>让重要信息留在上下文里</strong>
+                <p>手动记录项目事实、决策和偏好，AI 会在后续对话中参考这些内容。</p>
+              </div>
+            </div>
+
+            <div class="memory-columns">
+              <form class="memory-form-card" @submit.prevent="handleAddMemory">
+                <div class="memory-card-heading">
+                  <div>
+                    <span class="memory-card-kicker">NEW MEMORY</span>
+                    <h2>添加新记忆</h2>
+                  </div>
+                  <span class="memory-card-heading-icon" aria-hidden="true"><AppIcon name="plus" :size="16" /></span>
+                </div>
+
+                <label class="memory-field memory-field-wide">
+                  <span>内容</span>
+                  <textarea
+                    v-model="newMemory.userRequest"
+                    rows="4"
+                    placeholder="例如：项目使用 Bun 管理依赖"
+                  />
+                </label>
+
+                <label class="memory-field memory-field-wide">
+                  <span>摘要 <em>可选</em></span>
+                  <input v-model="newMemory.summary" type="text" placeholder="用一句话概括这条记忆" />
+                </label>
+
+                <div class="memory-field-grid">
+                  <label class="memory-field">
+                    <span>类型</span>
+                    <select v-model="newMemory.kind">
+                      <option v-for="(label, key) in kindLabels" :key="key" :value="key">
+                        {{ label }}
+                      </option>
+                    </select>
+                  </label>
+                  <label class="memory-field">
+                    <span>重要度 <strong class="memory-range-value">{{ newMemory.importance }}/5</strong></span>
+                    <input v-model.number="newMemory.importance" type="range" min="1" max="5" />
+                  </label>
+                </div>
+
+                <label class="memory-field memory-field-wide">
+                  <span>标签 <em>可选</em></span>
+                  <input v-model="newMemory.tags" type="text" placeholder="用逗号分隔多个标签" />
+                </label>
+
+                <div class="memory-form-footer">
+                  <span class="memory-form-hint">保存后会立即用于后续对话</span>
+                  <button class="save-button memory-submit" type="submit" :disabled="isAddingMemory">
+                    <AppIcon :name="isAddingMemory ? 'loader' : 'plus'" :size="14" />
+                    {{ isAddingMemory ? '添加中...' : '添加记忆' }}
+                  </button>
+                </div>
+              </form>
+
+              <div class="memory-list-card">
+                <div class="memory-card-heading memory-list-heading">
+                  <div>
+                    <span class="memory-card-kicker">SAVED MEMORIES</span>
+                    <h2>已保存的记忆 <span>{{ filteredMemories.length }}</span></h2>
+                  </div>
+                  <AppIcon name="layers" :size="17" />
+                </div>
+                <label class="memory-search">
+                  <AppIcon name="search" :size="15" />
+                  <input v-model="memorySearchQuery" type="search" placeholder="搜索内容、摘要或标签" />
+                </label>
+                <div v-if="filteredMemories.length > 0" class="memory-list">
+                  <MemoryReference
+                    v-for="memory in filteredMemories"
+                    :key="`${memory.date}-${memory.slug}`"
+                    :memory="memory"
+                    compact
+                    @click="handleMemoryClick(memory)"
+                  />
+                </div>
+                <div v-else class="memory-empty">
+                  <span class="memory-empty-icon" aria-hidden="true"><AppIcon name="brain" :size="22" /></span>
+                  <strong>{{ memorySearchQuery ? '没有找到匹配的记忆' : '还没有保存记忆' }}</strong>
+                  <span>{{ memorySearchQuery ? '换个关键词试试' : '添加第一条记忆，让 AI 更了解这个项目' }}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section v-else-if="activeSection === 'usage'" class="settings-stack">
             <TokenUsage />
           </section>
@@ -767,6 +993,14 @@ function resetBackgroundColor(): void {
           </section>
         </div>
       </main>
+
+      <MemoryDetail
+        v-if="showMemoryDetail && selectedMemory"
+        :memory="selectedMemory"
+        :visible="showMemoryDetail"
+        @close="handleCloseDetail"
+        @delete="handleDeleteMemory"
+      />
     </div>
   </Teleport>
 </template>
@@ -1555,5 +1789,208 @@ function resetBackgroundColor(): void {
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.2),
     0 3px 8px rgba(0, 0, 0, 0.16);
+}
+
+/* ── Memory management ── */
+
+.memory-page {
+  gap: 16px;
+}
+
+.memory-intro {
+  display: flex;
+  max-width: 1040px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, var(--border-color));
+  border-radius: var(--border-radius);
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
+}
+
+.memory-intro-icon,
+.memory-card-heading-icon,
+.memory-empty-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+}
+
+.memory-intro-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--border-radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+}
+
+.memory-intro strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.memory-intro p {
+  margin: 2px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.memory-columns {
+  display: grid;
+  max-width: 1040px;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.memory-form-card,
+.memory-list-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--border-radius-lg);
+  background: var(--color-surface);
+}
+
+.memory-form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+}
+
+.memory-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.memory-card-heading h2 {
+  margin: 4px 0 0;
+  color: var(--color-text);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.memory-card-heading h2 span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.memory-card-kicker {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.memory-card-heading-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--border-radius-sm);
+  background: var(--color-bg-tertiary);
+}
+
+.memory-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.memory-field-wide { width: 100%; }
+.memory-field em { color: var(--color-text-muted); font-size: 11px; font-style: normal; font-weight: 400; }
+.memory-field input,
+.memory-field textarea,
+.memory-field select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.memory-field textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
+.memory-field select { height: 36px; padding: 0 10px; }
+.memory-field-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+
+.memory-field input[type='range'] {
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.memory-field input[type='range']::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 28%, var(--color-bg-tertiary));
+}
+
+.memory-field input[type='range']::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-accent) 38%, transparent);
+}
+
+.memory-field input[type='range']::-moz-range-track { height: 5px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--color-text-muted) 28%, var(--color-bg-tertiary)); }
+.memory-field input[type='range']::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: var(--color-accent); }
+.memory-range-value { float: right; color: var(--color-text); font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+
+.memory-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.memory-form-hint { color: var(--color-text-muted); font-size: 11px; }
+.memory-submit { display: inline-flex; align-items: center; gap: 7px; background: var(--color-accent); color: #fff; }
+.memory-submit:hover:not(:disabled) { background: var(--color-accent-hover); }
+
+.memory-list-card { min-height: 100%; padding: 20px 0 8px; }
+.memory-list-heading { padding: 0 20px 16px; }
+.memory-list-heading > svg { color: var(--color-text-muted); }
+.memory-search { display: flex; align-items: center; gap: 8px; margin: 0 20px 12px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+.memory-search:focus-within { border-color: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.memory-search input { width: 100%; height: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--color-text); font-size: 12px; }
+.memory-search input:focus { box-shadow: none; }
+.memory-list { border-top: 1px solid var(--border-color); }
+.memory-list :deep(.memory-reference) { border-bottom: 1px solid var(--border-color); }
+.memory-list :deep(.memory-reference:last-child) { border-bottom: 0; }
+.memory-empty { display: flex; min-height: 230px; align-items: center; justify-content: center; gap: 7px; padding: 30px 22px; flex-direction: column; text-align: center; }
+.memory-empty-icon { width: 48px; height: 48px; margin-bottom: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface)); }
+.memory-empty strong { color: var(--color-text-secondary); font-size: 13px; }
+.memory-empty span:last-child { color: var(--color-text-muted); font-size: 12px; }
+
+@media (max-width: 1050px) {
+  .memory-columns { grid-template-columns: 1fr; }
+  .memory-list-card { min-height: 0; }
+}
+
+@media (max-width: 560px) {
+  .memory-field-grid { grid-template-columns: 1fr; }
+  .memory-form-footer { align-items: flex-start; flex-direction: column; }
 }
 </style>

@@ -30,12 +30,24 @@
 
 ## 诊断日志
 
-| 日志类型 | 路径 |
-|----------|------|
-| 主进程日志 | `%APPDATA%\SunCode\.suncode\app.log`（自动轮转，≥2MB → `app.old.log`） |
-| Agent 运行时诊断 | `%APPDATA%\SunCode\.suncode\diagnostics\<runId>.log`（每次运行独立文件） |
-| 运行事件 | `%APPDATA%\SunCode\.suncode\sessions\<sessionId>\runs\<runId>.jsonl`（每次运行独立 JSONL 文件） |
-| Bash 后台输出（harness 层） | `%USERPROFILE%\.zcode\cli\exec\sess_{sessionId}\call_{callId}-stdout.log` |
+| 日志类型 | 开发模式路径 | 生产模式路径 |
+|----------|-------------|-------------|
+| 主进程日志 | `%APPDATA%\SunCode Dev\.suncode\app.log` | `%APPDATA%\SunCode\.suncode\app.log`（自动轮转，≥2MB → `app.old.log`） |
+| Agent 运行时诊断 | `%APPDATA%\SunCode Dev\.suncode\diagnostics\<runId>.log` | `%APPDATA%\SunCode\.suncode\diagnostics\<runId>.log`（每次运行独立文件） |
+| 运行事件 | `%APPDATA%\SunCode Dev\.suncode\sessions\<sessionId>\runs\<runId>.jsonl` | `%APPDATA%\SunCode\.suncode\sessions\<sessionId>\runs\<runId>.jsonl`（每次运行独立 JSONL 文件） |
+| Bash 后台输出（harness 层） | `%USERPROFILE%\.zcode\cli\exec\sess_{sessionId}\call_{callId}-stdout.log` | `%USERPROFILE%\.zcode\cli\exec\sess_{sessionId}\call_{callId}-stdout.log` |
+
+### 开发模式 vs 生产模式
+
+| 模式 | 文件日志级别 | 控制台输出 |
+|------|-------------|-----------|
+| 开发模式 (`app.isPackaged=false`) | `debug` | 完整输出（`debug` 级别） |
+| 生产模式 (`app.isPackaged=true`) | `info` | 仅警告和错误（`warn` 级别） |
+
+- 开发模式下，诊断日志会同时输出到文件和控制台，便于实时调试
+- 生产模式下，诊断日志仅写入文件，控制台保持静默以减少干扰
+- 主进程通过 `IS_DEV`（`!app.isPackaged`）判断模式，通过 `SUNCODE_IS_DEV` 环境变量传递给 Worker
+- 路径差异源于 [app-identity.ts](file:///d:/project/SunCode/src/main/app-identity.ts)：开发模式下 `app.setName('SunCode Dev')` 使 `userData` 目录独立，避免与生产版本的数据冲突
 
 ## 构建与发布
 

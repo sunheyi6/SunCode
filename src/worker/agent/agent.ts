@@ -32,6 +32,7 @@ import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } f
 import {
   buildSessionSnapshot,
   loadMemories,
+  loadMemoriesWithEntries,
   type MemoryEntry,
   saveMemory,
   saveSessionSnapshot,
@@ -531,7 +532,9 @@ export class Agent {
 
     // Load auto-generated memories from prior sessions (with semantic search)
     const userQuery = latestUserText(this.messages);
-    const memoryContent = await loadMemories(this.workingDir, userQuery, this.sessionId);
+    const memoryResult = await loadMemoriesWithEntries(this.workingDir, userQuery, this.sessionId);
+    const memoryContent = memoryResult.content;
+    const memoryEntries = memoryResult.entries;
     const relevantLessonsContent = loadRelevantLessons(
       this.workingDir,
       userQuery,
@@ -563,6 +566,7 @@ export class Agent {
       skillsContent,
       agentsMdContent,
       memoryContent,
+      memoryEntries,
       relevantLessonsContent,
       responseLanguage: this.currentResponseLanguage,
       abortSignal: this.abortController!.signal,

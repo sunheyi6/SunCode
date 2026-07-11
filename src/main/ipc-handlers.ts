@@ -25,6 +25,7 @@ import type {
   WorkerOutMessage,
 } from '@shared/types';
 import { app, dialog, ipcMain, Notification, nativeTheme, shell } from 'electron';
+import { IS_DEV } from './app-identity';
 import {
   checkForUpdates,
   downloadUpdate,
@@ -100,6 +101,9 @@ for (const [provider, key] of Object.entries(currentSettings.envApiKeys)) {
     console.log(`[Main] ENV ${envKey} set from config`);
   }
 }
+
+// Pass dev mode flag to worker for conditional logging
+process.env.SUNCODE_IS_DEV = IS_DEV ? '1' : '0';
 const sessions: Map<string, SessionMeta> = new Map();
 const sessionMessages: Map<string, Message[]> = new Map();
 let currentSessionId: string | null = null;
@@ -1260,6 +1264,105 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.on('updater:skip-version', (_event, version: string) => {
     skipVersion(version);
+  });
+
+  // ===== Memory Management =====
+  ipcMain.handle('memory:get', async (_event, workingDir?: string, sessionId?: string) => {
+    try {
+      const { getAllMemories } = await import('../worker/agent/memory');
+      const dir = workingDir || process.cwd();
+      return getAllMemories(dir, sessionId);
+    } catch (err) {
+      console.error('[Main] memory:get failed:', (err as Error).message);
+      return [];
+    }
+  });
+
+  ipcMain.handle(
+    'memory:save',
+    async (_event, workingDir: string, memory: Record<string, unknown>, sessionId?: string) => {
+      try {
+        const { saveMemory } = await import('../worker/agent/memory');
+        const entry = memory as {
+          date: string;
+          slug: string;
+          userRequest: string;
+          toolsUsed: Record<string, number>;
+          summary: string;
+          scope?: 'session' | 'project';
+          kind?:
+            | 'task_summary'
+            | 'project_fact'
+            | 'decision'
+            | 'preference'
+            | 'lesson'
+            | 'ephemeral';
+          importance?: number;
+          tags?: string[];
+          expiresAt?: string;
+          validFrom?: string;
+          pinned?: boolean;
+        };
+        await saveMemory(workingDir, entry, undefined, undefined, sessionId);
+      } catch (err) {
+        console.error('[Main] memory:save failed:', (err as Error).message);
+        throw err;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    'memory:delete',
+    async (_event, workingDir: string, date: string, slug: string, sessionId?: string) => {
+      try {
+        const { deleteMemory } = await import('../worker/agent/memory');
+        await deleteMemory(workingDir, date, slug, sessionId);
+      } catch (err) {
+        console.error('[Main] memory:delete failed:', (err as Error).message);
+        throw err;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    'memory:search',
+    async (_event, workingDir: string, query: string, sessionId?: string) => {
+      try {
+        const { getAllMemories, searchMemories } = await import('../worker/agent/memory');
+        const dir = workingDir || process.cwd();
+        const allEntries = getAllMemories(dir, sessionId);
+        return searchMemories(allEntries, query);
+      } catch (err) {
+        console.error('[Main] memory:search failed:', (err as Error).message);
+        return [];
+      }
+    },
+  );
+
+  ipcMain.handle(
+    'memory:getDetail',
+    async (_event, workingDir: string, date: string, slug: string, sessionId?: string) => {
+      try {
+        const { getAllMemories } = await import('../worker/agent/memory');
+        const dir = workingDir || process.cwd();
+        const entries = getAllMemories(dir, sessionId);
+        return entries.find((e) => e.date === date && e.slug === slug) || null;
+      } catch (err) {
+        console.error('[Main] memory:getDetail failed:', (err as Error).message);
+        return null;
+      }
+    },
+  );
+
+  ipcMain.handle('memory:getScenes', async (_event, workingDir?: string, sessionId?: string) => {
+    try {
+      const { getMemScenes } = await import('../worker/agent/memory');
+      const dir = workingDir || process.cwd();
+      return getMemScenes(dir, sessionId);
+    } catch (err) {
+      console.error('[Main] memory:getScenes failed:', (err as Error).message);
+      return [];
+    }
   });
 }
 

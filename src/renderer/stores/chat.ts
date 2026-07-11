@@ -1,5 +1,6 @@
 import { sanitizeStructuredMessageLeak } from '@shared/finalization';
 import type {
+  MemoryEntry,
   Message,
   RunEvent,
   StreamEvent,
@@ -49,6 +50,8 @@ export interface ChatMessage {
   turnDetails?: TurnDetail[];
   /** UI language derived from the user prompt for localized progress display. */
   uiLanguage?: UiLanguage;
+  /** Memories referenced by this message */
+  memoryReferences?: MemoryEntry[];
 }
 
 let msgCounter = 0;
@@ -517,6 +520,10 @@ export const useChatStore = defineStore('chat', () => {
         if (event.type === 'message_end') {
           if (event.message) {
             applyFinalMessageToUi(target, event.message);
+          }
+
+          if (data?.memoryReferences) {
+            target.memoryReferences = data.memoryReferences as MemoryEntry[];
           }
 
           console.debug(

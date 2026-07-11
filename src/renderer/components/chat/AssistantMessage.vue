@@ -1,12 +1,34 @@
 <script setup lang="ts">
+import type { MemoryEntry } from '@shared/types';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 import { useSettingsStore } from '../../stores/settings';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import AppIcon from '../icons/AppIcon.vue';
 import { buildInlineCallTrace } from './call-trace-view-model';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import InlineCallTrace from './InlineCallTrace.vue';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import MemoryDetail from './MemoryDetail.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import MemoryReference from './MemoryReference.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import StreamingText from './StreamingText.vue';
+
+const selectedMemory = ref<MemoryEntry | null>(null);
+const showMemoryDetail = ref(false);
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function handleMemoryClick(memory: MemoryEntry): void {
+  selectedMemory.value = memory;
+  showMemoryDetail.value = true;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function handleCloseDetail(): void {
+  showMemoryDetail.value = false;
+  selectedMemory.value = null;
+}
 
 const props = defineProps<{
   message: ChatMessage;
@@ -179,6 +201,26 @@ async function copyContent() {
         <StreamingText :text="message.content" :is-streaming="message.isStreaming" />
       </div>
 
+      <!-- Memory references used in this response -->
+      <div
+        v-if="message.memoryReferences && message.memoryReferences.length > 0 && !message.isStreaming"
+        class="memory-references"
+      >
+        <div class="memory-references-header">
+          <span class="memory-icon" aria-hidden="true"><AppIcon name="brain" :size="14" /></span>
+          <span>引用的记忆</span>
+        </div>
+        <div class="memory-references-list">
+          <MemoryReference
+            v-for="memory in message.memoryReferences"
+            :key="`${memory.date}-${memory.slug}`"
+            :memory="memory"
+            :compact="false"
+            @click="handleMemoryClick(memory)"
+          />
+        </div>
+      </div>
+
       <!-- Waiting for first response -->
       <div v-if="message.isStreaming && !hasContent && !hasThinking" class="streaming-indicator">
         <span class="dot" /><span class="dot" /><span class="dot" />
@@ -190,6 +232,14 @@ async function copyContent() {
         {{ copied ? '已复制' : '复制' }}
       </button>
     </div>
+
+    <MemoryDetail
+      v-if="showMemoryDetail && selectedMemory"
+      :memory="selectedMemory"
+      :visible="showMemoryDetail"
+      :show-delete="false"
+      @close="handleCloseDetail"
+    />
   </div>
 </template>
 
@@ -312,4 +362,33 @@ details[open] > .thinking-summary-done::before {
 .assistant-message:hover .copy-btn { opacity: 0.7; }
 .copy-btn:hover { opacity: 1 !important; background: var(--color-surface); }
 .copy-btn.copied { opacity: 1; color: var(--color-green); font-size: 11px; }
+
+/* -- memory references -- */
+.memory-references {
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--color-bg-secondary);
+  border-radius: var(--border-radius);
+  border-left: 3px solid var(--color-accent);
+}
+
+.memory-references-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.memory-icon {
+  font-size: 14px;
+}
+
+.memory-references-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
 </style>

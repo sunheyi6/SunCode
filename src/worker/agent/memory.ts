@@ -15,9 +15,12 @@ import { buildStructuredTaskPrompt } from './model-structured-content';
 const MEMORIES_DIR = '.suncode/memories';
 const MEMORY_INDEX = 'MEMORY.md';
 const MEMORY_INDEX_JSON = 'MEMORY.json';
+const MEMSCENES_DIR = 'scenes';
 const MAX_FILES = 30;
 const MAX_SUMMARY_LENGTH = 500;
 const MAX_RETRIEVED_MEMORIES = 5;
+const MEMSCENE_SIMILARITY_THRESHOLD = 0.6;
+const MEMSCENE_MIN_ENTRIES = 2;
 
 export type MemoryScope = 'session' | 'project';
 export type MemoryKind =
@@ -27,6 +30,15 @@ export type MemoryKind =
   | 'preference'
   | 'lesson'
   | 'ephemeral';
+
+export interface StructuredFact {
+  type: 'fact' | 'preference' | 'decision';
+  subject: string;
+  predicate: string;
+  object: string;
+  validity: { start: string; end?: string };
+  confidence: number;
+}
 
 export interface MemoryEntry {
   date: string;
@@ -42,7 +54,11 @@ export interface MemoryEntry {
   accessCount?: number;
   updatedAt?: string;
   expiresAt?: string;
+  validFrom?: string;
   pinned?: boolean;
+  facts?: StructuredFact[];
+  supersedes?: string[];
+  sceneId?: string;
 }
 
 export interface MemorySearchResult {
@@ -62,25 +78,50 @@ export interface SessionSnapshot {
   lastPlan?: string;
 }
 
+export interface MemoryScene {
+  id: string;
+  centroid: number[];
+  entries: string[];
+  summary: string;
+  tags: string[];
+  updatedAt: string;
+  createdAt: string;
+}
+
 const embeddingCache: Map<string, number[]> = new Map();
+const sceneCache: Map<string, MemoryScene[]> = new Map();
+
+export interface LoadMemoriesResult {
+  content: string;
+  entries: MemoryEntry[];
+}
 
 export async function loadMemories(
   workingDir: string,
   query?: string,
   sessionId?: string,
 ): Promise<string> {
+  const result = await loadMemoriesWithEntries(workingDir, query, sessionId);
+  return result.content;
+}
+
+export async function loadMemoriesWithEntries(
+  workingDir: string,
+  query?: string,
+  sessionId?: string,
+): Promise<LoadMemoriesResult> {
   const entries = [
     ...loadScopedMemoryEntries(projectMemoryDir(workingDir), 'project'),
     ...loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session'),
   ];
-  if (entries.length === 0) return '';
+  if (entries.length === 0) return { content: '', entries: [] };
 
   const selectedEntries = query?.trim()
     ? await searchMemories(entries, query)
     : entries.slice(0, Math.min(entries.length, MAX_RETRIEVED_MEMORIES));
 
   const content = formatMemoryIndex(selectedEntries);
-  return content.slice(0, 4000);
+  return { content: content.slice(0, 4000), entries: selectedEntries };
 }
 
 export async function saveMemory(
@@ -115,14 +156,27 @@ export async function saveMemory(
     }
   }
 
+  if (!entry.facts && provider && modelId) {
+    try {
+      const facts = await extractStructuredFacts(entry, provider, modelId);
+      if (facts.length > 0) {
+        finalEntry = { ...finalEntry, facts };
+      }
+    } catch (e) {
+      console.warn('Failed to extract structured facts:', e);
+    }
+  }
+
   try {
-    finalEntry.embedding = await computeEmbedding(finalEntry);
+    finalEntry.embedding = await computeEmbedding(finalEntry, provider, modelId);
   } catch (e) {
     console.warn('Failed to compute embedding:', e);
   }
 
   const sessionPath = join(memDir, `${finalEntry.date}-${finalEntry.slug}.md`);
   writeFileSync(sessionPath, formatSessionMemory(finalEntry), 'utf-8');
+
+  await consolidateMemScenes(memDir);
 
   pruneOldMemories(memDir);
   rebuildIndexes(memDir);
@@ -136,8 +190,10 @@ export async function searchMemories(
     return entries.slice(0, MAX_RETRIEVED_MEMORIES);
   }
 
+  const queryEmbedding = await computeEmbeddingForText(query);
+
   const results = entries
-    .map((entry) => ({ entry, score: scoreMemory(entry, query) }))
+    .map((entry) => ({ entry, score: hybridScore(entry, query, queryEmbedding) }))
     .filter((result) => result.score > 0)
     .sort((a, b) => b.score - a.score);
 
@@ -151,7 +207,7 @@ export function updateMemory(
   updates: Partial<MemoryEntry>,
   sessionId?: string,
 ): void {
-  const memDir = sessionMemoryDir(workingDir, sessionId);
+  const memDir = sessionId ? sessionMemoryDir(workingDir, sessionId) : projectMemoryDir(workingDir);
   const sessionPath = join(memDir, `${date}-${slug}.md`);
 
   if (!existsSync(sessionPath)) {
@@ -170,7 +226,7 @@ export function deleteMemory(
   slug: string,
   sessionId?: string,
 ): void {
-  const memDir = sessionMemoryDir(workingDir, sessionId);
+  const memDir = sessionId ? sessionMemoryDir(workingDir, sessionId) : projectMemoryDir(workingDir);
   const sessionPath = join(memDir, `${date}-${slug}.md`);
 
   if (!existsSync(sessionPath)) {
@@ -178,17 +234,32 @@ export function deleteMemory(
   }
 
   unlinkSync(sessionPath);
+  sceneCache.delete(memDir);
   rebuildIndexes(memDir);
 }
 
 export function getAllMemories(
   workingDir: string,
   sessionId?: string,
-  scope: MemoryScope = sessionId ? 'session' : 'project',
+  scope?: MemoryScope,
 ): MemoryEntry[] {
-  const memDir =
-    scope === 'project' ? projectMemoryDir(workingDir) : sessionMemoryDir(workingDir, sessionId);
-  return loadScopedMemoryEntries(memDir, scope);
+  if (scope) {
+    const memDir =
+      scope === 'project' ? projectMemoryDir(workingDir) : sessionMemoryDir(workingDir, sessionId);
+    return loadScopedMemoryEntries(memDir, scope);
+  }
+
+  return [
+    ...loadScopedMemoryEntries(projectMemoryDir(workingDir), 'project'),
+    ...(sessionId
+      ? loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session')
+      : []),
+  ];
+}
+
+export function getMemScenes(workingDir: string, sessionId?: string): MemoryScene[] {
+  const memDir = sessionId ? sessionMemoryDir(workingDir, sessionId) : projectMemoryDir(workingDir);
+  return loadMemScenes(memDir);
 }
 
 export function saveSessionSnapshot(workingDir: string, snapshot: SessionSnapshot): void {
@@ -267,6 +338,7 @@ export function mergeMemories(
       .join('\n\n'),
     importance: Math.max(...entries.map((e) => e.importance ?? 1), 1),
     tags: [...new Set(entries.flatMap((e) => e.tags || []))],
+    facts: [...new Set(entries.flatMap((e) => e.facts || []))],
     updatedAt: new Date().toISOString(),
   };
 
@@ -283,6 +355,98 @@ export function mergeMemories(
     'utf-8',
   );
   rebuildIndexes(memDir);
+}
+
+async function consolidateMemScenes(memDir: string): Promise<void> {
+  const scenesDir = join(memDir, MEMSCENES_DIR);
+  if (!existsSync(scenesDir)) {
+    mkdirSync(scenesDir, { recursive: true });
+  }
+
+  const entries = loadScopedMemoryEntries(memDir, 'session');
+  const existingScenes = loadMemScenes(memDir);
+  const updatedScenes = [...existingScenes];
+
+  for (const entry of entries) {
+    if (!entry.embedding || !entry.slug) continue;
+
+    let matchedScene = null;
+    let bestSimilarity = 0;
+
+    for (const scene of updatedScenes) {
+      if (!scene.centroid) continue;
+      const similarity = cosineSimilarity(entry.embedding!, scene.centroid);
+      if (similarity > bestSimilarity && similarity >= MEMSCENE_SIMILARITY_THRESHOLD) {
+        bestSimilarity = similarity;
+        matchedScene = scene;
+      }
+    }
+
+    if (matchedScene) {
+      if (!matchedScene.entries.includes(entry.slug)) {
+        matchedScene.entries.push(entry.slug);
+        matchedScene.centroid = updateCentroid(matchedScene.centroid, entry.embedding!);
+        matchedScene.tags = [...new Set([...matchedScene.tags, ...(entry.tags || [])])];
+        matchedScene.summary = mergeSummaries(matchedScene.summary, entry.summary);
+        matchedScene.updatedAt = new Date().toISOString();
+      }
+    } else {
+      const newScene: MemoryScene = {
+        id: `scene-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        centroid: [...entry.embedding!],
+        entries: [entry.slug],
+        summary: entry.summary || '',
+        tags: entry.tags || [],
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+      updatedScenes.push(newScene);
+    }
+  }
+
+  for (const scene of updatedScenes) {
+    writeFileSync(join(scenesDir, `${scene.id}.json`), JSON.stringify(scene, null, 2), 'utf-8');
+  }
+
+  const entriesToScenes: Record<string, string> = {};
+  for (const scene of updatedScenes) {
+    for (const entrySlug of scene.entries) {
+      entriesToScenes[entrySlug] = scene.id;
+    }
+  }
+
+  for (const entry of entries) {
+    const entryPath = join(memDir, `${entry.date}-${entry.slug}.md`);
+    if (existsSync(entryPath)) {
+      const parsed = parseSessionMemory(readFileSync(entryPath, 'utf-8'));
+      parsed.sceneId = entriesToScenes[entry.slug];
+      writeFileSync(entryPath, formatSessionMemory(parsed), 'utf-8');
+    }
+  }
+
+  sceneCache.set(memDir, updatedScenes);
+}
+
+function loadMemScenes(memDir: string): MemoryScene[] {
+  const cached = sceneCache.get(memDir);
+  if (cached) return cached;
+
+  const scenesDir = join(memDir, MEMSCENES_DIR);
+  if (!existsSync(scenesDir)) return [];
+
+  const scenes: MemoryScene[] = [];
+  try {
+    for (const file of readdirSync(scenesDir).filter((f) => f.endsWith('.json'))) {
+      const content = readFileSync(join(scenesDir, file), 'utf-8');
+      const scene = JSON.parse(content) as MemoryScene;
+      scenes.push(scene);
+    }
+  } catch {
+    // Skip unreadable scene files
+  }
+
+  sceneCache.set(memDir, scenes);
+  return scenes;
 }
 
 function sessionMemoryDir(workingDir: string, sessionId?: string): string {
@@ -320,6 +484,18 @@ function formatSessionMemory(entry: MemoryEntry): string {
 
   const tagList = entry.tags?.map((t) => `#${t}`).join(' ') || '';
 
+  const factsSection =
+    entry.facts && entry.facts.length > 0
+      ? [
+          '',
+          '**结构化事实**:',
+          ...entry.facts.map(
+            (f) =>
+              `- ${f.type}: ${f.subject} ${f.predicate} ${f.object}${f.validity.end ? ` (有效期: ${f.validity.start} ~ ${f.validity.end})` : ''}`,
+          ),
+        ].join('\n')
+      : '';
+
   return [
     '---',
     `date: ${entry.date}`,
@@ -329,9 +505,12 @@ function formatSessionMemory(entry: MemoryEntry): string {
     `accessCount: ${entry.accessCount ?? 0}`,
     ...(entry.updatedAt ? [`updatedAt: ${entry.updatedAt}`] : []),
     ...(entry.expiresAt ? [`expiresAt: ${entry.expiresAt}`] : []),
+    ...(entry.validFrom ? [`validFrom: ${entry.validFrom}`] : []),
     ...(entry.pinned ? ['pinned: true'] : []),
     ...(entry.tags && entry.tags.length > 0 ? [`tags: ${entry.tags.join(', ')}`] : []),
+    ...(entry.sceneId ? [`sceneId: ${entry.sceneId}`] : []),
     ...(entry.embedding ? [`embedding: ${JSON.stringify(entry.embedding)}`] : []),
+    ...(entry.facts && entry.facts.length > 0 ? [`facts: ${JSON.stringify(entry.facts)}`] : []),
     '---',
     '',
     `## ${entry.userRequest.slice(0, 80)}`,
@@ -342,6 +521,7 @@ function formatSessionMemory(entry: MemoryEntry): string {
     '',
     '**摘要**:',
     entry.summary || '(none)',
+    factsSection,
     '',
   ].join('\n');
 }
@@ -396,9 +576,12 @@ function parseSessionMemory(content: string): MemoryEntry {
     accessCount: frontmatter.accessCount ? parseInt(frontmatter.accessCount, 10) : 0,
     updatedAt: frontmatter.updatedAt,
     expiresAt: frontmatter.expiresAt,
+    validFrom: frontmatter.validFrom,
     pinned: frontmatter.pinned === 'true',
     tags: frontmatter.tags ? frontmatter.tags.split(',').map((t) => t.trim()) : [],
+    sceneId: frontmatter.sceneId || undefined,
     embedding: frontmatter.embedding ? JSON.parse(frontmatter.embedding) : undefined,
+    facts: frontmatter.facts ? JSON.parse(frontmatter.facts) : undefined,
   };
 }
 
@@ -455,7 +638,15 @@ function formatMemoryIndex(entries: MemoryEntry[]): string {
     parts.push(`\n**Scope**: ${entry.scope ?? 'session'}`);
     parts.push(`\n**Kind**: ${entry.kind ?? 'task_summary'}`);
     parts.push(`\n**Tools**: ${toolList}`);
-    parts.push(`\n**Summary**: ${entry.summary || '(none)'}\n`);
+    parts.push(`\n**Summary**: ${entry.summary || '(none)'}`);
+    if (entry.facts && entry.facts.length > 0) {
+      parts.push(
+        `\n**Facts**: ${entry.facts
+          .map((f) => `${f.subject} ${f.predicate} ${f.object}`)
+          .join('; ')}`,
+      );
+    }
+    parts.push('');
   }
 
   return parts.join('\n');
@@ -527,21 +718,37 @@ function loadAllMemoryEntries(memDir: string): MemoryEntry[] {
   return loadScopedMemoryEntries(memDir, 'session');
 }
 
-function scoreMemory(entry: MemoryEntry, query: string): number {
+function hybridScore(entry: MemoryEntry, query: string, queryEmbedding: number[]): number {
+  let score = 0;
+
   const haystack =
     `${entry.userRequest} ${entry.summary} ${(entry.tags ?? []).join(' ')}`.toLowerCase();
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return 0;
 
-  let score = 0;
-  const fullQuery = query.toLowerCase().trim();
-  if (fullQuery && haystack.includes(fullQuery)) score += 5;
-  for (const term of terms) {
-    if (haystack.includes(term)) score += 2;
+  if (terms.length > 0) {
+    const fullQuery = query.toLowerCase().trim();
+    if (fullQuery && haystack.includes(fullQuery)) score += 5;
+    for (const term of terms) {
+      if (haystack.includes(term)) score += 2;
+    }
   }
+
+  if (entry.embedding && queryEmbedding.length > 0) {
+    const similarity = cosineSimilarity(entry.embedding, queryEmbedding);
+    score += similarity * 10;
+  }
+
   score += (entry.importance ?? 1) * 0.25;
   score += Math.min(entry.accessCount ?? 0, 10) * 0.1;
   if (entry.pinned) score += 1;
+
+  const now = Date.now();
+  const validFrom = entry.validFrom ? Date.parse(entry.validFrom) : -Infinity;
+  const expiresAt = entry.expiresAt ? Date.parse(entry.expiresAt) : Infinity;
+  if (now < validFrom || now > expiresAt) {
+    score *= 0.3;
+  }
+
   return score;
 }
 
@@ -553,10 +760,50 @@ function memoryRetentionScore(entry: MemoryEntry): number {
     score += 20;
   }
   if (entry.kind === 'ephemeral') score -= 10;
-  if (entry.expiresAt && Date.parse(entry.expiresAt) <= Date.now()) score -= 50;
+
+  const now = Date.now();
+  const validFrom = entry.validFrom ? Date.parse(entry.validFrom) : -Infinity;
+  const expiresAt = entry.expiresAt ? Date.parse(entry.expiresAt) : Infinity;
+  if (now < validFrom || now > expiresAt) score -= 50;
+
+  if (entry.facts && entry.facts.length > 0) {
+    score += entry.facts.length * 5;
+  }
+
   const updated = Date.parse(entry.updatedAt || entry.date || '');
   if (Number.isFinite(updated)) score += updated / 86_400_000_000;
   return score;
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  const minLen = Math.min(a.length, b.length);
+  let dotProduct = 0;
+  let magA = 0;
+  let magB = 0;
+  for (let i = 0; i < minLen; i++) {
+    dotProduct += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
+  }
+  if (magA === 0 || magB === 0) return 0;
+  return dotProduct / (Math.sqrt(magA) * Math.sqrt(magB));
+}
+
+function updateCentroid(current: number[], newVec: number[]): number[] {
+  const result: number[] = [];
+  const maxLen = Math.max(current.length, newVec.length);
+  for (let i = 0; i < maxLen; i++) {
+    result.push(((current[i] || 0) + (newVec[i] || 0)) / 2);
+  }
+  return result;
+}
+
+function mergeSummaries(existing: string, newSummary: string): string {
+  if (!existing) return newSummary;
+  if (!newSummary) return existing;
+  const combined = `${existing}\n\n${newSummary}`;
+  return combined.slice(0, MAX_SUMMARY_LENGTH);
 }
 
 function messageText(message: Message): string {
@@ -678,10 +925,110 @@ async function generateSummary(
   }
 }
 
-async function computeEmbedding(entry: MemoryEntry): Promise<number[]> {
+async function extractStructuredFacts(
+  entry: MemoryEntry,
+  provider: string,
+  modelId: string,
+): Promise<StructuredFact[]> {
+  try {
+    const pi = await import('@earendil-works/pi-ai');
+    const getModel = pi.getModel as unknown as (provider: string, modelId: string) => unknown;
+    const complete = pi.complete as unknown as (
+      model: unknown,
+      context: Record<string, unknown>,
+      options: Record<string, unknown>,
+    ) => Promise<{ content?: Array<{ type: string; text?: string }> } | undefined>;
+    const model = getModel(provider, modelId);
+    if (!model) {
+      console.warn('Model not available for fact extraction');
+      return [];
+    }
+
+    const prompt = `请从以下会话中提取结构化事实，格式为 JSON 数组。
+
+用户请求：${entry.userRequest}
+
+会话摘要：${entry.summary || '(无摘要)'}
+
+请提取以下类型的事实：
+- fact: 客观事实（如"项目使用 TypeScript"）
+- preference: 用户偏好（如"用户喜欢简洁的代码风格"）
+- decision: 决策记录（如"决定使用 React 框架"）
+
+每个事实包含：
+- type: 类型
+- subject: 主语（如"用户"、"项目"）
+- predicate: 谓语（如"喜欢"、"使用"、"决定"）
+- object: 宾语（如"TypeScript"、"简洁风格"）
+- validity: { start: "YYYY-MM-DD", end?: "YYYY-MM-DD" } - 有效期，无截止日期则省略 end
+- confidence: 0-1 的置信度
+
+返回格式示例：
+[
+  {"type": "preference", "subject": "用户", "predicate": "喜欢", "object": "TypeScript", "validity": {"start": "2026-07-11"}, "confidence": 0.9},
+  {"type": "fact", "subject": "项目", "predicate": "使用", "object": "Vue 3", "validity": {"start": "2026-07-11"}, "confidence": 1.0}
+]
+
+只返回 JSON 数组，不要包含其他内容。`;
+
+    const context = {
+      systemPrompt: prompt,
+      messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
+    };
+
+    const result = await complete(model, context, {
+      maxTokens: 500,
+      temperature: 0.2,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (result?.content) {
+      const text = result.content
+        .filter(
+          (c): c is { type: string; text: string } =>
+            c.type === 'text' && typeof c.text === 'string',
+        )
+        .map((c) => c.text)
+        .join('')
+        .trim();
+
+      try {
+        const jsonMatch = text.match(/\[.*\]/s);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]) as StructuredFact[];
+        }
+      } catch (parseError) {
+        console.warn('Failed to parse fact extraction JSON:', parseError);
+      }
+    }
+
+    return [];
+  } catch (e) {
+    console.warn('Fact extraction failed:', e);
+    return [];
+  }
+}
+
+async function computeEmbedding(
+  entry: MemoryEntry,
+  provider?: string,
+  modelId?: string,
+): Promise<number[]> {
   const text = `${entry.userRequest} ${entry.summary}`;
   const cacheKey = text.slice(0, 200);
 
+  if (embeddingCache.has(cacheKey)) {
+    const cached = embeddingCache.get(cacheKey);
+    if (cached) return cached;
+  }
+
+  const embedding = simpleTextEmbedding(text);
+  embeddingCache.set(cacheKey, embedding);
+  return embedding;
+}
+
+async function computeEmbeddingForText(text: string): Promise<number[]> {
+  const cacheKey = text.slice(0, 200);
   if (embeddingCache.has(cacheKey)) {
     const cached = embeddingCache.get(cacheKey);
     if (cached) return cached;

@@ -1,7 +1,7 @@
 /**
  * Diagnostic logger for the agent loop.
  *
- * Writes structured, timestamped diagnostic logs to a file AND to console.log.
+ * Writes structured, timestamped diagnostic logs to a file AND (in dev mode) to console.log.
  * File goes to .suncode/diagnostics/<runId>.log in the working directory.
  * Each run gets its own file — old logs are never overwritten.
  *
@@ -12,17 +12,16 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
+const IS_DEV = process.env.SUNCODE_IS_DEV === '1';
+
 export class DiagLogger {
   private logPath: string;
   private runStart: number;
 
   constructor(workingDir: string, runId: string) {
-    // Prefer user-level app data directory (set by main process); fall back
-    // to project-level .suncode for standalone/headless runs.
     const baseDir = process.env.SUNCODE_APP_DATA || resolve(workingDir, '.suncode');
     this.logPath = resolve(baseDir, 'diagnostics', `${runId}.log`);
     this.runStart = Date.now();
-    // Ensure the diagnostics directory exists
     try {
       mkdirSync(dirname(this.logPath), { recursive: true });
     } catch {
@@ -44,10 +43,10 @@ export class DiagLogger {
       : '';
     const line = `[${this.elapsed()}] [${category}] ${message}${dataStr}`;
 
-    // Console for live debugging
-    console.log(`[Diag] ${line}`);
+    if (IS_DEV) {
+      console.log(`[Diag] ${line}`);
+    }
 
-    // File for session persistence
     try {
       appendFileSync(this.logPath, `${line}\n`, 'utf-8');
     } catch {

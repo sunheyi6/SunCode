@@ -6,6 +6,7 @@ import { sanitizeStructuredMessageLeak } from '@shared/finalization';
 import type {
   AppSettings,
   ContentBlock,
+  MemoryEntry,
   Message,
   RunEvent,
   StopHookRegistry,
@@ -57,6 +58,8 @@ export interface AgentLoopInput {
   agentsMdContent?: string;
   /** Auto-generated memories from prior sessions. */
   memoryContent?: string;
+  /** Retrieved memory entries for UI display. */
+  memoryEntries?: MemoryEntry[];
   /** Retrieved failure lessons relevant to this request. */
   relevantLessonsContent?: string;
   /** User-facing response language derived from the current user prompt. */
@@ -541,6 +544,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             thinking: thinkingText,
             toolCalls: [...toolCalls],
             isFinished: true,
+            memoryReferences: input.memoryEntries,
           },
         });
         onStream({ type: 'turn_end', turnCount, hasToolCalls: toolCalls.length > 0 });

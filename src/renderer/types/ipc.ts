@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Type declarations for the window.suncode API.
  * All event callbacks receive a wrapper with sessionId for multi-session routing.
  */
@@ -213,6 +213,28 @@ declare global {
       skipVersion(version: string): void;
       getUpdateStatus(): Promise<UpdateStatus>;
       onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
+
+      // Memory Management
+      getMemories(workingDir?: string, sessionId?: string): Promise<unknown[]>;
+      saveMemory(
+        workingDir: string,
+        memory: Record<string, unknown>,
+        sessionId?: string,
+      ): Promise<void>;
+      deleteMemory(
+        workingDir: string,
+        date: string,
+        slug: string,
+        sessionId?: string,
+      ): Promise<void>;
+      searchMemories(workingDir: string, query: string, sessionId?: string): Promise<unknown[]>;
+      getMemoryDetail(
+        workingDir: string,
+        date: string,
+        slug: string,
+        sessionId?: string,
+      ): Promise<unknown | null>;
+      getMemoryScenes(workingDir?: string, sessionId?: string): Promise<unknown[]>;
     };
   }
 }

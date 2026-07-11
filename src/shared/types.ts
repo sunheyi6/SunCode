@@ -671,6 +671,8 @@ export interface StreamMessageData {
   stopReason?: string;
   /** Error message if the stream failed. */
   error?: string;
+  /** Memories referenced by this message */
+  memoryReferences?: MemoryEntry[];
 }
 
 export type StreamEventType =
@@ -1184,4 +1186,45 @@ export interface TaskPlan {
   taskType: TaskType;
   /** Ordered list of execution steps */
   steps: TaskStep[];
+}
+
+// ===== Memory Types =====
+
+export type MemoryScope = 'session' | 'project';
+export type MemoryKind =
+  | 'task_summary'
+  | 'project_fact'
+  | 'decision'
+  | 'preference'
+  | 'lesson'
+  | 'ephemeral';
+
+export interface StructuredFact {
+  type: 'fact' | 'preference' | 'decision';
+  subject: string;
+  predicate: string;
+  object: string;
+  validity: { start: string; end?: string };
+  confidence: number;
+}
+
+export interface MemoryEntry {
+  date: string;
+  slug: string;
+  userRequest: string;
+  toolsUsed: Record<string, number>;
+  summary: string;
+  scope?: MemoryScope;
+  kind?: MemoryKind;
+  embedding?: number[];
+  importance?: number;
+  tags?: string[];
+  accessCount?: number;
+  updatedAt?: string;
+  expiresAt?: string;
+  validFrom?: string;
+  pinned?: boolean;
+  facts?: StructuredFact[];
+  supersedes?: string[];
+  sceneId?: string;
 }
