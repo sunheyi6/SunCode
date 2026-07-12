@@ -42,6 +42,20 @@ const kindColors: Record<string, string> = {
 };
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const scopeLabels: Record<string, string> = {
+  global: '全局级',
+  project: '项目级',
+  session: '会话级',
+};
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const scopeColors: Record<string, string> = {
+  global: 'var(--color-purple)',
+  project: 'var(--color-teal)',
+  session: 'var(--color-text-muted)',
+};
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const formattedDate = computed(() => {
   const date = new Date(props.memory.date);
   return date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -121,8 +135,15 @@ function formatFact(fact: StructuredFact): string {
               >
                 {{ kindLabels[memory.kind || 'task_summary'] }}
               </span>
-              <span v-if="memory.scope" class="scope-badge">
-                {{ memory.scope === 'project' ? '项目级' : '会话级' }}
+              <span
+                v-if="memory.scope"
+                class="scope-badge"
+                :style="{
+                  borderColor: scopeColors[memory.scope],
+                  color: scopeColors[memory.scope],
+                }"
+              >
+                {{ scopeLabels[memory.scope] }}
               </span>
             </div>
 

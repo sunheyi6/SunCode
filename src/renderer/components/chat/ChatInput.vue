@@ -703,7 +703,7 @@ watch(
   padding: 0;
   border: 0;
   background: var(--color-bg);
-  color: #0067e8;
+  color: var(--color-accent);
   font-family: var(--font-sans);
   font-size: 14px;
   font-weight: inherit;

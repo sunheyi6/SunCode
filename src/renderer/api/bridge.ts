@@ -41,8 +41,8 @@ const api = (): NonNullable<Window['suncode']> => {
 
 export const bridge = {
   // ===== Agent =====
-  prompt(text: string, uiLanguage?: UiLanguage): void {
-    api().prompt(text, uiLanguage);
+  prompt(text: string, uiLanguage?: UiLanguage, sessionId?: string): void {
+    api().prompt(text, uiLanguage, sessionId);
   },
 
   abort(): void {

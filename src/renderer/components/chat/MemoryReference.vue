@@ -37,6 +37,20 @@ const kindColors: Record<string, string> = {
   lesson: 'var(--color-orange)',
   ephemeral: 'var(--color-text-muted)',
 };
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const scopeLabels: Record<string, string> = {
+  global: '全局级',
+  project: '项目级',
+  session: '会话级',
+};
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const scopeColors: Record<string, string> = {
+  global: 'var(--color-purple)',
+  project: 'var(--color-teal)',
+  session: 'var(--color-text-muted)',
+};
 </script>
 
 <template>
@@ -58,6 +72,16 @@ const kindColors: Record<string, string> = {
       }"
     >
       {{ kindLabels[memory.kind || 'task_summary'] }}
+    </span>
+    <span
+      v-if="memory.scope"
+      class="memory-scope"
+      :style="{
+        borderColor: scopeColors[memory.scope],
+        color: scopeColors[memory.scope],
+      }"
+    >
+      {{ scopeLabels[memory.scope] }}
     </span>
     <span class="memory-title">{{ memory.userRequest }}</span>
     <span class="memory-date">{{ memory.date }}</span>
@@ -103,6 +127,16 @@ const kindColors: Record<string, string> = {
 }
 
 .memory-kind {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid;
+  border-radius: var(--border-radius-pill);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.memory-scope {
   flex: 0 0 auto;
   padding: 2px 7px;
   border: 1px solid;

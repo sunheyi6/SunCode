@@ -4,48 +4,60 @@
 
 | 文档 | 说明 |
 |------|------|
+| [项目信息](project-info.md) | 运行时路径、数据目录、日志路径、构建信息、架构约定（Agent 回答"日志在哪""路径是什么"时优先读这个） |
 | [系统提示词设计](system-prompt-design.md) | System Prompt 构建：角色定义、Tool Discipline 反循环规则、一行式工具摘要、XML 结构化上下文、Token 优化 |
 | [工具调用设计](tool-calling-design.md) | 工具架构：回合事件 (turn_start/end)、参数验证、前端工具卡片 (Command/File/Inspect)、数据流 |
 | [上下文压缩设计](context-compaction-design.md) | 通过 `prepareNextTurn` 钩子自动压缩：触发策略、消息保留、与 Agent Loop 集成 |
 | [任务规划系统](task-planning-system.md) | 强制执行规划：三道防线、Plan Gate、Plan Parser、右侧面板统一、断路器机制 |
 | [任务结束判断机制](task-completion-mechanism.md) | `needs_follow_up` 决策、Goal 自主循环、Stop Hooks、双字段输出模型 |
-| [子智能体架构](subagent-architecture-comparison.md) | 子 Agent 委托系统：三框架对比 (pi-subagent/maka-agent/Codex CLI)、Dispatcher 调度、流式进度 |
 | [运行事件日志](run-event-logging-design.md) | JSONL 持久化：run_started/run_completed/model_request/turn_detail、CallTracePanel 回溯、Token 用量统计 |
 | [会话标题生成](session-title-generation.md) | AI 自动生成会话标题：轻量模型选取、TITLE_GENERATION_PROMPT、fallback 规则 |
-| [流式输出渲染](streaming-output-design.md) | 聊天流式时间轴：blocks/InlineCallTraceEntry 模型、中间文本一行预览、showThinking 开关、流式期间不标“最终回答” |
+| [流式输出渲染](streaming-output-design.md) | 聊天流式时间轴：blocks/InlineCallTraceEntry 模型、中间文本一行预览、showThinking 开关、流式期间不标"最终回答" |
 | [运行中引导注入](guidance-injection-design.md) | 引导注入通道：guidanceQueue/drainGuidance 模型、两个 drain 点位置策略、IPC 通道与持久化、UI 呈现（流式 chip + 重载时 user 气泡）、双 drain 末轮保护 |
 | [记忆系统设计](memory-system-design.md) | 双向记忆（自动记录 + 手动添加）、混合检索（关键词 + 向量相似度）、时间有效性管理、场景聚类、用户交互界面（设置管理 + 聊天引用展示） |
+| [工具设计 - bash](tools/bash.md) | 命令执行：尾部截断策略、进程树 kill、安全过滤、输出截断与临时文件保存 |
+| [工具设计 - edit](tools/edit.md) | 文件编辑：精确/模糊匹配引擎、BOM/行尾规范化、批量 edits、文件并发锁 |
+| [工具设计 - grep](tools/grep.md) | 内容搜索：ripgrep JSON 解析、文件缓存上下文、提前 kill 匹配限流 |
+| [工具设计 - write](tools/write.md) | 新建/覆盖写入：文件并发锁兼容、路径安全校验、行变更统计 |
+| [失败教训系统](failure-lessons-design.md) | 自动提取、存储和检索失败教训：四种触发类型、结构化教训提取、轻量 LLM 摘要、去重限流 |
+| [聊天输入框重设计](chat-input-redesign.md) | 聊天输入框重构：圆角容器布局、底部工具栏、主题适配、空输入禁用 |
+| [工具操作明细](tool-operation-details.md) | 工具调用卡片化：文件编辑/命令执行的结构化结果展示、状态追踪、行变更统计 |
+| [右侧悬浮面板](floating-panel-design.md) | Git 与进程信息悬浮面板：折叠态/展开态、Git 变更行统计、后台命令状态与计时 |
+| [调用链大纲](call-trace-outline-design.md) | 调用链面板大纲式布局：按 turn 分组、默认折叠摘要行、复用现有工具卡片 |
+| [紧凑流式输出](compact-streaming-progress.md) | 流式过程摘要：模型控制五行限制、中间文本预览 vs 最终回答区分、前端不截断 |
+| [顶部 Token 用量](header-token-usage.md) | Git 分支旁实时 Token 显示：复用 agent store 数据、千分位格式化、0 时隐藏 |
+| [会话切换性能](session-switch-performance.md) | 会话切换异步加载：最近 10 条优先、后台完整加载、竞态保护 |
 
-## 2026-06～07 架构变更摘要
+## 2026-06~07 架构变更摘要
 
 | 变更 | 说明 |
 |------|------|
-| **Dev/发版身份隔离** | `src/main/app-identity.ts` 作为主进程**最先 import** 的 bootstrap：dev 模式（`!app.isPackaged`）调用 `app.setName('SunCode Dev')`，使 dev 与发版 app 拥有独立的单实例锁 key 与 userData 目录（`%APPDATA%\SunCode Dev` vs `%APPDATA%\SunCode`）。避免 Windows 大小写不敏感导致 dev 与发版 app 共用锁、共用数据目录、互相"顶替"窗口。必须在任何 `app.getPath('userData')` 调用前执行，故独立成模块并置于 import 链首位 |
-| **启动流程适配器** | `scripts/launch-dev.js` 统一接管 `dev` 命令：Bun 可用性探测 → 依赖完整性自动修复 → 无 TTY/CI 适配 → Electron 桌面会话检查 → 启动失败诊断 |
-| 多 Session 并发 Agent | Worker 内 `Map<string,Agent>` 替代单例，每 session 独立 Agent 实例并行运行，消息按 sessionId 路由 |
-| SessionLock 串行化 | `withSessionLock` Promise 链保证同一 session 的 prompt/continue 操作不并发竞态；**stop/abort 不使用锁**直接中断 |
-| **软停止 (Soft Stop)** | 点击停止按钮 → `requestStop()` 设 flag + abort → 流中断 → 追加"请总结完成的操作" → 单轮纯文本总结 → 结束；区别于硬 abort |
-| **自动滚动修复** | 内容变化时始终自动滚到底部（不再 gate 在 `isStreaming`），工具执行/子智能体进度等离线更新也能触发；仅用户手动上滚时暂停 |
-| Session 切换 abort | 切换 session 时先 abort 当前 run，避免 `setMessages` 被静默忽略导致消息丢失 |
-| Token 实时追踪 | `onTurnStart` 回调传递实时 token 累计值，`emitStatus` 合并已提交 + 当前 run token，StatusBar 每轮刷新 |
-| 后台进程多实例管理 | bgProcessStarted/bgProcessCompleted 事件，支持多 bash 后台进程独立追踪和 kill；停止对话时自动清理 |
-| Agent turn 计数 | Agent 全局 turnCount 跨 run 累计，StatusBar 显示当前轮次 |
-| Tool Usage Discipline | 新增反循环规则章节，防止模型无限调用工具 |
-| 工具一行式摘要 | 替代完整 JSON Schema，节省 ~60% 工具 token |
-| `<project_context>` XML | 结构化注入 .agents.md / Skills / Memory / Lessons，遵循 pi/Codex 约定 |
-| Skills 技能系统 | `~/.suncode/skills/` + 项目 `.suncode/skills/` 双层加载，Markdown 格式，注入 system prompt |
-| Memory 记忆系统 | 每次 session 结束自动生成记忆摘要存入 `.suncode/memories/`，下次对话根据语义检索注入上下文 |
-| Lessons 教训系统 | 失败时自动提取教训存入 `.suncode/lessons/`，后续相关任务检索注入，避免重复踩坑 |
+| **Dev/发版身份隔离** | `src/main/app-identity.ts` 作为主进程**最先 import** 的 bootstrap:dev 模式(`!app.isPackaged`)调用 `app.setName('SunCode Dev')`,使 dev 与发版 app 拥有独立的单实例锁 key 与 userData 目录(`%APPDATA%\SunCode Dev` vs `%APPDATA%\SunCode`)。避免 Windows 大小写不敏感导致 dev 与发版 app 共用锁、共用数据目录、互相"顶替"窗口。必须在任何 `app.getPath('userData')` 调用前执行,故独立成模块并置于 import 链首位 |
+| **启动流程适配器** | `scripts/launch-dev.js` 统一接管 `dev` 命令:Bun 可用性探测 → 依赖完整性自动修复 → 无 TTY/CI 适配 → Electron 桌面会话检查 → 启动失败诊断 |
+| 多 Session 并发 Agent | Worker 内 `Map<string,Agent>` 替代单例,每 session 独立 Agent 实例并行运行,消息按 sessionId 路由 |
+| SessionLock 串行化 | `withSessionLock` Promise 链保证同一 session 的 prompt/continue 操作不并发竞态;**stop/abort 不使用锁**直接中断 |
+| **软停止 (Soft Stop)** | 点击停止按钮 → `requestStop()` 设 flag + abort → 流中断 → 追加"请总结完成的操作" → 单轮纯文本总结 → 结束;区别于硬 abort |
+| **自动滚动修复** | 内容变化时始终自动滚到底部(不再 gate 在 `isStreaming`),工具执行/子智能体进度等离线更新也能触发;仅用户手动上滚时暂停 |
+| Session 切换 abort | 切换 session 时先 abort 当前 run,避免 `setMessages` 被静默忽略导致消息丢失 |
+| Token 实时追踪 | `onTurnStart` 回调传递实时 token 累计值,`emitStatus` 合并已提交 + 当前 run token,StatusBar 每轮刷新 |
+| 后台进程多实例管理 | bgProcessStarted/bgProcessCompleted 事件,支持多 bash 后台进程独立追踪和 kill;停止对话时自动清理 |
+| Agent turn 计数 | Agent 全局 turnCount 跨 run 累计,StatusBar 显示当前轮次 |
+| Tool Usage Discipline | 新增反循环规则章节,防止模型无限调用工具 |
+| 工具一行式摘要 | 替代完整 JSON Schema,节省 ~60% 工具 token |
+| `<project_context>` XML | 结构化注入 .agents.md / Skills / Memory / Lessons,遵循 pi/Codex 约定 |
+| Skills 技能系统 | `~/.suncode/skills/` + 项目 `.suncode/skills/` 双层加载,Markdown 格式,注入 system prompt |
+| Memory 记忆系统 | 每次 session 结束自动生成记忆摘要存入 `.suncode/memories/`,下次对话根据语义检索注入上下文 |
+| Lessons 教训系统 | 失败时自动提取教训存入 `.suncode/lessons/`,后续相关任务检索注入,避免重复踩坑 |
 | `prepareNextTurn` 钩子 | 回合间上下文压缩 + 未来动态换模型的扩展点 |
-| `turn_start` / `turn_end` 事件 | 回合边界感知，前端展示进度（第N轮）|
+| `turn_start` / `turn_end` 事件 | 回合边界感知,前端展示进度(第N轮)|
 | 工具参数运行时验证 | 必填参数检查 + 类型强制转换 |
 | 前端工具卡片优化 | FileInspectCard (read/glob/grep)、思考区自动折叠、输入历史导航 |
-| 任务规划系统 | 三道防线（用户消息注入 + System Prompt + 首轮检查）、Plan Gate 强制步骤完成、断路器防死循环 |
-| Plan Parser | 宽松解析模型输出中的 📋 checklist，支持多种编号格式，自动去重 |
-| 右侧面板统一 | Git + Plan + Process 三合一右侧悬浮面板，计划 5 条默认折叠，显示执行时间 |
-| Goal 自主循环 | `/goal` 前缀触发：自动制定计划 → 执行 → 验证 → 失败重试，最多 N 轮或超时自动终止 |
-| 子智能体调度 | SubagentDispatcher 调度 explor/review/implement 子 Agent，流式输出思考过程和工具调用到主 UI |
-| 运行中引导注入 | 不中断 run 的引导通道：guidanceQueue 队列 + 两个 drain 注入点（turn 顶部 + stop 边缘），引导即时落盘，UI 显示为 inline-trace chip |
+| 任务规划系统 | 三道防线(用户消息注入 + System Prompt + 首轮检查)、Plan Gate 强制步骤完成、断路器防死循环 |
+| Plan Parser | 宽松解析模型输出中的 📋 checklist,支持多种编号格式,自动去重 |
+| 右侧面板统一 | Git + Plan + Process 三合一右侧悬浮面板,计划 5 条默认折叠,显示执行时间 |
+| Goal 自主循环 | `/goal` 前缀触发:自动制定计划 → 执行 → 验证 → 失败重试,最多 N 轮或超时自动终止 |
+| 子智能体调度 | SubagentDispatcher 调度 explor/review/implement 子 Agent,流式输出思考过程和工具调用到主 UI |
+| 运行中引导注入 | 不中断 run 的引导通道:guidanceQueue 队列 + 两个 drain 注入点(turn 顶部 + stop 边缘),引导即时落盘,UI 显示为 inline-trace chip |
 
 ## 相关源码
 

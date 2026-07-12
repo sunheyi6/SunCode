@@ -28,9 +28,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 const suncodeAPI = {
   // ===== Agent Control =====
 
-  /** Send a prompt to the agent */
-  prompt(text: string, uiLanguage?: UiLanguage): void {
-    ipcRenderer.send('agent:prompt', text, uiLanguage);
+  /** Send a prompt to the agent for the session that initiated it. */
+  prompt(text: string, uiLanguage?: UiLanguage, sessionId?: string): void {
+    ipcRenderer.send('agent:prompt', text, uiLanguage, sessionId);
   },
 
   /** Abort the current agent run (hard stop). */

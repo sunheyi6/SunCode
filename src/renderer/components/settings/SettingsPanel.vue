@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AppSettings, DiscoveredSkill, MemoryEntry } from '@shared/types';
+import type { AppSettings, AppearanceStyle, DiscoveredSkill, MemoryEntry } from '@shared/types';
 import { computed, onMounted, ref, watch } from 'vue';
 import { bridge } from '../../api/bridge';
 import { useToast } from '../../composables/useToast';
@@ -7,6 +7,7 @@ import { useSessionsStore } from '../../stores/sessions';
 import { useSettingsStore } from '../../stores/settings';
 import { useStatsStore } from '../../stores/stats';
 import { useUpdateStore } from '../../stores/update';
+import MemoryAddDialog from '../chat/MemoryAddDialog.vue';
 import MemoryDetail from '../chat/MemoryDetail.vue';
 import MemoryReference from '../chat/MemoryReference.vue';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
@@ -40,36 +41,30 @@ const loadedSkills = ref<DiscoveredSkill[]>([]);
 
 const memories = ref<MemoryEntry[]>([]);
 const memorySearchQuery = ref('');
+const memoryScopeFilter = ref<'all' | 'global' | 'project' | 'session'>('all');
 const selectedMemory = ref<MemoryEntry | null>(null);
 const showMemoryDetail = ref(false);
-const isAddingMemory = ref(false);
-const newMemory = ref({
-  userRequest: '',
-  summary: '',
-  kind: 'task_summary' as MemoryEntry['kind'],
-  scope: 'project' as MemoryEntry['scope'],
-  importance: 1,
-  tags: '',
-});
+const showAddDialog = ref(false);
 
-const kindLabels: Record<string, string> = {
-  task_summary: '任务摘要',
-  project_fact: '项目事实',
-  decision: '决策',
-  preference: '偏好',
-  lesson: '经验教训',
-  ephemeral: '临时',
-};
+const scopeFilterOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'global', label: '全局' },
+  { value: 'project', label: '项目' },
+  { value: 'session', label: '会话' },
+] as const;
 
 const filteredMemories = computed(() => {
-  if (!memorySearchQuery.value.trim()) return memories.value;
-  const query = memorySearchQuery.value.toLowerCase();
-  return memories.value.filter(
-    (m) =>
+  const query = memorySearchQuery.value.toLowerCase().trim();
+  return memories.value.filter((m) => {
+    const scope = m.scope ?? 'session';
+    if (memoryScopeFilter.value !== 'all' && scope !== memoryScopeFilter.value) return false;
+    if (!query) return true;
+    return (
       m.userRequest.toLowerCase().includes(query) ||
       m.summary.toLowerCase().includes(query) ||
-      m.tags?.some((t) => t.toLowerCase().includes(query)),
-  );
+      m.tags?.some((t) => t.toLowerCase().includes(query))
+    );
+  });
 });
 
 async function loadMemories(): Promise<void> {
@@ -101,46 +96,16 @@ watch([() => activeSection.value, () => sessionsStore.activeSessionId], ([sectio
   }
 });
 
-async function handleAddMemory(): Promise<void> {
-  if (!newMemory.value.userRequest.trim()) {
-    showToast('请输入记忆内容', 'error');
-    return;
-  }
+function openAddDialog(): void {
+  showAddDialog.value = true;
+}
 
-  isAddingMemory.value = true;
-  try {
-    const workingDir = await bridge.getWorkingDir();
-    const memory: MemoryEntry = {
-      date: new Date().toISOString().slice(0, 10),
-      slug: `manual-${Date.now()}`,
-      userRequest: newMemory.value.userRequest,
-      toolsUsed: {},
-      summary: newMemory.value.summary,
-      kind: newMemory.value.kind,
-      scope: newMemory.value.scope,
-      importance: newMemory.value.importance,
-      tags: newMemory.value.tags
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean),
-    };
-    await bridge.saveMemory(workingDir, memory);
-    showToast('记忆已添加', 'success');
-    newMemory.value = {
-      userRequest: '',
-      summary: '',
-      kind: 'task_summary',
-      scope: 'project',
-      importance: 1,
-      tags: '',
-    };
-    await loadMemories();
-  } catch (e) {
-    showToast('添加记忆失败', 'error');
-    console.error('[SettingsPanel] addMemory failed:', e);
-  } finally {
-    isAddingMemory.value = false;
-  }
+function closeAddDialog(): void {
+  showAddDialog.value = false;
+}
+
+async function onMemorySaved(): Promise<void> {
+  await loadMemories();
 }
 
 function handleMemoryClick(memory: MemoryEntry): void {
@@ -387,6 +352,51 @@ function themeLabel(theme: AppSettings['theme']): string {
   return '深色';
 }
 
+/**
+ * Selectable design styles. Each carries dark + light preview swatches so the
+ * card preview matches whichever mode is active (what-you-see-is-what-you-get).
+ */
+interface StylePreset {
+  value: AppearanceStyle;
+  label: string;
+  bg: string;
+  accent: string;
+  lightBg: string;
+  lightAccent: string;
+}
+
+const STYLE_PRESETS: ReadonlyArray<StylePreset> = [
+  { value: 'apple', label: 'SunCode 默认', bg: '#000000', accent: '#007aff', lightBg: '#f5f5f7', lightAccent: '#007aff' },
+  { value: 'linear', label: 'Linear', bg: '#08090a', accent: '#5e6ad2', lightBg: '#f9f9fb', lightAccent: '#5e6ad2' },
+  { value: 'vercel', label: 'Vercel', bg: '#000000', accent: '#ededed', lightBg: '#fafafa', lightAccent: '#000000' },
+  { value: 'raycast', label: 'Raycast', bg: '#1c1c1e', accent: '#ff6365', lightBg: '#f7f7f8', lightAccent: '#ff6363' },
+  { value: 'cursor', label: 'Cursor', bg: '#1e1e1e', accent: '#3ccb7f', lightBg: '#f8f8f8', lightAccent: '#16a34a' },
+  { value: 'notion', label: 'Notion', bg: '#191919', accent: '#e8b86d', lightBg: '#f7f6f3', lightAccent: '#d9730d' },
+  { value: 'stripe', label: 'Stripe', bg: '#0a0e1a', accent: '#635bff', lightBg: '#f6f9fc', lightAccent: '#635bff' },
+  { value: 'spotify', label: 'Spotify', bg: '#000000', accent: '#1db954', lightBg: '#f8f8f8', lightAccent: '#1db954' },
+];
+
+/** Preview swatch colors follow the currently resolved light/dark mode. */
+function previewBg(preset: StylePreset): string {
+  return settingsStore.resolvedTheme === 'light' ? preset.lightBg : preset.bg;
+}
+
+function previewAccent(preset: StylePreset): string {
+  return settingsStore.resolvedTheme === 'light' ? preset.lightAccent : preset.accent;
+}
+
+const currentAppearance = computed<AppearanceStyle>(
+  () => settingsStore.settings.appearance ?? 'apple',
+);
+
+const currentAppearanceLabel = computed(
+  () => STYLE_PRESETS.find((p) => p.value === currentAppearance.value)?.label ?? 'SunCode 默认',
+);
+
+function selectStyle(style: AppearanceStyle): void {
+  settingsStore.setAppearance(style);
+}
+
 const activeBackgroundColor = computed(() => {
   const color = settingsStore.settings.backgroundColor?.trim();
   return color || '';
@@ -471,6 +481,7 @@ function resetBackgroundColor(): void {
             <h1>{{ activeTitle }}</h1>
             <div v-if="activeSection === 'appearance'" class="heading-pills">
               <span>{{ themeLabel(settingsStore.settings.theme) }}</span>
+              <span>{{ currentAppearanceLabel }}</span>
               <span>{{ activeBackgroundColor ? activeBackgroundColor : '主题默认' }}</span>
             </div>
           </section>
@@ -547,6 +558,32 @@ function resetBackgroundColor(): void {
                   <span>{{ settingsStore.settings.fontSize }}px</span>
                 </span>
               </label>
+            </div>
+
+            <div class="settings-card">
+              <div class="setting-row static">
+                <span class="setting-copy">
+                  <strong>设计风格</strong>
+                  <small>选择应用整体的配色风格，明暗模式均会套用对应版本。</small>
+                </span>
+              </div>
+              <div class="style-grid">
+                <button
+                  v-for="preset in STYLE_PRESETS"
+                  :key="preset.value"
+                  type="button"
+                  class="style-card"
+                  :class="{ active: currentAppearance === preset.value }"
+                  :aria-pressed="currentAppearance === preset.value"
+                  :title="preset.label"
+                  @click="selectStyle(preset.value)"
+                >
+                  <span class="style-preview" :style="{ background: previewBg(preset) }">
+                    <span class="style-accent" :style="{ background: previewAccent(preset) }"></span>
+                  </span>
+                  <span class="style-name">{{ preset.label }}</span>
+                </button>
+              </div>
             </div>
 
             <div class="settings-card">
@@ -850,71 +887,35 @@ function resetBackgroundColor(): void {
               </div>
             </div>
 
-            <div class="memory-columns">
-              <form class="memory-form-card" @submit.prevent="handleAddMemory">
-                <div class="memory-card-heading">
-                  <div>
-                    <span class="memory-card-kicker">NEW MEMORY</span>
-                    <h2>添加新记忆</h2>
-                  </div>
-                  <span class="memory-card-heading-icon" aria-hidden="true"><AppIcon name="plus" :size="16" /></span>
-                </div>
-
-                <label class="memory-field memory-field-wide">
-                  <span>内容</span>
-                  <textarea
-                    v-model="newMemory.userRequest"
-                    rows="4"
-                    placeholder="例如：项目使用 Bun 管理依赖"
-                  />
-                </label>
-
-                <label class="memory-field memory-field-wide">
-                  <span>摘要 <em>可选</em></span>
-                  <input v-model="newMemory.summary" type="text" placeholder="用一句话概括这条记忆" />
-                </label>
-
-                <div class="memory-field-grid">
-                  <label class="memory-field">
-                    <span>类型</span>
-                    <select v-model="newMemory.kind">
-                      <option v-for="(label, key) in kindLabels" :key="key" :value="key">
-                        {{ label }}
-                      </option>
-                    </select>
-                  </label>
-                  <label class="memory-field">
-                    <span>重要度 <strong class="memory-range-value">{{ newMemory.importance }}/5</strong></span>
-                    <input v-model.number="newMemory.importance" type="range" min="1" max="5" />
-                  </label>
-                </div>
-
-                <label class="memory-field memory-field-wide">
-                  <span>标签 <em>可选</em></span>
-                  <input v-model="newMemory.tags" type="text" placeholder="用逗号分隔多个标签" />
-                </label>
-
-                <div class="memory-form-footer">
-                  <span class="memory-form-hint">保存后会立即用于后续对话</span>
-                  <button class="save-button memory-submit" type="submit" :disabled="isAddingMemory">
-                    <AppIcon :name="isAddingMemory ? 'loader' : 'plus'" :size="14" />
-                    {{ isAddingMemory ? '添加中...' : '添加记忆' }}
-                  </button>
-                </div>
-              </form>
-
-              <div class="memory-list-card">
+            <div class="memory-list-card">
                 <div class="memory-card-heading memory-list-heading">
                   <div>
                     <span class="memory-card-kicker">SAVED MEMORIES</span>
                     <h2>已保存的记忆 <span>{{ filteredMemories.length }}</span></h2>
                   </div>
-                  <AppIcon name="layers" :size="17" />
+                  <div class="memory-list-actions">
+                    <button class="add-memory-button" type="button" @click="openAddDialog">
+                      <AppIcon name="plus" :size="14" />
+                      添加记忆
+                    </button>
+                  </div>
                 </div>
                 <label class="memory-search">
                   <AppIcon name="search" :size="15" />
                   <input v-model="memorySearchQuery" type="search" placeholder="搜索内容、摘要或标签" />
                 </label>
+                <div class="memory-scope-tabs">
+                  <button
+                    v-for="opt in scopeFilterOptions"
+                    :key="opt.value"
+                    type="button"
+                    class="memory-scope-tab"
+                    :class="{ active: memoryScopeFilter === opt.value }"
+                    @click="memoryScopeFilter = opt.value"
+                  >
+                    {{ opt.label }}
+                  </button>
+                </div>
                 <div v-if="filteredMemories.length > 0" class="memory-list">
                   <MemoryReference
                     v-for="memory in filteredMemories"
@@ -926,11 +927,10 @@ function resetBackgroundColor(): void {
                 </div>
                 <div v-else class="memory-empty">
                   <span class="memory-empty-icon" aria-hidden="true"><AppIcon name="brain" :size="22" /></span>
-                  <strong>{{ memorySearchQuery ? '没有找到匹配的记忆' : '还没有保存记忆' }}</strong>
-                  <span>{{ memorySearchQuery ? '换个关键词试试' : '添加第一条记忆，让 AI 更了解这个项目' }}</span>
+                  <strong>{{ memorySearchQuery ? '没有找到匹配的记忆' : (memoryScopeFilter === 'global' ? '还没有全局记忆' : '还没有保存记忆') }}</strong>
+                  <span>{{ memorySearchQuery ? '换个关键词试试' : (memoryScopeFilter === 'global' ? '在「添加新记忆」时把作用域设为「全局级」' : '添加第一条记忆，让 AI 更了解这个项目') }}</span>
                 </div>
               </div>
-            </div>
           </section>
 
           <section v-else-if="activeSection === 'usage'" class="settings-stack">
@@ -1000,6 +1000,13 @@ function resetBackgroundColor(): void {
         :visible="showMemoryDetail"
         @close="handleCloseDetail"
         @delete="handleDeleteMemory"
+      />
+
+      <MemoryAddDialog
+        v-if="showAddDialog"
+        :visible="showAddDialog"
+        @close="closeAddDialog"
+        @saved="onMemorySaved"
       />
     </div>
   </Teleport>
@@ -1716,6 +1723,68 @@ function resetBackgroundColor(): void {
   font-size: 12px;
 }
 
+/* ── Design style picker ── */
+
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 10px;
+  padding: 4px 20px 20px;
+}
+
+.style-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--color-bg);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+}
+
+.style-card:hover {
+  border-color: var(--color-text-secondary);
+  background: var(--color-surface-hover);
+  transform: translateY(-1px);
+}
+
+.style-card.active {
+  border-color: var(--color-accent);
+  background: var(--color-surface-hover);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.style-preview {
+  height: 46px;
+  display: flex;
+  align-items: flex-end;
+  padding: 8px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: 8px;
+}
+
+.style-accent {
+  width: 20px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.style-name {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.style-card.active .style-name {
+  color: var(--color-text);
+}
+
 /* ── Toggle Switch (same iOS-style as .switch) ── */
 
 .toggle-row {
@@ -1809,7 +1878,6 @@ function resetBackgroundColor(): void {
 }
 
 .memory-intro-icon,
-.memory-card-heading-icon,
 .memory-empty-icon {
   display: inline-flex;
   flex: 0 0 auto;
@@ -1838,28 +1906,12 @@ function resetBackgroundColor(): void {
   font-size: 12px;
 }
 
-.memory-columns {
-  display: grid;
-  max-width: 1040px;
-  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
-  gap: 16px;
-  align-items: start;
-}
-
-.memory-form-card,
 .memory-list-card {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border-color-strong);
   border-radius: var(--border-radius-lg);
   background: var(--color-surface);
-}
-
-.memory-form-card {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding: 20px;
 }
 
 .memory-card-heading {
@@ -1890,84 +1942,23 @@ function resetBackgroundColor(): void {
   letter-spacing: 0.1em;
 }
 
-.memory-card-heading-icon {
-  width: 30px;
-  height: 30px;
+.memory-list-actions { display: flex; align-items: center; gap: 8px; }
+.add-memory-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border: 0;
   border-radius: var(--border-radius-sm);
-  background: var(--color-bg-tertiary);
-}
-
-.memory-field {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 7px;
-  color: var(--color-text-secondary);
+  background: var(--color-accent);
+  color: #fff;
   font-size: 12px;
   font-weight: 600;
-}
-
-.memory-field-wide { width: 100%; }
-.memory-field em { color: var(--color-text-muted); font-size: 11px; font-style: normal; font-weight: 400; }
-.memory-field input,
-.memory-field textarea,
-.memory-field select {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--border-color-strong);
-  border-radius: var(--border-radius-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-  font-size: 13px;
-}
-
-.memory-field textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
-.memory-field select { height: 36px; padding: 0 10px; }
-.memory-field-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
-
-.memory-field input[type='range'] {
-  height: 20px;
-  margin: 0;
-  padding: 0;
-  appearance: none;
-  -webkit-appearance: none;
-  background: transparent;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
-
-.memory-field input[type='range']::-webkit-slider-runnable-track {
-  height: 5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-text-muted) 28%, var(--color-bg-tertiary));
-}
-
-.memory-field input[type='range']::-webkit-slider-thumb {
-  width: 16px;
-  height: 16px;
-  margin-top: -5px;
-  appearance: none;
-  -webkit-appearance: none;
-  border: 0;
-  border-radius: 50%;
-  background: var(--color-accent);
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-accent) 38%, transparent);
-}
-
-.memory-field input[type='range']::-moz-range-track { height: 5px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--color-text-muted) 28%, var(--color-bg-tertiary)); }
-.memory-field input[type='range']::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: var(--color-accent); }
-.memory-range-value { float: right; color: var(--color-text); font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
-
-.memory-form-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 2px;
-}
-
-.memory-form-hint { color: var(--color-text-muted); font-size: 11px; }
-.memory-submit { display: inline-flex; align-items: center; gap: 7px; background: var(--color-accent); color: #fff; }
-.memory-submit:hover:not(:disabled) { background: var(--color-accent-hover); }
+.add-memory-button:hover { background: var(--color-accent-hover); }
 
 .memory-list-card { min-height: 100%; padding: 20px 0 8px; }
 .memory-list-heading { padding: 0 20px 16px; }
@@ -1979,18 +1970,27 @@ function resetBackgroundColor(): void {
 .memory-list { border-top: 1px solid var(--border-color); }
 .memory-list :deep(.memory-reference) { border-bottom: 1px solid var(--border-color); }
 .memory-list :deep(.memory-reference:last-child) { border-bottom: 0; }
+
+.memory-scope-tabs { display: flex; gap: 6px; margin: 0 20px 10px; flex-wrap: wrap; }
+.memory-scope-tab {
+  padding: 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.memory-scope-tab:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.memory-scope-tab.active { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
 .memory-empty { display: flex; min-height: 230px; align-items: center; justify-content: center; gap: 7px; padding: 30px 22px; flex-direction: column; text-align: center; }
 .memory-empty-icon { width: 48px; height: 48px; margin-bottom: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface)); }
 .memory-empty strong { color: var(--color-text-secondary); font-size: 13px; }
 .memory-empty span:last-child { color: var(--color-text-muted); font-size: 12px; }
 
 @media (max-width: 1050px) {
-  .memory-columns { grid-template-columns: 1fr; }
   .memory-list-card { min-height: 0; }
-}
-
-@media (max-width: 560px) {
-  .memory-field-grid { grid-template-columns: 1fr; }
-  .memory-form-footer { align-items: flex-start; flex-direction: column; }
 }
 </style>

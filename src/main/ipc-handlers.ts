@@ -109,9 +109,67 @@ const sessionMessages: Map<string, Message[]> = new Map();
 let currentSessionId: string | null = null;
 /** The session that originated the current agent prompt (may differ from
  *  currentSessionId if the user switched sessions mid-run). Used by
- *  saveMessage to ensure assistant responses land in the correct session.
- *  User messages ignore this and always use currentSessionId. */
+ *  saveMessage as a legacy fallback when the renderer does not provide an
+ *  explicit target. */
 let promptSessionId: string | null = null;
+
+interface PersistMessageResult {
+  added: boolean;
+  updated: boolean;
+}
+
+/**
+ * Persist a message from the main process. Assistant messages are merged into
+ * an existing trailing assistant row so the renderer's later save cannot
+ * duplicate the answer that was durably written from the worker completion.
+ */
+async function persistSessionMessage(
+  targetSession: string,
+  message: Message,
+): Promise<PersistMessageResult> {
+  let messages = sessionMessages.get(targetSession);
+  let meta = sessions.get(targetSession);
+
+  if (!messages || !meta) {
+    const disk = await loadSession(targetSession);
+    if (disk) {
+      messages = disk.messages;
+      meta = disk.meta;
+      sessions.set(targetSession, meta);
+      sessionMessages.set(targetSession, messages);
+    }
+  }
+
+  if (!messages || !meta) {
+    console.warn(`[Main] saveMessage: session not found ${targetSession.slice(-8)}`);
+    return { added: false, updated: false };
+  }
+
+  const last = messages[messages.length - 1];
+  let added = false;
+  let updated = false;
+
+  if (message.role === 'assistant' && last?.role === 'assistant') {
+    messages[messages.length - 1] = { ...last, ...message };
+    updated = true;
+  } else {
+    messages.push(message);
+    added = true;
+  }
+
+  meta.updated = new Date().toISOString();
+  meta.messageCount = messages.length;
+  await saveSession(meta, messages);
+  return { added, updated };
+}
+
+async function persistAssistantMessage(sessionId: string, message: Message): Promise<void> {
+  try {
+    await persistSessionMessage(sessionId, message);
+  } catch (err) {
+    console.error('[Main] Failed to persist completed assistant message:', (err as Error).message);
+  }
+}
 
 // ===== Agent Worker Management =====
 
@@ -132,6 +190,31 @@ function getAgentWorker(): Worker {
 
     agentWorker.on('message', async (msg: WorkerOutMessage) => {
       console.log('[Main] Worker message:', msg.type);
+
+      // Runtime events and completed messages must be durable even when the
+      // renderer has crashed or the window is already closing. The renderer
+      // still receives these events when available, but it is no longer the
+      // only owner of assistant-message persistence.
+      if (msg.type === 'runEvent') {
+        const evt = msg.event;
+        const sid = msg.sessionId;
+        if (evt.type !== 'metadata') {
+          if (evt.type === 'run_started') {
+            await startRun(sid, evt.runId);
+          }
+          await appendEvent(sid, evt.runId, evt);
+        }
+        const mainWindow = windowManager?.getMainWindow();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('agent:run-event', { sessionId: sid, event: evt });
+        }
+        return;
+      }
+
+      if (msg.type === 'done') {
+        await persistAssistantMessage(msg.sessionId, msg.message);
+      }
+
       const mainWindow = windowManager?.getMainWindow();
       if (!mainWindow || mainWindow.isDestroyed()) return;
 
@@ -200,18 +283,6 @@ function getAgentWorker(): Worker {
             ports: msg.ports,
           });
           break;
-        case 'runEvent': {
-          const evt = msg.event;
-          const sid = msg.sessionId;
-          if (evt.type === 'metadata') break; // metadata is written by startRun, never via IPC
-          if (evt.type === 'run_started') {
-            await startRun(sid, evt.runId);
-          }
-          await appendEvent(sid, evt.runId, evt);
-          // Forward to renderer for call trace panel
-          mainWindow.webContents.send('agent:run-event', { sessionId: msg.sessionId, event: evt });
-          break;
-        }
         case 'subagentStart':
           mainWindow.webContents.send('agent:subagent-start', {
             sessionId: msg.sessionId,
@@ -354,17 +425,20 @@ export function registerIpcHandlers(wm: WindowManager): void {
   initSessionStore();
 
   // Agent
-  ipcMain.on('agent:prompt', (_event, text: string, uiLanguage?: UiLanguage) => {
-    try {
-      const sessionId = currentSessionId;
-      if (!sessionId) return;
-      console.log('[Main] agent:prompt received:', text.slice(0, 80));
-      promptSessionId = sessionId; // Snap the owning session
-      sendToWorker({ type: 'prompt', sessionId, text, uiLanguage });
-    } catch (err) {
-      console.error('[Main] agent:prompt failed:', (err as Error).message);
-    }
-  });
+  ipcMain.on(
+    'agent:prompt',
+    (_event, text: string, uiLanguage?: UiLanguage, requestedSessionId?: string) => {
+      try {
+        const sessionId = requestedSessionId || currentSessionId;
+        if (!sessionId) return;
+        console.log('[Main] agent:prompt received:', text.slice(0, 80));
+        promptSessionId = sessionId; // Snap the owning session
+        sendToWorker({ type: 'prompt', sessionId, text, uiLanguage });
+      } catch (err) {
+        console.error('[Main] agent:prompt failed:', (err as Error).message);
+      }
+    },
+  );
 
   ipcMain.on('agent:abort', () => {
     try {
@@ -612,14 +686,12 @@ export function registerIpcHandlers(wm: WindowManager): void {
     'session:saveMessage',
     async (_event, message: Message, targetSessionId?: string) => {
       try {
-        // Role-based session targeting:
-        // - User messages always go to currentSessionId (the session the user is viewing).
-        // - Assistant/system messages use the explicit targetSessionId (from the renderer event),
-        //   falling back to promptSessionId for backward compatibility.
+        // Prefer the session captured by the renderer at dispatch time for
+        // every role. Falling back to the current/prompt session keeps older
+        // renderer payloads working without reintroducing cross-session writes.
         const targetSession =
-          message.role === 'user'
-            ? currentSessionId
-            : targetSessionId || promptSessionId || currentSessionId;
+          targetSessionId ||
+          (message.role === 'user' ? currentSessionId : promptSessionId || currentSessionId);
         if (!targetSession) {
           console.log('[Main] saveMessage: SKIP (no session)');
           return;
@@ -629,21 +701,18 @@ export function registerIpcHandlers(wm: WindowManager): void {
           `[Main] saveMessage role=${message.role} target=${targetSession.slice(-8)} cur=${currentSessionId?.slice(-8) ?? 'null'} prompt=${promptSessionId?.slice(-8) ?? 'null'} before=${msgs.length}`,
         );
         const isFirstMessage = msgs.length === 0;
-        msgs.push(message);
-        sessionMessages.set(targetSession, msgs);
+        const result = await persistSessionMessage(targetSession, message);
 
         const meta = sessions.get(targetSession);
-        if (meta) {
-          meta.updated = new Date().toISOString();
-          meta.messageCount = msgs.length;
-          if (isFirstMessage && message.role === 'user') {
-            // Quick fallback title from the first message text
-            const title = extractTitle(message);
-            if (title) meta.name = title;
-            // Fire-and-forget: AI-generated title in the background
-            void generateTitleWithAI(targetSession, message);
+        if (meta && isFirstMessage && result.added && message.role === 'user') {
+          // Quick fallback title from the first message text
+          const title = extractTitle(message);
+          if (title) {
+            meta.name = title;
+            await saveSession(meta, sessionMessages.get(targetSession) || []);
           }
-          await saveSession(meta, msgs);
+          // Fire-and-forget: AI-generated title in the background
+          void generateTitleWithAI(targetSession, message);
         }
       } catch (err) {
         console.error('[Main] session:saveMessage failed:', (err as Error).message);
@@ -1289,7 +1358,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
           userRequest: string;
           toolsUsed: Record<string, number>;
           summary: string;
-          scope?: 'session' | 'project';
+          scope?: 'session' | 'project' | 'global';
           kind?:
             | 'task_summary'
             | 'project_fact'

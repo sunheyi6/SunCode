@@ -68,6 +68,9 @@ let isDownloading = false;
 let activeSource: UpdateSource | null = null;
 // Track skipped versions in-memory (persisted until app restart)
 const skippedVersions = new Set<string>();
+// Track the version currently being downloaded so the progress listener
+// can skip broadcasts for a version the user has dismissed.
+let downloadingVersion: string | undefined;
 
 function broadcast(status: UpdateStatus): void {
   currentStatus = status;
@@ -220,6 +223,8 @@ async function runDownload(): Promise<void> {
     return;
   }
   isDownloading = true;
+  // Capture the version before the initial broadcast (it has version field).
+  downloadingVersion = currentStatus.version;
   broadcast({ state: 'downloading', downloadProgress: 0 });
 
   // Start from the source that found the update, then fall back to the rest.
@@ -247,6 +252,7 @@ async function runDownload(): Promise<void> {
       const dl = await attemptDownload();
       if (dl.kind === 'downloaded') {
         isDownloading = false;
+        downloadingVersion = undefined;
         console.log('[Updater] Update downloaded via', source.name, ':', dl.info.version);
         broadcast({
           state: 'downloaded',
@@ -264,6 +270,7 @@ async function runDownload(): Promise<void> {
   }
 
   isDownloading = false;
+  downloadingVersion = undefined;
   console.error('[Updater] Download failed from all sources');
   broadcast({ state: 'error', error: lastError ?? 'Download failed from all sources' });
 }
@@ -291,6 +298,11 @@ export function initAutoUpdater(wm: WindowManager): void {
 
   // Progress is broadcast live regardless of which source is active.
   autoUpdater.on('download-progress', (progress) => {
+    // If the user dismissed (skipped) the version being downloaded, do not
+    // override their idle/no-update state with a stale downloading broadcast.
+    if (downloadingVersion && skippedVersions.has(downloadingVersion)) {
+      return;
+    }
     broadcast({
       state: 'downloading',
       downloadProgress: progress.percent,
@@ -310,7 +322,10 @@ export function getUpdateStatus(): UpdateStatus {
 
 export function skipVersion(version: string): void {
   skippedVersions.add(version);
-  broadcast({ ...currentStatus, skippedVersion: version });
+  // Broadcast no-update so the renderer truly dismisses the banner.
+  // Previously this spread currentStatus (still update-available), causing the
+  // renderer's listener to revert from idle back to update-available.
+  broadcast({ state: 'no-update', skippedVersion: version });
 }
 
 export async function checkForUpdates(): Promise<void> {

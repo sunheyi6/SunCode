@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   appendEvent: vi.fn(),
   findStaleRuns: vi.fn(),
+  getEvents: vi.fn(),
+  listRuns: vi.fn(),
   loadAllSessions: vi.fn(),
   loadSession: vi.fn(),
   saveSession: vi.fn(),
@@ -12,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../src/main/run-store', () => ({
   appendEvent: mocks.appendEvent,
   findStaleRuns: mocks.findStaleRuns,
+  getEvents: mocks.getEvents,
+  listRuns: mocks.listRuns,
 }));
 
 vi.mock('../../src/main/session-store', () => ({
@@ -40,6 +44,8 @@ describe('recoverInterruptedSessions', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     mocks.appendEvent.mockReset();
     mocks.findStaleRuns.mockReset();
+    mocks.getEvents.mockReset();
+    mocks.listRuns.mockReset();
     mocks.loadAllSessions.mockReset();
     mocks.loadSession.mockReset();
     mocks.saveSession.mockReset();
@@ -58,6 +64,7 @@ describe('recoverInterruptedSessions', () => {
 
     mocks.loadAllSessions.mockResolvedValue(sessions);
     mocks.findStaleRuns.mockResolvedValue([]);
+    mocks.listRuns.mockResolvedValue([]);
     mocks.loadSession.mockResolvedValue({ meta: sessions[0], messages });
 
     await recoverInterruptedSessions({
@@ -99,6 +106,7 @@ describe('recoverInterruptedSessions', () => {
 
     mocks.loadAllSessions.mockResolvedValue(sessions);
     mocks.findStaleRuns.mockResolvedValue(['run-1']);
+    mocks.listRuns.mockResolvedValue([]);
     mocks.loadSession.mockResolvedValue({ meta: sessions[0], messages });
 
     await recoverInterruptedSessions({ scheduleBackground: false });
@@ -110,6 +118,56 @@ describe('recoverInterruptedSessions', () => {
     expect(mocks.saveSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'recent', messageCount: 2 }),
       expect.arrayContaining([expect.objectContaining({ role: 'assistant' })]),
+    );
+  });
+
+  test('rebuilds a missing assistant message from a completed run', async () => {
+    const sessions = [session('recent', '2026-07-02T10:00:00.000Z')];
+    const messages: Message[] = [
+      { role: 'assistant', content: 'previous answer' },
+      { role: 'user', content: 'continue' },
+    ];
+    const responseText = JSON.stringify({
+      type: 'suncode.message',
+      role: 'assistant',
+      content: { text: 'Recovered answer' },
+    });
+
+    mocks.loadAllSessions.mockResolvedValue(sessions);
+    mocks.findStaleRuns.mockResolvedValue([]);
+    mocks.listRuns.mockResolvedValue(['run-1']);
+    mocks.getEvents.mockResolvedValue([
+      {
+        type: 'model_request_completed',
+        runId: 'run-1',
+        turnNumber: 1,
+        attempt: 1,
+        provider: 'deepseek',
+        model: 'deepseek-v4-flash',
+        durationMs: 100,
+        timestamp: '2026-07-02T10:00:01.000Z',
+        stopReason: 'stop',
+        responseText,
+      },
+      {
+        type: 'run_completed',
+        runId: 'run-1',
+        turnCount: 1,
+        timestamp: '2026-07-02T10:00:01.000Z',
+      },
+    ]);
+    mocks.loadSession.mockResolvedValue({ meta: sessions[0], messages });
+
+    await recoverInterruptedSessions({ scheduleBackground: false });
+
+    expect(mocks.saveSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'recent', messageCount: 3 }),
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Recovered answer' }],
+        }),
+      ]),
     );
   });
 });

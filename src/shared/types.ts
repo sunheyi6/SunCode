@@ -235,6 +235,17 @@ export interface CustomEndpoint {
 
 // ===== Settings Types =====
 
+/** Selectable design styles (dark brand palettes applied via `data-style`). */
+export type AppearanceStyle =
+  | 'apple'
+  | 'linear'
+  | 'vercel'
+  | 'raycast'
+  | 'cursor'
+  | 'notion'
+  | 'stripe'
+  | 'spotify';
+
 /** Application settings */
 export interface AppSettings {
   activeModel: string;
@@ -244,6 +255,12 @@ export interface AppSettings {
   autoCompact: boolean;
   compactThreshold: number; // 0-1 fraction of context window
   theme: 'system' | 'light' | 'dark';
+  /**
+   * Design style / brand theme. Selects a color palette via the `data-style`
+   * attribute on <html>. Each style has both a dark and a light variant, so it
+   * applies in both dark and light mode. 'apple' preserves the default look.
+   */
+  appearance?: AppearanceStyle;
   /**
    * Optional global background color override (hex, e.g. `#1a1a2e`).
    * When unset/empty, the active theme palette is used.
@@ -1190,7 +1207,7 @@ export interface TaskPlan {
 
 // ===== Memory Types =====
 
-export type MemoryScope = 'session' | 'project';
+export type MemoryScope = 'session' | 'project' | 'global';
 export type MemoryKind =
   | 'task_summary'
   | 'project_fact'

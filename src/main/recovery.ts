@@ -1,5 +1,5 @@
-import type { SessionMeta } from '@shared/types';
-import { appendEvent, findStaleRuns } from './run-store';
+import type { Message, RunEvent, SessionMeta } from '@shared/types';
+import { appendEvent, findStaleRuns, getEvents, listRuns } from './run-store';
 import { loadAllSessions, loadSession, saveSession } from './session-store';
 
 const STARTUP_RECOVERY_SESSION_LIMIT = 5;
@@ -83,18 +83,26 @@ async function recoverSessionBatch(sessions: SessionMeta[]): Promise<void> {
 async function recoverSession(meta: SessionMeta): Promise<void> {
   try {
     const staleRunIds = await findStaleRuns(meta.id);
-    if (staleRunIds.length === 0) return;
+    const tail = await loadSession(meta.id, 1);
+    if (!tail) return;
 
-    console.log(
-      `[Recovery] Session "${meta.name}" has ${staleRunIds.length} stale run(s): ${staleRunIds.join(', ')}`,
-    );
+    const mayNeedCompletedRecovery = tail.messages[tail.messages.length - 1]?.role === 'user';
+    if (staleRunIds.length === 0 && !mayNeedCompletedRecovery) return;
 
-    // Load the session to repair messages
-    const data = await loadSession(meta.id);
+    // Stale-run repair needs the complete history; completed-run repair only
+    // needs it when the tail confirms that the latest user message is orphaned.
+    const data =
+      staleRunIds.length > 0 || mayNeedCompletedRecovery ? await loadSession(meta.id) : tail;
     if (!data) return;
 
     const messages = data.messages;
     let modified = false;
+
+    if (staleRunIds.length > 0) {
+      console.log(
+        `[Recovery] Session "${meta.name}" has ${staleRunIds.length} stale run(s): ${staleRunIds.join(', ')}`,
+      );
+    }
 
     for (const runId of staleRunIds) {
       // Append recovery marker to the JSONL event log
@@ -127,6 +135,21 @@ async function recoverSession(meta: SessionMeta): Promise<void> {
       }
     }
 
+    // A renderer crash can happen after the worker has emitted run_completed.
+    // Such a run is not stale, but its final assistant message may still be
+    // absent because the old persistence path lived in the renderer. Rebuild
+    // that message from the last completed model request when possible.
+    if (messages[messages.length - 1]?.role === 'user') {
+      const recovered = await findLatestCompletedAssistantMessage(meta.id);
+      if (recovered) {
+        messages.push(recovered);
+        meta.messageCount = messages.length;
+        meta.updated = new Date().toISOString();
+        modified = true;
+        console.log(`[Recovery] Rebuilt completed assistant message for "${meta.name}"`);
+      }
+    }
+
     if (modified) {
       await saveSession(meta, messages);
       console.log(`[Recovery] Repaired session "${meta.name}"`);
@@ -134,6 +157,74 @@ async function recoverSession(meta: SessionMeta): Promise<void> {
   } catch (err) {
     console.warn(`[Recovery] Skipping session "${meta.name}" due to error:`, err);
   }
+}
+
+async function findLatestCompletedAssistantMessage(sessionId: string): Promise<Message | null> {
+  const candidates: Array<{ timestamp: string; message: Message }> = [];
+
+  for (const runId of await listRuns(sessionId)) {
+    const events = await getEvents(sessionId, runId);
+    const completed = [...events]
+      .reverse()
+      .find(
+        (event): event is Extract<RunEvent, { type: 'run_completed' }> =>
+          event.type === 'run_completed',
+      );
+    if (!completed) continue;
+
+    const finalRequest = [...events]
+      .reverse()
+      .find(
+        (event): event is Extract<RunEvent, { type: 'model_request_completed' }> =>
+          event.type === 'model_request_completed' && Boolean(event.responseText?.trim()),
+      );
+    if (!finalRequest?.responseText) continue;
+
+    const text = extractRecoveredText(finalRequest.responseText);
+    if (!text) continue;
+
+    const content: Message['content'] = [];
+    if (finalRequest.responseThinking) {
+      content.push({ type: 'thinking', text: finalRequest.responseThinking });
+    }
+    content.push({ type: 'text', text });
+    candidates.push({ timestamp: completed.timestamp, message: { role: 'assistant', content } });
+  }
+
+  candidates.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  return candidates[candidates.length - 1]?.message ?? null;
+}
+
+function extractRecoveredText(raw: string): string {
+  const trimmed = raw.trim();
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    const extracted = textFromStructuredValue(parsed);
+    if (extracted) return extracted;
+  } catch {
+    // The response may already be plain text.
+  }
+  return trimmed;
+}
+
+function textFromStructuredValue(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        isRecord(item) && item.type === 'text' ? textFromStructuredValue(item.text) : '',
+      )
+      .filter(Boolean)
+      .join('')
+      .trim();
+  }
+  if (!isRecord(value)) return '';
+  if (typeof value.text === 'string') return value.text.trim();
+  return textFromStructuredValue(value.content);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function delay(ms: number): Promise<void> {

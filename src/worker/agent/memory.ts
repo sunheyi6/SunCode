@@ -22,7 +22,7 @@ const MAX_RETRIEVED_MEMORIES = 5;
 const MEMSCENE_SIMILARITY_THRESHOLD = 0.6;
 const MEMSCENE_MIN_ENTRIES = 2;
 
-export type MemoryScope = 'session' | 'project';
+export type MemoryScope = 'session' | 'project' | 'global';
 export type MemoryKind =
   | 'task_summary'
   | 'project_fact'
@@ -111,6 +111,7 @@ export async function loadMemoriesWithEntries(
   sessionId?: string,
 ): Promise<LoadMemoriesResult> {
   const entries = [
+    ...loadScopedMemoryEntries(globalMemoryDir(), 'global'),
     ...loadScopedMemoryEntries(projectMemoryDir(workingDir), 'project'),
     ...loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session'),
   ];
@@ -133,7 +134,11 @@ export async function saveMemory(
 ): Promise<void> {
   const scope = entry.scope ?? (sessionId ? 'session' : 'project');
   const memDir =
-    scope === 'project' ? projectMemoryDir(workingDir) : sessionMemoryDir(workingDir, sessionId);
+    scope === 'global'
+      ? globalMemoryDir()
+      : scope === 'project'
+        ? projectMemoryDir(workingDir)
+        : sessionMemoryDir(workingDir, sessionId);
   if (!existsSync(memDir)) {
     mkdirSync(memDir, { recursive: true });
   }
@@ -207,7 +212,13 @@ export function updateMemory(
   updates: Partial<MemoryEntry>,
   sessionId?: string,
 ): void {
-  const memDir = sessionId ? sessionMemoryDir(workingDir, sessionId) : projectMemoryDir(workingDir);
+  const finalScope = updates.scope;
+  const memDir =
+    finalScope === 'global'
+      ? globalMemoryDir()
+      : finalScope === 'project' || !sessionId
+        ? projectMemoryDir(workingDir)
+        : sessionMemoryDir(workingDir, sessionId);
   const sessionPath = join(memDir, `${date}-${slug}.md`);
 
   if (!existsSync(sessionPath)) {
@@ -226,16 +237,24 @@ export function deleteMemory(
   slug: string,
   sessionId?: string,
 ): void {
-  const memDir = sessionId ? sessionMemoryDir(workingDir, sessionId) : projectMemoryDir(workingDir);
-  const sessionPath = join(memDir, `${date}-${slug}.md`);
+  const candidates = [
+    globalMemoryDir(),
+    projectMemoryDir(workingDir),
+    ...(sessionId ? [sessionMemoryDir(workingDir, sessionId)] : []),
+  ];
+  const fileName = `${date}-${slug}.md`;
 
-  if (!existsSync(sessionPath)) {
-    throw new Error(`Memory not found: ${date}-${slug}`);
+  for (const memDir of candidates) {
+    const sessionPath = join(memDir, fileName);
+    if (existsSync(sessionPath)) {
+      unlinkSync(sessionPath);
+      sceneCache.delete(memDir);
+      rebuildIndexes(memDir);
+      return;
+    }
   }
 
-  unlinkSync(sessionPath);
-  sceneCache.delete(memDir);
-  rebuildIndexes(memDir);
+  throw new Error(`Memory not found: ${date}-${slug}`);
 }
 
 export function getAllMemories(
@@ -245,11 +264,16 @@ export function getAllMemories(
 ): MemoryEntry[] {
   if (scope) {
     const memDir =
-      scope === 'project' ? projectMemoryDir(workingDir) : sessionMemoryDir(workingDir, sessionId);
+      scope === 'global'
+        ? globalMemoryDir()
+        : scope === 'project'
+          ? projectMemoryDir(workingDir)
+          : sessionMemoryDir(workingDir, sessionId);
     return loadScopedMemoryEntries(memDir, scope);
   }
 
   return [
+    ...loadScopedMemoryEntries(globalMemoryDir(), 'global'),
     ...loadScopedMemoryEntries(projectMemoryDir(workingDir), 'project'),
     ...(sessionId
       ? loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session')
@@ -310,9 +334,17 @@ export function mergeMemories(
   newSlug: string,
   sessionId?: string,
 ): void {
-  const scope = entries.find((entry) => entry.scope === 'project') ? 'project' : 'session';
+  const scopeEntry =
+    entries.find((entry) => entry.scope === 'global') ??
+    entries.find((entry) => entry.scope === 'project') ??
+    entries[0];
+  const scope = scopeEntry?.scope ?? 'session';
   const memDir =
-    scope === 'project' ? projectMemoryDir(workingDir) : sessionMemoryDir(workingDir, sessionId);
+    scope === 'global'
+      ? globalMemoryDir()
+      : scope === 'project'
+        ? projectMemoryDir(workingDir)
+        : sessionMemoryDir(workingDir, sessionId);
   if (!existsSync(memDir)) {
     mkdirSync(memDir, { recursive: true });
   }
@@ -451,6 +483,15 @@ function loadMemScenes(memDir: string): MemoryScene[] {
 
 function sessionMemoryDir(workingDir: string, sessionId?: string): string {
   return getAgentDataSubdir(workingDir, MEMORIES_DIR, sessionId);
+}
+
+function globalMemoryDir(): string {
+  const appDataDir = process.env.SUNCODE_APP_DATA;
+  if (appDataDir) {
+    return join(appDataDir, 'global', 'memories');
+  }
+  const homeDir = process.env.USERPROFILE || process.env.HOME || '';
+  return join(homeDir, '.suncode', 'global', 'memories');
 }
 
 function projectMemoryDir(workingDir: string): string {
@@ -756,7 +797,12 @@ function memoryRetentionScore(entry: MemoryEntry): number {
   let score = (entry.importance ?? 1) * 10;
   score += Math.min(entry.accessCount ?? 0, 20);
   if (entry.pinned) score += 1000;
-  if (entry.kind === 'decision' || entry.kind === 'project_fact' || entry.kind === 'preference') {
+  if (
+    entry.scope === 'global' ||
+    entry.kind === 'decision' ||
+    entry.kind === 'project_fact' ||
+    entry.kind === 'preference'
+  ) {
     score += 20;
   }
   if (entry.kind === 'ephemeral') score -= 10;

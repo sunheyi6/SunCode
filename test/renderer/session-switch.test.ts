@@ -113,4 +113,25 @@ describe('session switching', () => {
 
     expect(loadSessionMock).toHaveBeenCalledTimes(4);
   });
+
+  test('reloads a session after an active run invalidates its cached history', async () => {
+    let persisted = false;
+    loadSessionMock.mockImplementation((id: string, maxMessages?: number) => {
+      const prefix = persisted ? 'fresh' : 'stale';
+      const history = messages(`${id}-${prefix}`, 12);
+      return Promise.resolve(maxMessages === 10 ? history.slice(-10) : history);
+    });
+
+    const store = useSessionsStore();
+    store.sessions = [session('old'), session('new')];
+    await store.selectSession('old');
+    await vi.waitFor(() => expect(useChatStore().messages[0]?.content).toContain('stale'));
+
+    store.invalidateSessionCache('old');
+    persisted = true;
+    await store.selectSession('new');
+    await store.selectSession('old');
+
+    await vi.waitFor(() => expect(useChatStore().messages[0]?.content).toContain('fresh'));
+  });
 });

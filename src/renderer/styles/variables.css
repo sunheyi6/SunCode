@@ -75,6 +75,306 @@
   --sidebar-panel-secondary: #98989d;
   --sidebar-panel-muted: #636366;
   --sidebar-panel-line: rgba(84, 84, 88, 0.36);
+
+  /* Brand design-style tokens (driven by the data-style attribute) */
+  --color-bubble-user: #d9d9dc;
+  --color-bubble-user-text: #252528;
+  --color-on-accent: #ffffff;
+}
+
+/* ── Brand design styles (DARK variants) ──
+ * Each block overrides the dark :root palette when <html data-style="X"> is set
+ * while in dark mode. Specificity (0,2,0) beats the base :root (0,1,0).
+ * The matching LIGHT variants live after the [data-theme='light'] block and use
+ * :root[data-theme='light'][data-style='X'] (0,3,0) so they win in light mode.
+ * Undeclared tokens fall back to the apple light/dark palette automatically.
+ */
+
+:root[data-style='linear'] {
+  --color-bg: #08090a;
+  --color-bg-secondary: #0f1011;
+  --color-bg-tertiary: #18191b;
+  --color-surface: #0f1011;
+  --color-surface-hover: #18191b;
+  --color-overlay: #232427;
+  --color-text: #f7f8f8;
+  --color-text-secondary: #8a8f98;
+  --color-text-muted: #62666d;
+  --color-accent: #5e6ad2;
+  --color-accent-hover: #7c84e8;
+  --color-green: #4cb782;
+  --color-red: #eb5757;
+  --color-yellow: #f2c94c;
+  --color-orange: #e0995e;
+  --color-purple: #8b5cf6;
+  --color-teal: #56b6c2;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-strong: rgba(255, 255, 255, 0.14);
+  --color-bubble-user: #18191b;
+  --color-bubble-user-text: #f7f8f8;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #0f1011;
+  --sidebar-surface: #18191b;
+  --sidebar-hover: #232427;
+  --sidebar-active: #232427;
+  --sidebar-text: #f7f8f8;
+  --sidebar-text-secondary: #8a8f98;
+  --sidebar-text-muted: #62666d;
+  --sidebar-line: rgba(255, 255, 255, 0.08);
+  --sidebar-panel-bg: #0f1011;
+  --sidebar-panel-surface: #18191b;
+  --sidebar-panel-hover: #232427;
+  --sidebar-panel-active: #232427;
+  --sidebar-panel-text: #f7f8f8;
+  --sidebar-panel-secondary: #8a8f98;
+  --sidebar-panel-muted: #62666d;
+  --sidebar-panel-line: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-style='vercel'] {
+  --color-bg: #000000;
+  --color-bg-secondary: #0a0a0a;
+  --color-bg-tertiary: #111111;
+  --color-surface: #0a0a0a;
+  --color-surface-hover: #1a1a1a;
+  --color-overlay: #262626;
+  --color-text: #ffffff;
+  --color-text-secondary: #a1a1a1;
+  --color-text-muted: #6b6b6b;
+  --color-accent: #ededed;
+  --color-accent-hover: #ffffff;
+  --color-green: #34d399;
+  --color-red: #f87171;
+  --color-yellow: #fbbf24;
+  --color-orange: #fb923c;
+  --color-purple: #a1a1a1;
+  --color-teal: #67e8f9;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-color-strong: rgba(255, 255, 255, 0.18);
+  --color-bubble-user: #fafafa;
+  --color-bubble-user-text: #000000;
+  --color-on-accent: #000000;
+  --sidebar-bg: #0a0a0a;
+  --sidebar-surface: #111111;
+  --sidebar-hover: #1a1a1a;
+  --sidebar-active: #1a1a1a;
+  --sidebar-text: #ffffff;
+  --sidebar-text-secondary: #a1a1a1;
+  --sidebar-text-muted: #6b6b6b;
+  --sidebar-line: rgba(255, 255, 255, 0.1);
+  --sidebar-panel-bg: #0a0a0a;
+  --sidebar-panel-surface: #111111;
+  --sidebar-panel-hover: #1a1a1a;
+  --sidebar-panel-active: #1a1a1a;
+  --sidebar-panel-text: #ffffff;
+  --sidebar-panel-secondary: #a1a1a1;
+  --sidebar-panel-muted: #6b6b6b;
+  --sidebar-panel-line: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-style='raycast'] {
+  --color-bg: #1c1c1e;
+  --color-bg-secondary: #232325;
+  --color-bg-tertiary: #2c2c2e;
+  --color-surface: #232325;
+  --color-surface-hover: #2c2c2e;
+  --color-overlay: #3a3a3c;
+  --color-text: #f2f2f2;
+  --color-text-secondary: #9a9aa0;
+  --color-text-muted: #6e6e73;
+  --color-accent: #ff6365;
+  --color-accent-hover: #ff7a7c;
+  --color-green: #4cb782;
+  --color-red: #ff6365;
+  --color-yellow: #f2c94c;
+  --color-orange: #e0995e;
+  --color-purple: #c084fc;
+  --color-teal: #56b6c2;
+  --border-color: rgba(255, 255, 255, 0.09);
+  --border-color-strong: rgba(255, 255, 255, 0.16);
+  --color-bubble-user: #2c2c2e;
+  --color-bubble-user-text: #f2f2f2;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #232325;
+  --sidebar-surface: #2c2c2e;
+  --sidebar-hover: #3a3a3c;
+  --sidebar-active: #3a3a3c;
+  --sidebar-text: #f2f2f2;
+  --sidebar-text-secondary: #9a9aa0;
+  --sidebar-text-muted: #6e6e73;
+  --sidebar-line: rgba(255, 255, 255, 0.09);
+  --sidebar-panel-bg: #232325;
+  --sidebar-panel-surface: #2c2c2e;
+  --sidebar-panel-hover: #3a3a3c;
+  --sidebar-panel-active: #3a3a3c;
+  --sidebar-panel-text: #f2f2f2;
+  --sidebar-panel-secondary: #9a9aa0;
+  --sidebar-panel-muted: #6e6e73;
+  --sidebar-panel-line: rgba(255, 255, 255, 0.09);
+}
+
+:root[data-style='cursor'] {
+  --color-bg: #1e1e1e;
+  --color-bg-secondary: #252526;
+  --color-bg-tertiary: #2d2d30;
+  --color-surface: #252526;
+  --color-surface-hover: #2d2d30;
+  --color-overlay: #3a3a3d;
+  --color-text: #e6e6e6;
+  --color-text-secondary: #a0a0a0;
+  --color-text-muted: #6e6e6e;
+  --color-accent: #3ccb7f;
+  --color-accent-hover: #4fd993;
+  --color-green: #3ccb7f;
+  --color-red: #f87171;
+  --color-yellow: #e5c07b;
+  --color-orange: #d9a066;
+  --color-purple: #c084fc;
+  --color-teal: #4ec9b0;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-strong: rgba(255, 255, 255, 0.14);
+  --color-bubble-user: #2d2d30;
+  --color-bubble-user-text: #e6e6e6;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #252526;
+  --sidebar-surface: #2d2d30;
+  --sidebar-hover: #3a3a3d;
+  --sidebar-active: #3a3a3d;
+  --sidebar-text: #e6e6e6;
+  --sidebar-text-secondary: #a0a0a0;
+  --sidebar-text-muted: #6e6e6e;
+  --sidebar-line: rgba(255, 255, 255, 0.08);
+  --sidebar-panel-bg: #252526;
+  --sidebar-panel-surface: #2d2d30;
+  --sidebar-panel-hover: #3a3a3d;
+  --sidebar-panel-active: #3a3a3d;
+  --sidebar-panel-text: #e6e6e6;
+  --sidebar-panel-secondary: #a0a0a0;
+  --sidebar-panel-muted: #6e6e6e;
+  --sidebar-panel-line: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-style='notion'] {
+  --color-bg: #191919;
+  --color-bg-secondary: #202020;
+  --color-bg-tertiary: #2b2b2b;
+  --color-surface: #202020;
+  --color-surface-hover: #2b2b2b;
+  --color-overlay: #363636;
+  --color-text: #ffffff;
+  --color-text-secondary: #9b9a97;
+  --color-text-muted: #6b6b6b;
+  --color-accent: #e8b86d;
+  --color-accent-hover: #f0c785;
+  --color-green: #4cb782;
+  --color-red: #eb5757;
+  --color-yellow: #e8b86d;
+  --color-orange: #d9730d;
+  --color-purple: #c084fc;
+  --color-teal: #56b6c2;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-strong: rgba(255, 255, 255, 0.14);
+  --color-bubble-user: #2b2b2b;
+  --color-bubble-user-text: #ffffff;
+  --color-on-accent: #1c1705;
+  --sidebar-bg: #202020;
+  --sidebar-surface: #2b2b2b;
+  --sidebar-hover: #363636;
+  --sidebar-active: #363636;
+  --sidebar-text: #ffffff;
+  --sidebar-text-secondary: #9b9a97;
+  --sidebar-text-muted: #6b6b6b;
+  --sidebar-line: rgba(255, 255, 255, 0.08);
+  --sidebar-panel-bg: #202020;
+  --sidebar-panel-surface: #2b2b2b;
+  --sidebar-panel-hover: #363636;
+  --sidebar-panel-active: #363636;
+  --sidebar-panel-text: #ffffff;
+  --sidebar-panel-secondary: #9b9a97;
+  --sidebar-panel-muted: #6b6b6b;
+  --sidebar-panel-line: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-style='stripe'] {
+  --color-bg: #0a0e1a;
+  --color-bg-secondary: #111a2e;
+  --color-bg-tertiary: #18213b;
+  --color-surface: #111a2e;
+  --color-surface-hover: #18213b;
+  --color-overlay: #232f52;
+  --color-text: #ffffff;
+  --color-text-secondary: #a3adc9;
+  --color-text-muted: #6b7693;
+  --color-accent: #635bff;
+  --color-accent-hover: #7a73ff;
+  --color-green: #3ecf8e;
+  --color-red: #ff6b6b;
+  --color-yellow: #f5c451;
+  --color-orange: #f59e42;
+  --color-purple: #8b7dff;
+  --color-teal: #4fd1c5;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-strong: rgba(255, 255, 255, 0.14);
+  --color-bubble-user: #18213b;
+  --color-bubble-user-text: #ffffff;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #111a2e;
+  --sidebar-surface: #18213b;
+  --sidebar-hover: #232f52;
+  --sidebar-active: #232f52;
+  --sidebar-text: #ffffff;
+  --sidebar-text-secondary: #a3adc9;
+  --sidebar-text-muted: #6b7693;
+  --sidebar-line: rgba(255, 255, 255, 0.08);
+  --sidebar-panel-bg: #111a2e;
+  --sidebar-panel-surface: #18213b;
+  --sidebar-panel-hover: #232f52;
+  --sidebar-panel-active: #232f52;
+  --sidebar-panel-text: #ffffff;
+  --sidebar-panel-secondary: #a3adc9;
+  --sidebar-panel-muted: #6b7693;
+  --sidebar-panel-line: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-style='spotify'] {
+  --color-bg: #000000;
+  --color-bg-secondary: #0f0f0f;
+  --color-bg-tertiary: #181818;
+  --color-surface: #121212;
+  --color-surface-hover: #1a1a1a;
+  --color-overlay: #2a2a2a;
+  --color-text: #ffffff;
+  --color-text-secondary: #b3b3b3;
+  --color-text-muted: #7a7a7a;
+  --color-accent: #1db954;
+  --color-accent-hover: #1ed760;
+  --color-green: #1db954;
+  --color-red: #e25b5b;
+  --color-yellow: #f5c451;
+  --color-orange: #f59e42;
+  --color-purple: #b388eb;
+  --color-teal: #4fd1c5;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-color-strong: rgba(255, 255, 255, 0.18);
+  --color-bubble-user: #181818;
+  --color-bubble-user-text: #ffffff;
+  --color-on-accent: #000000;
+  --sidebar-bg: #0f0f0f;
+  --sidebar-surface: #181818;
+  --sidebar-hover: #2a2a2a;
+  --sidebar-active: #2a2a2a;
+  --sidebar-text: #ffffff;
+  --sidebar-text-secondary: #b3b3b3;
+  --sidebar-text-muted: #7a7a7a;
+  --sidebar-line: rgba(255, 255, 255, 0.1);
+  --sidebar-panel-bg: #0f0f0f;
+  --sidebar-panel-surface: #181818;
+  --sidebar-panel-hover: #2a2a2a;
+  --sidebar-panel-active: #2a2a2a;
+  --sidebar-panel-text: #ffffff;
+  --sidebar-panel-secondary: #b3b3b3;
+  --sidebar-panel-muted: #7a7a7a;
+  --sidebar-panel-line: rgba(255, 255, 255, 0.1);
 }
 
 /* Light theme — Apple white */
@@ -121,4 +421,262 @@
   --sidebar-panel-secondary: #77777d;
   --sidebar-panel-muted: #a0a0a7;
   --sidebar-panel-line: #cfcfd4;
+
+  /* Brand design-style tokens (light-mode values) */
+  --color-bubble-user: #e4e4e8;
+  --color-bubble-user-text: #1d1d1f;
+  --color-on-accent: #ffffff;
+}
+
+/* ── Brand design styles (LIGHT variants) ──
+ * Specificity (0,3,0) so they override the apple light block above.
+ * Semantic colors (green/red/yellow/...) inherit from the apple light palette.
+ */
+
+:root[data-theme='light'][data-style='linear'] {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f9f9fb;
+  --color-bg-tertiary: #f0f0f3;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f4f4f6;
+  --color-overlay: #e8e8ec;
+  --color-text: #08090a;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+  --color-accent: #5e6ad2;
+  --color-accent-hover: #4f5ac0;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-color-strong: rgba(0, 0, 0, 0.14);
+  --color-bubble-user: #f0f0f3;
+  --color-bubble-user-text: #08090a;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #f9f9fb;
+  --sidebar-surface: #ffffff;
+  --sidebar-hover: #f0f0f3;
+  --sidebar-active: #e8e8ec;
+  --sidebar-text: #08090a;
+  --sidebar-text-secondary: #6b7280;
+  --sidebar-text-muted: #9ca3af;
+  --sidebar-line: rgba(0, 0, 0, 0.08);
+  --sidebar-panel-bg: #f9f9fb;
+  --sidebar-panel-surface: #ffffff;
+  --sidebar-panel-hover: #f0f0f3;
+  --sidebar-panel-active: #e8e8ec;
+  --sidebar-panel-text: #08090a;
+  --sidebar-panel-secondary: #6b7280;
+  --sidebar-panel-muted: #9ca3af;
+  --sidebar-panel-line: rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme='light'][data-style='vercel'] {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #fafafa;
+  --color-bg-tertiary: #f4f4f4;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f5f5f5;
+  --color-overlay: #ededed;
+  --color-text: #000000;
+  --color-text-secondary: #666666;
+  --color-text-muted: #999999;
+  --color-accent: #000000;
+  --color-accent-hover: #383838;
+  --border-color: rgba(0, 0, 0, 0.1);
+  --border-color-strong: rgba(0, 0, 0, 0.18);
+  --color-bubble-user: #171717;
+  --color-bubble-user-text: #ffffff;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #fafafa;
+  --sidebar-surface: #ffffff;
+  --sidebar-hover: #f0f0f0;
+  --sidebar-active: #ededed;
+  --sidebar-text: #000000;
+  --sidebar-text-secondary: #666666;
+  --sidebar-text-muted: #999999;
+  --sidebar-line: rgba(0, 0, 0, 0.1);
+  --sidebar-panel-bg: #fafafa;
+  --sidebar-panel-surface: #ffffff;
+  --sidebar-panel-hover: #f0f0f0;
+  --sidebar-panel-active: #ededed;
+  --sidebar-panel-text: #000000;
+  --sidebar-panel-secondary: #666666;
+  --sidebar-panel-muted: #999999;
+  --sidebar-panel-line: rgba(0, 0, 0, 0.1);
+}
+
+:root[data-theme='light'][data-style='raycast'] {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f7f7f8;
+  --color-bg-tertiary: #efeff1;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f2f2f4;
+  --color-overlay: #e6e6e9;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #6b6b70;
+  --color-text-muted: #9a9aa0;
+  --color-accent: #ff6363;
+  --color-accent-hover: #f04b4d;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-color-strong: rgba(0, 0, 0, 0.14);
+  --color-bubble-user: #f0f0f2;
+  --color-bubble-user-text: #1a1a1a;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #f7f7f8;
+  --sidebar-surface: #ffffff;
+  --sidebar-hover: #efeff1;
+  --sidebar-active: #e6e6e9;
+  --sidebar-text: #1a1a1a;
+  --sidebar-text-secondary: #6b6b70;
+  --sidebar-text-muted: #9a9aa0;
+  --sidebar-line: rgba(0, 0, 0, 0.08);
+  --sidebar-panel-bg: #f7f7f8;
+  --sidebar-panel-surface: #ffffff;
+  --sidebar-panel-hover: #efeff1;
+  --sidebar-panel-active: #e6e6e9;
+  --sidebar-panel-text: #1a1a1a;
+  --sidebar-panel-secondary: #6b6b70;
+  --sidebar-panel-muted: #9a9aa0;
+  --sidebar-panel-line: rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme='light'][data-style='cursor'] {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f8f8f8;
+  --color-bg-tertiary: #f0f0f0;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f3f3f3;
+  --color-overlay: #e8e8e8;
+  --color-text: #1e1e1e;
+  --color-text-secondary: #616161;
+  --color-text-muted: #9a9a9a;
+  --color-accent: #16a34a;
+  --color-accent-hover: #15803d;
+  --color-green: #16a34a;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-color-strong: rgba(0, 0, 0, 0.14);
+  --color-bubble-user: #f0f0f0;
+  --color-bubble-user-text: #1e1e1e;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #f8f8f8;
+  --sidebar-surface: #ffffff;
+  --sidebar-hover: #f0f0f0;
+  --sidebar-active: #e8e8e8;
+  --sidebar-text: #1e1e1e;
+  --sidebar-text-secondary: #616161;
+  --sidebar-text-muted: #9a9a9a;
+  --sidebar-line: rgba(0, 0, 0, 0.08);
+  --sidebar-panel-bg: #f8f8f8;
+  --sidebar-panel-surface: #ffffff;
+  --sidebar-panel-hover: #f0f0f0;
+  --sidebar-panel-active: #e8e8e8;
+  --sidebar-panel-text: #1e1e1e;
+  --sidebar-panel-secondary: #616161;
+  --sidebar-panel-muted: #9a9a9a;
+  --sidebar-panel-line: rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme='light'][data-style='notion'] {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f7f6f3;
+  --color-bg-tertiary: #efede8;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f0ec;
+  --color-overlay: #e9e7e1;
+  --color-text: #37352f;
+  --color-text-secondary: #787774;
+  --color-text-muted: #9b9a97;
+  --color-accent: #d9730d;
+  --color-accent-hover: #c26608;
+  --color-orange: #d9730d;
+  --border-color: rgba(55, 53, 47, 0.09);
+  --border-color-strong: rgba(55, 53, 47, 0.16);
+  --color-bubble-user: #f1f0ec;
+  --color-bubble-user-text: #37352f;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #f7f6f3;
+  --sidebar-surface: #ffffff;
+  --sidebar-hover: #efede8;
+  --sidebar-active: #e9e7e1;
+  --sidebar-text: #37352f;
+  --sidebar-text-secondary: #787774;
+  --sidebar-text-muted: #9b9a97;
+  --sidebar-line: rgba(55, 53, 47, 0.09);
+  --sidebar-panel-bg: #f7f6f3;
+  --sidebar-panel-surface: #ffffff;
+  --sidebar-panel-hover: #efede8;
+  --sidebar-panel-active: #e9e7e1;
+  --sidebar-panel-text: #37352f;
+  --sidebar-panel-secondary: #787774;
+  --sidebar-panel-muted: #9b9a97;
+  --sidebar-panel-line: rgba(55, 53, 47, 0.09);
+}
+
+:root[data-theme='light'][data-style='stripe'] {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f6f9fc;
+  --color-bg-tertiary: #eef3f8;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f0f4f9;
+  --color-overlay: #e3ebf3;
+  --color-text: #0a2540;
+  --color-text-secondary: #425466;
+  --color-text-muted: #8792a2;
+  --color-accent: #635bff;
+  --color-accent-hover: #4f47e5;
+  --border-color: rgba(10, 37, 64, 0.08);
+  --border-color-strong: rgba(10, 37, 64, 0.14);
+  --color-bubble-user: #eef3f8;
+  --color-bubble-user-text: #0a2540;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #f6f9fc;
+  --sidebar-surface: #ffffff;
+  --sidebar-hover: #eef3f8;
+  --sidebar-active: #e3ebf3;
+  --sidebar-text: #0a2540;
+  --sidebar-text-secondary: #425466;
+  --sidebar-text-muted: #8792a2;
+  --sidebar-line: rgba(10, 37, 64, 0.08);
+  --sidebar-panel-bg: #f6f9fc;
+  --sidebar-panel-surface: #ffffff;
+  --sidebar-panel-hover: #eef3f8;
+  --sidebar-panel-active: #e3ebf3;
+  --sidebar-panel-text: #0a2540;
+  --sidebar-panel-secondary: #425466;
+  --sidebar-panel-muted: #8792a2;
+  --sidebar-panel-line: rgba(10, 37, 64, 0.08);
+}
+
+:root[data-theme='light'][data-style='spotify'] {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f8f8f8;
+  --color-bg-tertiary: #f0f0f0;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f3f3f3;
+  --color-overlay: #e8e8e8;
+  --color-text: #121212;
+  --color-text-secondary: #6a6a6a;
+  --color-text-muted: #9a9a9a;
+  --color-accent: #1db954;
+  --color-accent-hover: #1aa34a;
+  --color-green: #1db954;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-color-strong: rgba(0, 0, 0, 0.14);
+  --color-bubble-user: #f0f0f0;
+  --color-bubble-user-text: #121212;
+  --color-on-accent: #ffffff;
+  --sidebar-bg: #f8f8f8;
+  --sidebar-surface: #ffffff;
+  --sidebar-hover: #f0f0f0;
+  --sidebar-active: #e8e8e8;
+  --sidebar-text: #121212;
+  --sidebar-text-secondary: #6a6a6a;
+  --sidebar-text-muted: #9a9a9a;
+  --sidebar-line: rgba(0, 0, 0, 0.08);
+  --sidebar-panel-bg: #f8f8f8;
+  --sidebar-panel-surface: #ffffff;
+  --sidebar-panel-hover: #f0f0f0;
+  --sidebar-panel-active: #e8e8e8;
+  --sidebar-panel-text: #121212;
+  --sidebar-panel-secondary: #6a6a6a;
+  --sidebar-panel-muted: #9a9a9a;
+  --sidebar-panel-line: rgba(0, 0, 0, 0.08);
 }

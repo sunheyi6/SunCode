@@ -7,6 +7,12 @@ files:
   - dist-electron
   - dist
 
+extraResources:
+  - from: docs
+    to: docs
+    filter:
+      - "**/*.md"
+
 # ===== Windows =====
 win:
   target:

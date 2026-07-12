@@ -101,7 +101,7 @@ declare global {
   interface Window {
     suncode: {
       // Agent
-      prompt(text: string, uiLanguage?: UiLanguage): void;
+      prompt(text: string, uiLanguage?: UiLanguage, sessionId?: string): void;
       abort(): void;
       injectGuidance(text: string, uiLanguage?: UiLanguage): void;
       stop(): void;

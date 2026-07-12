@@ -1,4 +1,4 @@
-import type { AppSettings } from '@shared/types';
+import type { AppSettings, AppearanceStyle } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';
@@ -12,6 +12,7 @@ export const useSettingsStore = defineStore('settings', () => {
     autoCompact: true,
     compactThreshold: 0.7,
     theme: 'system',
+    appearance: 'apple',
     permissionMode: 'full_access',
     windowsShell: 'auto',
     fontSize: 14,
@@ -39,6 +40,7 @@ export const useSettingsStore = defineStore('settings', () => {
       settings.value = { ...settings.value, ...s };
       const resolved = await syncNativeTheme(settings.value.theme);
       applyTheme(settings.value.theme, resolved);
+      applyAppearance(settings.value.appearance ?? 'apple');
       applyFontSize(settings.value.fontSize);
       applyBackgroundColor(settings.value.backgroundColor);
       isLoaded.value = true;
@@ -86,6 +88,25 @@ export const useSettingsStore = defineStore('settings', () => {
     if (theme !== 'system') applyTheme(theme);
     void update({ theme });
     void syncNativeTheme(theme).then((resolved) => applyTheme(theme, resolved));
+  }
+
+  /**
+   * Apply the design style by toggling the `data-style` attribute on <html>.
+   * 'apple' (the default) removes the attribute so the base :root palette is used.
+   */
+  function applyAppearance(style: AppearanceStyle = 'apple'): void {
+    const root = document.documentElement;
+    if (!style || style === 'apple') {
+      root.removeAttribute('data-style');
+    } else {
+      root.setAttribute('data-style', style);
+    }
+  }
+
+  function setAppearance(style: AppearanceStyle): void {
+    settings.value = { ...settings.value, appearance: style };
+    applyAppearance(style);
+    void update({ appearance: style });
   }
 
   function applyFontSize(size: number): void {
@@ -317,6 +338,8 @@ export const useSettingsStore = defineStore('settings', () => {
     update,
     applyTheme,
     setTheme,
+    applyAppearance,
+    setAppearance,
     applyFontSize,
     setFontSize,
     applyBackgroundColor,

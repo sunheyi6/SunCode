@@ -100,7 +100,7 @@ button:active {
 
 button.primary {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent, #ffffff);
   box-shadow: 0 3px 10px color-mix(in srgb, var(--color-accent) 24%, transparent);
 }
 button.primary:hover { opacity: 0.9; }

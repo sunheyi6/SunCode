@@ -41,7 +41,11 @@ temp-*
 *.cjs
 temp_extract.js
 
+# Workbuddy tool
+.workbuddy/
+
 # Benchmark / test artifacts
+dist-verify/
 jobs/
 pier_suncode_agent.py
 scripts/bench-agent.ts

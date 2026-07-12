@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SunCode 设计风格候选方案</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #0c0d0f;
+      --page-raised: #111317;
+      --page-line: rgba(255, 255, 255, .08);
+      --page-text: #f4f5f7;
+      --page-muted: #9298a3;
+      --page-faint: #606671;
+      --page-accent: #a6b4ff;
+      --page-max: 1560px;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--page); }
+    body { margin: 0; min-width: 320px; background: var(--page); color: var(--page-text); }
+    button { font: inherit; }
+
+    .page-header {
+      max-width: var(--page-max);
+      margin: 0 auto;
+      padding: 48px 40px 28px;
+      border-bottom: 1px solid var(--page-line);
+    }
+
+    .eyebrow {
+      margin-bottom: 14px;
+      color: var(--page-accent);
+      font: 600 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    h1 { margin: 0; font-size: clamp(26px, 3vw, 42px); line-height: 1.1; letter-spacing: -.04em; }
+    .intro { max-width: 780px; margin: 15px 0 0; color: var(--page-muted); font-size: 14px; line-height: 1.7; }
+
+    .research {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      max-width: 920px;
+      margin-top: 24px;
+    }
+
+    .research a {
+      display: block;
+      padding: 12px 14px;
+      border: 1px solid var(--page-line);
+      border-radius: 10px;
+      color: var(--page-muted);
+      text-decoration: none;
+      background: var(--page-raised);
+      transition: border-color .16s ease, color .16s ease;
+    }
+
+    .research a:hover { border-color: rgba(166, 180, 255, .55); color: var(--page-text); }
+    .research strong { display: block; margin-bottom: 4px; color: var(--page-text); font-size: 12px; }
+    .research span { font-size: 11px; line-height: 1.45; }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 22px; color: var(--page-faint); font-size: 12px; }
+    .legend span::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--page-accent); }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+      max-width: var(--page-max);
+      margin: 0 auto;
+      padding: 28px 40px 64px;
+    }
+
+    .settings-shell {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      gap: 0;
+      max-width: var(--page-max);
+      margin: 0 auto;
+      padding: 28px 40px 0;
+    }
+
+    .settings-nav {
+      padding: 18px 12px;
+      border: 1px solid var(--page-line);
+      border-right: 0;
+      border-radius: 14px 0 0 14px;
+      background: #0f1114;
+    }
+
+    .settings-title { margin: 0 10px 18px; color: var(--page-text); font-size: 12px; font-weight: 700; }
+    .settings-nav-item { padding: 8px 10px; border-radius: 7px; color: var(--page-muted); font-size: 12px; }
+    .settings-nav-item.active { background: rgba(166, 180, 255, .13); color: var(--page-text); }
+
+    .settings-panel {
+      display: grid;
+      grid-template-columns: minmax(300px, .85fr) minmax(420px, 1.15fr);
+      gap: 24px;
+      min-width: 0;
+      padding: 22px 24px;
+      border: 1px solid var(--page-line);
+      border-radius: 0 14px 14px 0;
+      background: #14171b;
+    }
+
+    .settings-panel h2 { margin: 0; font-size: 18px; letter-spacing: -.03em; }
+    .settings-panel-copy { margin: 7px 0 22px; color: var(--page-muted); font-size: 12px; line-height: 1.6; }
+    .setting-field { padding: 14px 0; border-top: 1px solid var(--page-line); }
+    .setting-label { display: block; margin-bottom: 8px; color: var(--page-text); font-size: 12px; font-weight: 600; }
+    .setting-help { margin: 0 0 10px; color: var(--page-faint); font-size: 11px; line-height: 1.5; }
+    .theme-select { width: 100%; padding: 9px 10px; border: 1px solid rgba(255,255,255,.13); border-radius: 8px; outline: 0; background: #0e1013; color: var(--page-text); font-size: 12px; }
+    .theme-select:focus { border-color: rgba(166, 180, 255, .65); }
+    .default-note { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--page-muted); font-size: 11px; }
+    .default-note::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #6fd7a3; }
+    .window-note { display: flex; align-items: center; gap: 7px; margin-top: 10px; color: var(--page-faint); font-size: 11px; }
+    .window-note-sample { color: var(--page-muted); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 2px; }
+    .settings-preview-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; color: var(--page-muted); font-size: 11px; }
+    .settings-preview-label strong { color: var(--page-text); font-weight: 600; }
+    .settings-preview-frame { overflow: hidden; min-width: 0; border: 1px solid var(--page-line); border-radius: 11px; background: #0e1013; }
+    .settings-preview-frame .preview { aspect-ratio: 16 / 9; border: 0; }
+
+    .candidate {
+      overflow: hidden;
+      border: 1px solid var(--page-line);
+      border-radius: 16px;
+      background: #111317;
+      cursor: pointer;
+      transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    }
+
+    .candidate:hover { transform: translateY(-2px); border-color: rgba(166, 180, 255, .38); box-shadow: 0 18px 50px rgba(0, 0, 0, .24); }
+    .candidate.selected { border-color: rgba(166, 180, 255, .75); box-shadow: 0 0 0 1px rgba(166, 180, 255, .2), 0 18px 50px rgba(0, 0, 0, .28); }
+    .candidate.selected h2::after { content: "当前选择"; display: inline-block; margin-left: 8px; padding: 3px 6px; border-radius: 4px; background: rgba(111, 215, 163, .14); color: #78d9a9; font-size: 9px; font-weight: 600; vertical-align: middle; letter-spacing: 0; }
+
+    .candidate-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px 16px; }
+    .candidate-number { margin-bottom: 6px; color: var(--page-faint); font: 600 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .13em; }
+    .candidate h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+    .candidate-note { margin: 6px 0 0; color: var(--page-muted); font-size: 12px; line-height: 1.45; }
+    .swatches { display: flex; flex-shrink: 0; gap: 5px; padding-top: 2px; }
+    .swatch { width: 15px; height: 15px; border: 1px solid rgba(255,255,255,.18); border-radius: 50%; }
+    .candidate-tags { display: flex; flex-wrap: wrap; gap: 5px; margin: 11px 20px 18px; }
+    .tag { padding: 4px 7px; border: 1px solid rgba(255,255,255,.08); border-radius: 5px; color: var(--page-muted); font-size: 10px; }
+
+    /* Shared first-screen structure. The eight themes only replace these tokens. */
+    .preview { --canvas: #161719; --sidebar: #1e1f21; --panel: #242629; --surface: #292b2f; --line: rgba(255,255,255,.1); --text: #f2f3f5; --muted: #9298a3; --faint: #656b76; --accent: #8da2ff; --accent-soft: rgba(141,162,255,.13); --accent-ink: #11131a; --radius: 10px; --shadow: 0 12px 30px rgba(0,0,0,.2); }
+    .preview { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-top: 1px solid var(--line); background: var(--canvas); color: var(--text); font-size: clamp(8px, .78vw, 12px); }
+    .window { display: flex; width: 100%; height: 100%; }
+    .sidebar { display: flex; flex: 0 0 27%; flex-direction: column; min-width: 0; background: var(--sidebar); border-right: 1px solid var(--line); }
+    .sidebar-top { padding: 5.5% 7%; }
+    .brand-row, .row, .topbar, .composer-meta, .statusbar { display: flex; align-items: center; }
+    .brand-row { gap: 8px; margin-bottom: 8%; }
+    .mark { display: grid; width: 23px; height: 23px; place-items: center; border-radius: calc(var(--radius) - 3px); background: var(--accent); color: var(--accent-ink); font-weight: 800; }
+    .brand-name { font-size: 1.08em; font-weight: 700; letter-spacing: -.03em; }
+    .brand-env { padding: 3px 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: .72em; font-weight: 700; }
+    .command { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 5px 7px; border-radius: calc(var(--radius) - 2px); color: var(--muted); }
+    .command.active { background: var(--accent-soft); color: var(--text); }
+    .command-icon { width: 14px; color: var(--accent); text-align: center; font-size: 1.1em; }
+    .command-label { flex: 1; }
+    .shortcut { color: var(--faint); font: .76em ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .sidebar-section { padding: 0 7%; }
+    .section-label { display: flex; align-items: center; justify-content: space-between; margin: 10% 0 4%; color: var(--faint); font-size: .72em; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .session { display: flex; gap: 7px; min-width: 0; padding: 6px 7px; border-radius: calc(var(--radius) - 2px); color: var(--muted); }
+    .session.active { background: var(--surface); color: var(--text); box-shadow: inset 2px 0 var(--accent); }
+    .session-dot { width: 6px; height: 6px; margin-top: 5px; flex: 0 0 6px; border-radius: 50%; background: var(--accent); }
+    .session-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-meta { margin-top: 2px; color: var(--faint); font-size: .8em; }
+    .sidebar-footer { margin-top: auto; padding: 5% 7%; border-top: 1px solid var(--line); color: var(--muted); }
+    .main { display: flex; min-width: 0; flex: 1; flex-direction: column; background: var(--canvas); }
+    .topbar { min-height: 12%; justify-content: space-between; padding: 0 4%; border-bottom: 1px solid var(--line); color: var(--muted); }
+    .breadcrumb { display: flex; gap: 7px; align-items: center; font-size: .88em; }
+    .breadcrumb strong { color: var(--text); font-weight: 600; }
+    .top-actions { display: flex; gap: 5px; }
+    .icon-button { display: grid; width: 25px; height: 25px; place-items: center; border: 1px solid transparent; border-radius: calc(var(--radius) - 3px); background: transparent; color: var(--muted); }
+    .icon-button:hover { border-color: var(--line); background: var(--surface); color: var(--text); }
+    .window-controls { display: flex; gap: 2px; margin-left: 4px; padding-left: 6px; border-left: 1px solid var(--line); }
+    .window-control { display: grid; width: 22px; height: 22px; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 1em; line-height: 1; }
+    .window-control:hover { background: var(--accent-soft); color: var(--text); }
+    .window-control.close:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+    .main-content { display: flex; min-height: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; padding: 4% 6% 0; }
+    .welcome { width: min(620px, 86%); text-align: center; }
+    .welcome-mark { display: grid; width: 46px; height: 46px; margin: 0 auto 15px; place-items: center; border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line)); border-radius: 14px; background: var(--accent-soft); color: var(--accent); font-size: 1.65em; font-weight: 500; }
+    .welcome h3 { margin: 0; font-size: clamp(17px, 1.65vw, 25px); letter-spacing: -.035em; }
+    .welcome p { max-width: 480px; margin: 9px auto 0; color: var(--muted); line-height: 1.6; }
+    .suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 21px; }
+    .suggestion { padding: 7px 9px; border: 1px solid var(--line); border-radius: calc(var(--radius) - 2px); background: var(--panel); color: var(--muted); font-size: .82em; }
+    .composer { width: min(680px, 90%); margin: 5% auto 0; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: calc(var(--radius) + 3px); background: var(--panel); box-shadow: var(--shadow); text-align: left; }
+    .composer-placeholder { min-height: 24px; color: var(--faint); }
+    .composer-meta { justify-content: space-between; margin-top: 12px; color: var(--faint); font-size: .78em; }
+    .composer-tools { display: flex; gap: 5px; }
+    .tool-pill { padding: 4px 6px; border-radius: 5px; background: var(--surface); color: var(--muted); }
+    .send { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 7px; background: var(--accent); color: var(--accent-ink); font-weight: 800; }
+    .statusbar { justify-content: space-between; min-height: 9%; padding: 0 4%; border-top: 1px solid var(--line); color: var(--faint); font-size: .76em; }
+    .status-left { display: flex; gap: 6px; align-items: center; }
+    .status-light { width: 6px; height: 6px; border-radius: 50%; background: #5fd49b; }
+
+    /* Candidate token sets. These are intentionally restrained: one accent plus neutral surfaces. */
+    .theme-linear .preview { --canvas: #0f1012; --sidebar: #0b0c0e; --panel: #17191d; --surface: #1d2025; --line: rgba(255,255,255,.085); --text: #f4f5f7; --muted: #8b919c; --faint: #626873; --accent: #7d86e8; --accent-soft: rgba(125,134,232,.13); --accent-ink: #fff; --radius: 9px; }
+    .theme-vercel .preview { --canvas: #050505; --sidebar: #080808; --panel: #111111; --surface: #171717; --line: rgba(255,255,255,.11); --text: #f5f5f5; --muted: #8b8b8b; --faint: #5f5f5f; --accent: #f5f5f5; --accent-soft: rgba(255,255,255,.085); --accent-ink: #090909; --radius: 7px; }
+    .theme-cursor .preview { --canvas: #1e1e1e; --sidebar: #252526; --panel: #292a2d; --surface: #303136; --line: rgba(255,255,255,.085); --text: #e7e7e7; --muted: #a5a5a5; --faint: #737373; --accent: #46d18b; --accent-soft: rgba(70,209,139,.12); --accent-ink: #0b1911; --radius: 7px; }
+    .theme-raycast .preview { --canvas: #1b1b1e; --sidebar: #141416; --panel: #242428; --surface: #2d2d32; --line: rgba(255,255,255,.08); --text: #f1f1f3; --muted: #9b9ba3; --faint: #6c6c75; --accent: #ff6b6d; --accent-soft: rgba(255,107,109,.12); --accent-ink: #230b0c; --radius: 11px; }
+    .theme-primer .preview { --canvas: #0d1117; --sidebar: #010409; --panel: #161b22; --surface: #21262d; --line: rgba(240,246,252,.12); --text: #e6edf3; --muted: #8b949e; --faint: #6e7681; --accent: #58a6ff; --accent-soft: rgba(56,139,253,.15); --accent-ink: #07111d; --radius: 6px; }
+    .theme-notion .preview { --canvas: #1f1f1d; --sidebar: #252522; --panel: #2a2a26; --surface: #33322e; --line: rgba(255,255,255,.09); --text: #f2f1ee; --muted: #aaa69e; --faint: #77736c; --accent: #e7aa55; --accent-soft: rgba(231,170,85,.13); --accent-ink: #211507; --radius: 8px; }
+    .theme-stripe .preview { --canvas: #0b1223; --sidebar: #0d172d; --panel: #141f39; --surface: #1b2949; --line: rgba(207,219,255,.1); --text: #eef2ff; --muted: #9ba8c7; --faint: #6c7897; --accent: #8b8dff; --accent-soft: rgba(139,141,255,.15); --accent-ink: #0d1025; --radius: 9px; }
+    .theme-apple .preview { --canvas: #1b1b1d; --sidebar: #242426; --panel: #2b2b2f; --surface: #343438; --line: rgba(255,255,255,.11); --text: #f5f5f7; --muted: #a1a1a6; --faint: #6e6e73; --accent: #4d9dff; --accent-soft: rgba(77,157,255,.14); --accent-ink: #071527; --radius: 13px; }
+
+    @media (max-width: 980px) {
+      .gallery { grid-template-columns: 1fr; }
+      .research { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .page-header { padding: 32px 20px 24px; }
+      .gallery { padding: 20px 16px 44px; }
+      .candidate-head { padding: 15px 16px 13px; }
+      .candidate-tags { margin-right: 16px; margin-left: 16px; }
+      .preview { aspect-ratio: 1 / .86; }
+      .sidebar { flex-basis: 31%; }
+      .sidebar-top, .sidebar-section { padding-right: 6%; padding-left: 6%; }
+      .main-content { padding-right: 4%; padding-left: 4%; }
+      .suggestion:nth-child(n+3) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="page-header">
+    <div class="eyebrow">SunCode / Visual direction study</div>
+    <h1>首屏设计风格候选</h1>
+    <p class="intro">这里模拟实际的“设置 → 外观 → 主题方案”配置。八个方案共用当前 SunCode 的核心骨架：左侧会话栏、中央欢迎区、底部输入框和状态栏。默认选中第 6 个方案，也可以自定义切换。</p>
+    <div class="research">
+      <a href="https://github.com/alexpate/awesome-design-systems" target="_blank" rel="noreferrer"><strong>awesome-design-systems</strong><span>设计系统索引：Primer、Carbon、Polaris 等成熟体系。</span></a>
+      <a href="https://github.com/VoltAgent/awesome-design-md" target="_blank" rel="noreferrer"><strong>awesome-design-md</strong><span>品牌视觉研究合集：将颜色、字阶、组件和间距写成 DESIGN.md。</span></a>
+      <a href="https://github.com/google-labs-code/design.md" target="_blank" rel="noreferrer"><strong>Google DESIGN.md</strong><span>可读、可执行的设计 token 格式，适合后续沉淀 SunCode 规范。</span></a>
+    </div>
+    <div class="legend"><span>低改动：不改变产品信息架构</span><span>低彩度：单一强调色</span><span>可迁移：对应现有 CSS variables</span></div>
+  </header>
+
+  <section class="settings-shell" aria-label="外观主题设置">
+    <nav class="settings-nav" aria-label="设置分区">
+      <div class="settings-title">设置</div>
+      <div class="settings-nav-item">常规</div>
+      <div class="settings-nav-item active">外观</div>
+      <div class="settings-nav-item">模型</div>
+      <div class="settings-nav-item">技能</div>
+      <div class="settings-nav-item">快捷键</div>
+    </nav>
+    <div class="settings-panel">
+      <div>
+        <h2>外观</h2>
+        <p class="settings-panel-copy">自定义 SunCode 的界面风格。主题只改变视觉 token，不改变现有布局和功能。</p>
+        <div class="setting-field">
+          <label class="setting-label" for="theme-select">主题方案</label>
+          <p class="setting-help">选择一个预设主题，后续也可以在此基础上继续调整颜色。</p>
+          <select id="theme-select" class="theme-select">
+            <option value="linear">01 · Linear Quiet</option>
+            <option value="vercel">02 · Vercel Monochrome</option>
+            <option value="cursor">03 · Cursor Code Slate</option>
+            <option value="raycast">04 · Raycast Command</option>
+            <option value="primer">05 · GitHub Primer Slate</option>
+            <option value="notion" selected>06 · Notion Warm Neutral</option>
+            <option value="stripe">07 · Stripe Blue Ink</option>
+            <option value="apple">08 · Apple Calm</option>
+          </select>
+          <span id="default-note" class="default-note">默认主题 · 06 Notion Warm Neutral</span>
+          <div class="window-note"><span class="window-note-sample">— □ ×</span>窗口控制区跟随当前主题</div>
+        </div>
+      </div>
+      <div>
+        <div class="settings-preview-label"><span>实时预览</span><strong id="selected-theme-name">Notion Warm Neutral</strong></div>
+        <div id="settings-preview" class="settings-preview-frame theme-notion" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <main class="gallery">
+    <article class="candidate theme-linear">
+      <div class="candidate-head"><div><div class="candidate-number">01 / 08</div><h2>Linear Quiet</h2><p class="candidate-note">克制的深色工作台，强调安静、连续的任务流。</p></div><div class="swatches"><i class="swatch" style="background:#0f1012"></i><i class="swatch" style="background:#17191d"></i><i class="swatch" style="background:#7d86e8"></i></div></div>
+      <div class="candidate-tags"><span class="tag">低对比边界</span><span class="tag">靛蓝强调</span><span class="tag">紧凑圆角</span></div>
+      <div class="preview"><div class="window"><aside class="sidebar"><div class="sidebar-top"><div class="brand-row"><b class="mark">S</b><span class="brand-name">SunCode</span><span class="brand-env">DEV</span></div><div class="command active"><span class="command-icon">＋</span><span class="command-label">新建任务</span><span class="shortcut">⌘N</span></div><div class="command"><span class="command-icon">⌕</span><span class="command-label">搜索</span><span class="shortcut">⌘K</span></div><div class="command"><span class="command-icon">✦</span><span class="command-label">技能</span></div></div><div class="sidebar-section"><div class="section-label"><span>最近对话</span><span>•••</span></div><div class="session active"><i class="session-dot"></i><div class="session-text">重构 agent-loop 的生命周期<div class="session-meta">今天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">检查工具调度器<div class="session-meta">昨天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">整理 memory 设计<div class="session-meta">7 月 10 日</div></div></div></div><div class="sidebar-footer">⚙　设置 <span class="shortcut">⌘,</span></div></aside><section class="main"><div class="topbar"><div class="breadcrumb"><strong>SunCode</strong><span>/</span><span>新任务</span></div><div class="top-actions"><span class="icon-button">◌</span><span class="icon-button">···</span></div></div><div class="main-content"><div class="welcome"><div class="welcome-mark">S</div><h3>你好，我是 SunCode</h3><p>你的 AI 编程助手。可以帮你理解项目、编写代码、调试问题和推进任务。</p><div class="suggestions"><span class="suggestion">解释当前项目结构</span><span class="suggestion">查找一个 bug</span><span class="suggestion">开始一个新任务</span></div><div class="composer"><div class="composer-placeholder">输入消息，开始工作…</div><div class="composer-meta"><div class="composer-tools"><span class="tool-pill">＋</span><span class="tool-pill">Auto</span><span class="tool-pill">main</span></div><span class="send">↑</span></div></div></div></div><div class="statusbar"><span class="status-left"><i class="status-light"></i>就绪</span><span>main　·　0 tokens</span></div></section></div></div>
+    </article>
+
+    <article class="candidate theme-vercel">
+      <div class="candidate-head"><div><div class="candidate-number">02 / 08</div><h2>Vercel Monochrome</h2><p class="candidate-note">黑白单色和极薄边界，让内容成为唯一的视觉焦点。</p></div><div class="swatches"><i class="swatch" style="background:#050505"></i><i class="swatch" style="background:#171717"></i><i class="swatch" style="background:#f5f5f5"></i></div></div>
+      <div class="candidate-tags"><span class="tag">纯黑白</span><span class="tag">极薄边界</span><span class="tag">高识别留白</span></div>
+      <div class="preview"><div class="window"><aside class="sidebar"><div class="sidebar-top"><div class="brand-row"><b class="mark">S</b><span class="brand-name">SunCode</span><span class="brand-env">DEV</span></div><div class="command active"><span class="command-icon">＋</span><span class="command-label">新建任务</span><span class="shortcut">⌘N</span></div><div class="command"><span class="command-icon">⌕</span><span class="command-label">搜索</span><span class="shortcut">⌘K</span></div><div class="command"><span class="command-icon">✦</span><span class="command-label">技能</span></div></div><div class="sidebar-section"><div class="section-label"><span>最近对话</span><span>•••</span></div><div class="session active"><i class="session-dot"></i><div class="session-text">重构 agent-loop 的生命周期<div class="session-meta">今天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">检查工具调度器<div class="session-meta">昨天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">整理 memory 设计<div class="session-meta">7 月 10 日</div></div></div></div><div class="sidebar-footer">⚙　设置 <span class="shortcut">⌘,</span></div></aside><section class="main"><div class="topbar"><div class="breadcrumb"><strong>SunCode</strong><span>/</span><span>新任务</span></div><div class="top-actions"><span class="icon-button">◌</span><span class="icon-button">···</span></div></div><div class="main-content"><div class="welcome"><div class="welcome-mark">S</div><h3>你好，我是 SunCode</h3><p>你的 AI 编程助手。可以帮你理解项目、编写代码、调试问题和推进任务。</p><div class="suggestions"><span class="suggestion">解释当前项目结构</span><span class="suggestion">查找一个 bug</span><span class="suggestion">开始一个新任务</span></div><div class="composer"><div class="composer-placeholder">输入消息，开始工作…</div><div class="composer-meta"><div class="composer-tools"><span class="tool-pill">＋</span><span class="tool-pill">Auto</span><span class="tool-pill">main</span></div><span class="send">↑</span></div></div></div></div><div class="statusbar"><span class="status-left"><i class="status-light"></i>就绪</span><span>main　·　0 tokens</span></div></section></div></div>
+    </article>
+
+    <article class="candidate theme-cursor">
+      <div class="candidate-head"><div><div class="candidate-number">03 / 08</div><h2>Cursor Code Slate</h2><p class="candidate-note">保留 IDE 的熟悉感，用绿色作为“正在工作”的单一信号。</p></div><div class="swatches"><i class="swatch" style="background:#1e1e1e"></i><i class="swatch" style="background:#303136"></i><i class="swatch" style="background:#46d18b"></i></div></div>
+      <div class="candidate-tags"><span class="tag">代码工作台</span><span class="tag">墨绿色状态</span><span class="tag">方形控件</span></div>
+      <div class="preview"><div class="window"><aside class="sidebar"><div class="sidebar-top"><div class="brand-row"><b class="mark">S</b><span class="brand-name">SunCode</span><span class="brand-env">DEV</span></div><div class="command active"><span class="command-icon">＋</span><span class="command-label">新建任务</span><span class="shortcut">⌘N</span></div><div class="command"><span class="command-icon">⌕</span><span class="command-label">搜索</span><span class="shortcut">⌘K</span></div><div class="command"><span class="command-icon">✦</span><span class="command-label">技能</span></div></div><div class="sidebar-section"><div class="section-label"><span>最近对话</span><span>•••</span></div><div class="session active"><i class="session-dot"></i><div class="session-text">重构 agent-loop 的生命周期<div class="session-meta">今天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">检查工具调度器<div class="session-meta">昨天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">整理 memory 设计<div class="session-meta">7 月 10 日</div></div></div></div><div class="sidebar-footer">⚙　设置 <span class="shortcut">⌘,</span></div></aside><section class="main"><div class="topbar"><div class="breadcrumb"><strong>SunCode</strong><span>/</span><span>新任务</span></div><div class="top-actions"><span class="icon-button">◌</span><span class="icon-button">···</span></div></div><div class="main-content"><div class="welcome"><div class="welcome-mark">S</div><h3>你好，我是 SunCode</h3><p>你的 AI 编程助手。可以帮你理解项目、编写代码、调试问题和推进任务。</p><div class="suggestions"><span class="suggestion">解释当前项目结构</span><span class="suggestion">查找一个 bug</span><span class="suggestion">开始一个新任务</span></div><div class="composer"><div class="composer-placeholder">输入消息，开始工作…</div><div class="composer-meta"><div class="composer-tools"><span class="tool-pill">＋</span><span class="tool-pill">Auto</span><span class="tool-pill">main</span></div><span class="send">↑</span></div></div></div></div><div class="statusbar"><span class="status-left"><i class="status-light"></i>就绪</span><span>main　·　0 tokens</span></div></section></div></div>
+    </article>
+
+    <article class="candidate theme-raycast">
+      <div class="candidate-head"><div><div class="candidate-number">04 / 08</div><h2>Raycast Command</h2><p class="candidate-note">更偏工具启动器的轻快感，珊瑚色只负责提示当前动作。</p></div><div class="swatches"><i class="swatch" style="background:#1b1b1e"></i><i class="swatch" style="background:#2d2d32"></i><i class="swatch" style="background:#ff6b6d"></i></div></div>
+      <div class="candidate-tags"><span class="tag">命令中心</span><span class="tag">珊瑚强调</span><span class="tag">柔和圆角</span></div>
+      <div class="preview"><div class="window"><aside class="sidebar"><div class="sidebar-top"><div class="brand-row"><b class="mark">S</b><span class="brand-name">SunCode</span><span class="brand-env">DEV</span></div><div class="command active"><span class="command-icon">＋</span><span class="command-label">新建任务</span><span class="shortcut">⌘N</span></div><div class="command"><span class="command-icon">⌕</span><span class="command-label">搜索</span><span class="shortcut">⌘K</span></div><div class="command"><span class="command-icon">✦</span><span class="command-label">技能</span></div></div><div class="sidebar-section"><div class="section-label"><span>最近对话</span><span>•••</span></div><div class="session active"><i class="session-dot"></i><div class="session-text">重构 agent-loop 的生命周期<div class="session-meta">今天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">检查工具调度器<div class="session-meta">昨天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">整理 memory 设计<div class="session-meta">7 月 10 日</div></div></div></div><div class="sidebar-footer">⚙　设置 <span class="shortcut">⌘,</span></div></aside><section class="main"><div class="topbar"><div class="breadcrumb"><strong>SunCode</strong><span>/</span><span>新任务</span></div><div class="top-actions"><span class="icon-button">◌</span><span class="icon-button">···</span></div></div><div class="main-content"><div class="welcome"><div class="welcome-mark">S</div><h3>你好，我是 SunCode</h3><p>你的 AI 编程助手。可以帮你理解项目、编写代码、调试问题和推进任务。</p><div class="suggestions"><span class="suggestion">解释当前项目结构</span><span class="suggestion">查找一个 bug</span><span class="suggestion">开始一个新任务</span></div><div class="composer"><div class="composer-placeholder">输入消息，开始工作…</div><div class="composer-meta"><div class="composer-tools"><span class="tool-pill">＋</span><span class="tool-pill">Auto</span><span class="tool-pill">main</span></div><span class="send">↑</span></div></div></div></div><div class="statusbar"><span class="status-left"><i class="status-light"></i>就绪</span><span>main　·　0 tokens</span></div></section></div></div>
+    </article>
+
+    <article class="candidate theme-primer">
+      <div class="candidate-head"><div><div class="candidate-number">05 / 08</div><h2>GitHub Primer Slate</h2><p class="candidate-note">把状态、可读性和信息层级放在第一位，适合工具操作密集的界面。</p></div><div class="swatches"><i class="swatch" style="background:#0d1117"></i><i class="swatch" style="background:#21262d"></i><i class="swatch" style="background:#58a6ff"></i></div></div>
+      <div class="candidate-tags"><span class="tag">信息优先</span><span class="tag">蓝色链接</span><span class="tag">低圆角</span></div>
+      <div class="preview"><div class="window"><aside class="sidebar"><div class="sidebar-top"><div class="brand-row"><b class="mark">S</b><span class="brand-name">SunCode</span><span class="brand-env">DEV</span></div><div class="command active"><span class="command-icon">＋</span><span class="command-label">新建任务</span><span class="shortcut">⌘N</span></div><div class="command"><span class="command-icon">⌕</span><span class="command-label">搜索</span><span class="shortcut">⌘K</span></div><div class="command"><span class="command-icon">✦</span><span class="command-label">技能</span></div></div><div class="sidebar-section"><div class="section-label"><span>最近对话</span><span>•••</span></div><div class="session active"><i class="session-dot"></i><div class="session-text">重构 agent-loop 的生命周期<div class="session-meta">今天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">检查工具调度器<div class="session-meta">昨天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">整理 memory 设计<div class="session-meta">7 月 10 日</div></div></div></div><div class="sidebar-footer">⚙　设置 <span class="shortcut">⌘,</span></div></aside><section class="main"><div class="topbar"><div class="breadcrumb"><strong>SunCode</strong><span>/</span><span>新任务</span></div><div class="top-actions"><span class="icon-button">◌</span><span class="icon-button">···</span></div></div><div class="main-content"><div class="welcome"><div class="welcome-mark">S</div><h3>你好，我是 SunCode</h3><p>你的 AI 编程助手。可以帮你理解项目、编写代码、调试问题和推进任务。</p><div class="suggestions"><span class="suggestion">解释当前项目结构</span><span class="suggestion">查找一个 bug</span><span class="suggestion">开始一个新任务</span></div><div class="composer"><div class="composer-placeholder">输入消息，开始工作…</div><div class="composer-meta"><div class="composer-tools"><span class="tool-pill">＋</span><span class="tool-pill">Auto</span><span class="tool-pill">main</span></div><span class="send">↑</span></div></div></div></div><div class="statusbar"><span class="status-left"><i class="status-light"></i>就绪</span><span>main　·　0 tokens</span></div></section></div></div>
+    </article>
+
+    <article class="candidate theme-notion">
+      <div class="candidate-head"><div><div class="candidate-number">06 / 08</div><h2>Notion Warm Neutral</h2><p class="candidate-note">降低冷峻感，用暖灰和琥珀色让长时间使用更松弛。</p></div><div class="swatches"><i class="swatch" style="background:#1f1f1d"></i><i class="swatch" style="background:#33322e"></i><i class="swatch" style="background:#e7aa55"></i></div></div>
+      <div class="candidate-tags"><span class="tag">暖灰底色</span><span class="tag">琥珀强调</span><span class="tag">文档感</span></div>
+      <div class="preview"><div class="window"><aside class="sidebar"><div class="sidebar-top"><div class="brand-row"><b class="mark">S</b><span class="brand-name">SunCode</span><span class="brand-env">DEV</span></div><div class="command active"><span class="command-icon">＋</span><span class="command-label">新建任务</span><span class="shortcut">⌘N</span></div><div class="command"><span class="command-icon">⌕</span><span class="command-label">搜索</span><span class="shortcut">⌘K</span></div><div class="command"><span class="command-icon">✦</span><span class="command-label">技能</span></div></div><div class="sidebar-section"><div class="section-label"><span>最近对话</span><span>•••</span></div><div class="session active"><i class="session-dot"></i><div class="session-text">重构 agent-loop 的生命周期<div class="session-meta">今天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">检查工具调度器<div class="session-meta">昨天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">整理 memory 设计<div class="session-meta">7 月 10 日</div></div></div></div><div class="sidebar-footer">⚙　设置 <span class="shortcut">⌘,</span></div></aside><section class="main"><div class="topbar"><div class="breadcrumb"><strong>SunCode</strong><span>/</span><span>新任务</span></div><div class="top-actions"><span class="icon-button">◌</span><span class="icon-button">···</span></div></div><div class="main-content"><div class="welcome"><div class="welcome-mark">S</div><h3>你好，我是 SunCode</h3><p>你的 AI 编程助手。可以帮你理解项目、编写代码、调试问题和推进任务。</p><div class="suggestions"><span class="suggestion">解释当前项目结构</span><span class="suggestion">查找一个 bug</span><span class="suggestion">开始一个新任务</span></div><div class="composer"><div class="composer-placeholder">输入消息，开始工作…</div><div class="composer-meta"><div class="composer-tools"><span class="tool-pill">＋</span><span class="tool-pill">Auto</span><span class="tool-pill">main</span></div><span class="send">↑</span></div></div></div></div><div class="statusbar"><span class="status-left"><i class="status-light"></i>就绪</span><span>main　·　0 tokens</span></div></section></div></div>
+    </article>
+
+    <article class="candidate theme-stripe">
+      <div class="candidate-head"><div><div class="candidate-number">07 / 08</div><h2>Stripe Blue Ink</h2><p class="candidate-note">深蓝工作台和单一紫蓝色，带来更专业的“控制台”气质。</p></div><div class="swatches"><i class="swatch" style="background:#0b1223"></i><i class="swatch" style="background:#1b2949"></i><i class="swatch" style="background:#8b8dff"></i></div></div>
+      <div class="candidate-tags"><span class="tag">蓝黑层级</span><span class="tag">紫蓝强调</span><span class="tag">专业控制台</span></div>
+      <div class="preview"><div class="window"><aside class="sidebar"><div class="sidebar-top"><div class="brand-row"><b class="mark">S</b><span class="brand-name">SunCode</span><span class="brand-env">DEV</span></div><div class="command active"><span class="command-icon">＋</span><span class="command-label">新建任务</span><span class="shortcut">⌘N</span></div><div class="command"><span class="command-icon">⌕</span><span class="command-label">搜索</span><span class="shortcut">⌘K</span></div><div class="command"><span class="command-icon">✦</span><span class="command-label">技能</span></div></div><div class="sidebar-section"><div class="section-label"><span>最近对话</span><span>•••</span></div><div class="session active"><i class="session-dot"></i><div class="session-text">重构 agent-loop 的生命周期<div class="session-meta">今天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">检查工具调度器<div class="session-meta">昨天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">整理 memory 设计<div class="session-meta">7 月 10 日</div></div></div></div><div class="sidebar-footer">⚙　设置 <span class="shortcut">⌘,</span></div></aside><section class="main"><div class="topbar"><div class="breadcrumb"><strong>SunCode</strong><span>/</span><span>新任务</span></div><div class="top-actions"><span class="icon-button">◌</span><span class="icon-button">···</span></div></div><div class="main-content"><div class="welcome"><div class="welcome-mark">S</div><h3>你好，我是 SunCode</h3><p>你的 AI 编程助手。可以帮你理解项目、编写代码、调试问题和推进任务。</p><div class="suggestions"><span class="suggestion">解释当前项目结构</span><span class="suggestion">查找一个 bug</span><span class="suggestion">开始一个新任务</span></div><div class="composer"><div class="composer-placeholder">输入消息，开始工作…</div><div class="composer-meta"><div class="composer-tools"><span class="tool-pill">＋</span><span class="tool-pill">Auto</span><span class="tool-pill">main</span></div><span class="send">↑</span></div></div></div></div><div class="statusbar"><span class="status-left"><i class="status-light"></i>就绪</span><span>main　·　0 tokens</span></div></section></div></div>
+    </article>
+
+    <article class="candidate theme-apple">
+      <div class="candidate-head"><div><div class="candidate-number">08 / 08</div><h2>Apple Calm</h2><p class="candidate-note">延续当前系统风格，但收紧颜色、阴影和层级，让界面更安静。</p></div><div class="swatches"><i class="swatch" style="background:#1b1b1d"></i><i class="swatch" style="background:#343438"></i><i class="swatch" style="background:#4d9dff"></i></div></div>
+      <div class="candidate-tags"><span class="tag">最小迁移</span><span class="tag">系统蓝</span><span class="tag">软圆角</span></div>
+      <div class="preview"><div class="window"><aside class="sidebar"><div class="sidebar-top"><div class="brand-row"><b class="mark">S</b><span class="brand-name">SunCode</span><span class="brand-env">DEV</span></div><div class="command active"><span class="command-icon">＋</span><span class="command-label">新建任务</span><span class="shortcut">⌘N</span></div><div class="command"><span class="command-icon">⌕</span><span class="command-label">搜索</span><span class="shortcut">⌘K</span></div><div class="command"><span class="command-icon">✦</span><span class="command-label">技能</span></div></div><div class="sidebar-section"><div class="section-label"><span>最近对话</span><span>•••</span></div><div class="session active"><i class="session-dot"></i><div class="session-text">重构 agent-loop 的生命周期<div class="session-meta">今天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">检查工具调度器<div class="session-meta">昨天 · SunCode</div></div></div><div class="session"><i class="session-dot" style="opacity:.35"></i><div class="session-text">整理 memory 设计<div class="session-meta">7 月 10 日</div></div></div></div><div class="sidebar-footer">⚙　设置 <span class="shortcut">⌘,</span></div></aside><section class="main"><div class="topbar"><div class="breadcrumb"><strong>SunCode</strong><span>/</span><span>新任务</span></div><div class="top-actions"><span class="icon-button">◌</span><span class="icon-button">···</span></div></div><div class="main-content"><div class="welcome"><div class="welcome-mark">S</div><h3>你好，我是 SunCode</h3><p>你的 AI 编程助手。可以帮你理解项目、编写代码、调试问题和推进任务。</p><div class="suggestions"><span class="suggestion">解释当前项目结构</span><span class="suggestion">查找一个 bug</span><span class="suggestion">开始一个新任务</span></div><div class="composer"><div class="composer-placeholder">输入消息，开始工作…</div><div class="composer-meta"><div class="composer-tools"><span class="tool-pill">＋</span><span class="tool-pill">Auto</span><span class="tool-pill">main</span></div><span class="send">↑</span></div></div></div></div><div class="statusbar"><span class="status-left"><i class="status-light"></i>就绪</span><span>main　·　0 tokens</span></div></section></div></div>
+    </article>
+  </main>
+
+  <script>
+    const themeSelect = document.querySelector('#theme-select');
+    const selectedThemeName = document.querySelector('#selected-theme-name');
+    const defaultNote = document.querySelector('#default-note');
+    const settingsPreview = document.querySelector('#settings-preview');
+    const candidates = [...document.querySelectorAll('.candidate')];
+    const themeNames = {
+      linear: 'Linear Quiet',
+      vercel: 'Vercel Monochrome',
+      cursor: 'Cursor Code Slate',
+      raycast: 'Raycast Command',
+      primer: 'GitHub Primer Slate',
+      notion: 'Notion Warm Neutral',
+      stripe: 'Stripe Blue Ink',
+      apple: 'Apple Calm',
+    };
+
+    document.querySelectorAll('.top-actions').forEach((actions) => {
+      const controls = document.createElement('div');
+      controls.className = 'window-controls';
+      controls.innerHTML = '<button class="window-control" aria-label="最小化">−</button><button class="window-control" aria-label="最大化">□</button><button class="window-control close" aria-label="关闭">×</button>';
+      actions.appendChild(controls);
+    });
+
+    function selectTheme(theme) {
+      const selected = document.querySelector(`.candidate.theme-${theme}`);
+      if (!selected) return;
+      candidates.forEach((candidate) => candidate.classList.toggle('selected', candidate === selected));
+      themeSelect.value = theme;
+      selectedThemeName.textContent = themeNames[theme];
+      defaultNote.textContent = `默认主题 · ${themeNames[theme]}`;
+      settingsPreview.className = `settings-preview-frame theme-${theme}`;
+      settingsPreview.innerHTML = `<div class="preview">${selected.querySelector('.preview').innerHTML}</div>`;
+    }
+
+    candidates.forEach((candidate) => {
+      candidate.addEventListener('click', () => selectTheme([...candidate.classList].find((name) => name.startsWith('theme-')).replace('theme-', '')));
+    });
+    themeSelect.addEventListener('change', (event) => selectTheme(event.target.value));
+    selectTheme('notion');
+  </script>
+</body>
+</html>

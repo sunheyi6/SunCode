@@ -5,18 +5,25 @@ import { bridge } from '../api/bridge';
 
 export const useUpdateStore = defineStore('update', () => {
   const status = ref<UpdateStatus>({ state: 'idle' });
+  /** Track the latest version across state changes so dismiss() can always
+   *  tell the main process to skip it, even during downloading/error states
+   *  where the UpdateStatus does not carry the version field. */
+  let lastVersion: string | undefined;
 
   let unlisten: (() => void) | null = null;
 
   async function init(): Promise<void> {
     try {
-      status.value = await bridge.getUpdateStatus();
+      const s = await bridge.getUpdateStatus();
+      status.value = s;
+      if (s.version) lastVersion = s.version;
     } catch {
       // preload might not be ready or running in a non-Electron context
     }
 
     unlisten = bridge.onUpdateStatus((newStatus) => {
       status.value = newStatus;
+      if (newStatus.version) lastVersion = newStatus.version;
       // Auto-install when download completes
       if (newStatus.state === 'downloaded') {
         bridge.installUpdate();
@@ -44,8 +51,10 @@ export const useUpdateStore = defineStore('update', () => {
   }
 
   function dismiss(): void {
-    if (status.value.version) {
-      bridge.skipVersion(status.value.version);
+    // Always use the last known version, not just status.value.version,
+    // because during downloading/error states the version field is absent.
+    if (lastVersion) {
+      bridge.skipVersion(lastVersion);
     }
     status.value = { state: 'idle' };
   }

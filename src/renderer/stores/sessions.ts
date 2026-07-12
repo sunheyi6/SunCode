@@ -15,6 +15,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   /** Cache: full histories used only for background hydration and Worker continuity. */
   const fullSessionMessagesCache = new Map<string, Message[]>();
   const fullLoadPromises = new Map<string, Promise<Message[]>>();
+  const cacheGenerations = new Map<string, number>();
   let selectionRequestId = 0;
 
   const sortedSessions = computed(() =>
@@ -60,6 +61,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   function hydrateFullSession(id: string, requestId: number): Promise<void> {
+    const generation = cacheGenerations.get(id) ?? 0;
     let fullLoad = fullSessionMessagesCache.has(id)
       ? Promise.resolve(fullSessionMessagesCache.get(id) as Message[])
       : fullLoadPromises.get(id);
@@ -78,6 +80,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     return fullLoad
       .then((messages) => {
+        if ((cacheGenerations.get(id) ?? 0) !== generation) return;
         fullSessionMessagesCache.set(id, messages);
         sessionMessagesCache.set(id, tailMessages(messages, SESSION_SNAPSHOT_SIZE));
         if (requestId === selectionRequestId && activeSessionId.value === id) {
@@ -88,6 +91,14 @@ export const useSessionsStore = defineStore('sessions', () => {
       .catch(() => {
         // Keep the snapshot visible when full history cannot be loaded.
       });
+  }
+
+  /** Drop histories that may predate a message persisted by an active run. */
+  function invalidateSessionCache(id: string): void {
+    sessionMessagesCache.delete(id);
+    fullSessionMessagesCache.delete(id);
+    fullLoadPromises.delete(id);
+    cacheGenerations.set(id, (cacheGenerations.get(id) ?? 0) + 1);
   }
 
   async function init(): Promise<void> {
@@ -173,5 +184,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     selectSession,
     deleteSession,
     deleteSessions,
+    invalidateSessionCache,
   };
 });

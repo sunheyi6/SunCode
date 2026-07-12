@@ -38,18 +38,25 @@ export function useAgent() {
   const isBusy = computed(() => chatStore.isStreaming);
 
   function dispatch(text: string): void {
+    const sessionId = sessionsStore.activeSessionId;
+    if (!sessionId) return;
+
     const uiLanguage = detectUiLanguage(text);
     chatStore.addUserMessage(text);
-    chatStore.setActiveSessionId(sessionsStore.activeSessionId ?? '');
+    chatStore.setActiveSessionId(sessionId);
     chatStore.startAssistantMessage();
     void bridge
-      .saveMessage({
-        role: 'user',
-        content: [{ type: 'text', text }],
-        uiLanguage,
-      })
+      .saveMessage(
+        {
+          role: 'user',
+          content: [{ type: 'text', text }],
+          uiLanguage,
+        },
+        sessionId,
+      )
+      .then(() => sessionsStore.invalidateSessionCache(sessionId))
       .then(() => sessionsStore.refresh());
-    bridge.prompt(text, uiLanguage);
+    bridge.prompt(text, uiLanguage, sessionId);
   }
 
   function scheduleNextPrompt(): void {
@@ -127,6 +134,7 @@ export function useAgent() {
     cleanups.push(
       bridge.onDone((data) => {
         chatStore.handleStreamEvent({ type: 'message_end', message: data.message }, data.sessionId);
+        sessionsStore.invalidateSessionCache(data.sessionId);
         void sessionsStore.refresh();
         agentStore.setStatus({
           state: 'done',
