@@ -1,4 +1,4 @@
-import type { AppSettings, AppearanceStyle } from '@shared/types';
+import type { AppearanceStyle, AppSettings } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { bridge } from '../api/bridge';

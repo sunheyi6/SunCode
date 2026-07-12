@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AppSettings, AppearanceStyle, DiscoveredSkill, MemoryEntry } from '@shared/types';
+import type { AppearanceStyle, AppSettings, DiscoveredSkill, MemoryEntry } from '@shared/types';
 import { computed, onMounted, ref, watch } from 'vue';
 import { bridge } from '../../api/bridge';
 import { useToast } from '../../composables/useToast';
@@ -366,14 +366,70 @@ interface StylePreset {
 }
 
 const STYLE_PRESETS: ReadonlyArray<StylePreset> = [
-  { value: 'apple', label: 'SunCode 默认', bg: '#000000', accent: '#007aff', lightBg: '#f5f5f7', lightAccent: '#007aff' },
-  { value: 'linear', label: 'Linear', bg: '#08090a', accent: '#5e6ad2', lightBg: '#f9f9fb', lightAccent: '#5e6ad2' },
-  { value: 'vercel', label: 'Vercel', bg: '#000000', accent: '#ededed', lightBg: '#fafafa', lightAccent: '#000000' },
-  { value: 'raycast', label: 'Raycast', bg: '#1c1c1e', accent: '#ff6365', lightBg: '#f7f7f8', lightAccent: '#ff6363' },
-  { value: 'cursor', label: 'Cursor', bg: '#1e1e1e', accent: '#3ccb7f', lightBg: '#f8f8f8', lightAccent: '#16a34a' },
-  { value: 'notion', label: 'Notion', bg: '#191919', accent: '#e8b86d', lightBg: '#f7f6f3', lightAccent: '#d9730d' },
-  { value: 'stripe', label: 'Stripe', bg: '#0a0e1a', accent: '#635bff', lightBg: '#f6f9fc', lightAccent: '#635bff' },
-  { value: 'spotify', label: 'Spotify', bg: '#000000', accent: '#1db954', lightBg: '#f8f8f8', lightAccent: '#1db954' },
+  {
+    value: 'apple',
+    label: 'SunCode 默认',
+    bg: '#000000',
+    accent: '#007aff',
+    lightBg: '#f5f5f7',
+    lightAccent: '#007aff',
+  },
+  {
+    value: 'linear',
+    label: 'Linear',
+    bg: '#08090a',
+    accent: '#5e6ad2',
+    lightBg: '#f9f9fb',
+    lightAccent: '#5e6ad2',
+  },
+  {
+    value: 'vercel',
+    label: 'Vercel',
+    bg: '#000000',
+    accent: '#ededed',
+    lightBg: '#fafafa',
+    lightAccent: '#000000',
+  },
+  {
+    value: 'raycast',
+    label: 'Raycast',
+    bg: '#1c1c1e',
+    accent: '#ff6365',
+    lightBg: '#f7f7f8',
+    lightAccent: '#ff6363',
+  },
+  {
+    value: 'cursor',
+    label: 'Cursor',
+    bg: '#1e1e1e',
+    accent: '#3ccb7f',
+    lightBg: '#f8f8f8',
+    lightAccent: '#16a34a',
+  },
+  {
+    value: 'notion',
+    label: 'Notion',
+    bg: '#191919',
+    accent: '#e8b86d',
+    lightBg: '#f7f6f3',
+    lightAccent: '#d9730d',
+  },
+  {
+    value: 'stripe',
+    label: 'Stripe',
+    bg: '#0a0e1a',
+    accent: '#635bff',
+    lightBg: '#f6f9fc',
+    lightAccent: '#635bff',
+  },
+  {
+    value: 'spotify',
+    label: 'Spotify',
+    bg: '#000000',
+    accent: '#1db954',
+    lightBg: '#f8f8f8',
+    lightAccent: '#1db954',
+  },
 ];
 
 /** Preview swatch colors follow the currently resolved light/dark mode. */

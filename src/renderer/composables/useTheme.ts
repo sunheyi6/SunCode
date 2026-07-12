@@ -1,5 +1,5 @@
-import { computed } from 'vue';
 import type { AppearanceStyle } from '@shared/types';
+import { computed } from 'vue';
 import { useSettingsStore } from '../stores/settings';
 
 /**
