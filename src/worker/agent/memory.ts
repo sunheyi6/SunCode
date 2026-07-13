@@ -21,6 +21,8 @@ const MAX_SUMMARY_LENGTH = 500;
 const MAX_RETRIEVED_MEMORIES = 5;
 const MEMSCENE_SIMILARITY_THRESHOLD = 0.6;
 const MEMSCENE_MIN_ENTRIES = 2;
+/** Minimum relevance score threshold — memories scoring below this are excluded. */
+const MIN_RELEVANCE_SCORE = 1.0;
 
 export type MemoryScope = 'session' | 'project' | 'global';
 export type MemoryKind =
@@ -105,6 +107,35 @@ export async function loadMemories(
   return result.content;
 }
 
+/**
+ * Detect casual social/chatty queries that don't need memory retrieval.
+ * Skips memory injection for greetings, mood expressions, and chit-chat.
+ */
+function isSocialQuery(query: string): boolean {
+  const trimmed = query.trim();
+  if (!trimmed) return false;
+
+  // File paths, code symbols, CLI flags → always allow memory retrieval
+  if (/[/\\:<>{}[\]()=+*|&^%$#@!~`]/.test(trimmed)) return false;
+
+  // Very short text without technical indicators → likely social
+  if (trimmed.length <= 6) {
+    if (/^[a-zA-Z]{3,}$/.test(trimmed) && !/^(hi|hey|yes|no|ok|bye)$/i.test(trimmed)) return false;
+    return true;
+  }
+
+  // Greeting patterns
+  if (/^(你好|哈[喽罗]|嗨|喂|大家[好]?|早[上安好]?|晚[上安好]?)/.test(trimmed)) return true;
+
+  // Mood expressions
+  if (/心情(不错|很好|不好|差|烦躁|愉悦|开心|美美)/.test(trimmed)) return true;
+
+  // Laughter / light reactions
+  if (/^(哈哈|嘻嘻|嘿嘿|呵呵)/.test(trimmed)) return true;
+
+  return false;
+}
+
 export async function loadMemoriesWithEntries(
   workingDir: string,
   query?: string,
@@ -116,6 +147,11 @@ export async function loadMemoriesWithEntries(
     ...loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session'),
   ];
   if (entries.length === 0) return { content: '', entries: [] };
+
+  // Skip memory retrieval for casual social queries (greetings, chit-chat, etc.)
+  if (query?.trim() && isSocialQuery(query)) {
+    return { content: '', entries: [] };
+  }
 
   const selectedEntries = query?.trim()
     ? await searchMemories(entries, query)
@@ -199,8 +235,10 @@ export async function searchMemories(
 
   const results = entries
     .map((entry) => ({ entry, score: hybridScore(entry, query, queryEmbedding) }))
-    .filter((result) => result.score > 0)
+    .filter((result) => result.score >= MIN_RELEVANCE_SCORE)
     .sort((a, b) => b.score - a.score);
+
+  if (results.length === 0) return [];
 
   return results.slice(0, MAX_RETRIEVED_MEMORIES).map((r) => r.entry);
 }
@@ -772,6 +810,15 @@ function hybridScore(entry: MemoryEntry, query: string, queryEmbedding: number[]
     for (const term of terms) {
       if (haystack.includes(term)) score += 2;
     }
+    // For Chinese text (single token with no spaces), add character-level matching
+    // so shorter substrings within the query can match relevant content
+    if (terms.length === 1 && /[\u4e00-\u9fff]/.test(terms[0]!)) {
+      const chars = [...terms[0]!];
+      for (let i = 0; i < chars.length - 1; i++) {
+        const bigram = chars[i]! + chars[i + 1]!;
+        if (haystack.includes(bigram)) score += 1;
+      }
+    }
   }
 
   if (entry.embedding && queryEmbedding.length > 0) {
@@ -1090,17 +1137,56 @@ function todayString(): string {
 }
 
 function simpleTextEmbedding(text: string): number[] {
-  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
-  const wordCounts: Record<string, number> = {};
-  for (const word of words) {
-    wordCounts[word] = (wordCounts[word] || 0) + 1;
+  const normalized = text.toLowerCase();
+  const features: string[] = [];
+  const hasCJK = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(normalized);
+
+  if (hasCJK) {
+    // For CJK text: extract character unigrams, bigrams, and trigrams
+    // to create meaningful multi-dimensional features without a word segmenter
+    const chars = [...normalized];
+    for (let i = 0; i < chars.length; i++) {
+      // Character unigram
+      features.push(chars[i]!);
+      // Bigram
+      if (i + 1 < chars.length) {
+        features.push(chars[i]! + chars[i + 1]!);
+      }
+      // Trigram
+      if (i + 2 < chars.length) {
+        features.push(chars[i]! + chars[i + 1]! + chars[i + 2]!);
+      }
+    }
+    // ASCII tokens within mixed text (e.g. "GitHub CLI" in Chinese context)
+    const asciiTokens = normalized.match(/[a-z][a-z0-9_\-.]*/g) || [];
+    for (const token of asciiTokens) {
+      if (token.length >= 2) {
+        features.push(token);
+      }
+    }
+  } else {
+    // Non-CJK text: use whitespace-separated words as before
+    const words = normalized.split(/\s+/).filter(Boolean);
+    for (const word of words) {
+      features.push(word);
+    }
   }
 
-  const vocab = [...new Set(words)].slice(0, 100);
-  const embedding = vocab.map((word) => wordCounts[word] || 0);
-  const norm = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+  // Count feature frequencies
+  const counts: Record<string, number> = {};
+  for (const f of features) {
+    counts[f] = (counts[f] || 0) + 1;
+  }
+
+  // Sort by key for deterministic feature order
+  const topFeatures = Object.entries(counts)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(0, 200);
+
+  const embedding = topFeatures.map(([, c]) => c);
+  const norm = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0));
   if (norm > 0) {
-    return embedding.map((val) => val / norm);
+    return embedding.map((v) => v / norm);
   }
 
   return embedding.length > 0 ? embedding : [0];
