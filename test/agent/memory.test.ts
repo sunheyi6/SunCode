@@ -353,6 +353,44 @@ describe('memory storage', () => {
     expect(reactScene?.entries).toContain('react-components');
   });
 
+  it('does not inject pinned global memory when the query is unrelated', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      // A pinned, high-importance global memory about GitHub CLI.
+      await saveMemory(workingDir, {
+        date: '2026-07-12',
+        slug: 'github-cli-available',
+        scope: 'global',
+        kind: 'project_fact',
+        userRequest: '本地有GitHub CLI',
+        toolsUsed: {},
+        summary: '用户告知本地已安装 GitHub CLI（gh），可以在需要时自行使用。',
+        tags: ['gh', 'github-cli', 'tooling'],
+        importance: 3,
+        pinned: true,
+      });
+
+      // Unrelated query: the global memory must NOT be injected.
+      await expect(loadMemories(workingDir, '帮我修一下这个 Vue 组件的样式 bug', 'session-1'))
+        .resolves.not.toContain('GitHub CLI');
+
+      // Related query: the global memory should still be injected.
+      await expect(loadMemories(workingDir, '用 gh 命令创建一个 GitHub PR', 'session-1')).resolves.toContain(
+        'GitHub CLI',
+      );
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
   it('applies time validity filtering in search', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');
 

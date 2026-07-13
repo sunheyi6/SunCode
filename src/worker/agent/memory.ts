@@ -231,10 +231,10 @@ export async function searchMemories(
     return entries.slice(0, MAX_RETRIEVED_MEMORIES);
   }
 
-  const queryEmbedding = await computeEmbeddingForText(query);
+  const queryFeatures = textFeatureMap(query);
 
   const results = entries
-    .map((entry) => ({ entry, score: hybridScore(entry, query, queryEmbedding) }))
+    .map((entry) => ({ entry, score: hybridScore(entry, query, queryFeatures) }))
     .filter((result) => result.score >= MIN_RELEVANCE_SCORE)
     .sort((a, b) => b.score - a.score);
 
@@ -797,8 +797,16 @@ function loadAllMemoryEntries(memDir: string): MemoryEntry[] {
   return loadScopedMemoryEntries(memDir, 'session');
 }
 
-function hybridScore(entry: MemoryEntry, query: string, queryEmbedding: number[]): number {
-  let score = 0;
+function hybridScore(
+  entry: MemoryEntry,
+  query: string,
+  queryFeatures: Map<string, number>,
+): number {
+  // Relevance score: only reflects actual query overlap (text + embedding).
+  // Bias bonuses (importance/accessCount/pinned) must NOT push a zero-relevance
+  // memory across the relevance threshold — otherwise a pinned/global memory
+  // gets injected into every conversation regardless of topic.
+  let relevanceScore = 0;
 
   const haystack =
     `${entry.userRequest} ${entry.summary} ${(entry.tags ?? []).join(' ')}`.toLowerCase();
@@ -806,9 +814,9 @@ function hybridScore(entry: MemoryEntry, query: string, queryEmbedding: number[]
 
   if (terms.length > 0) {
     const fullQuery = query.toLowerCase().trim();
-    if (fullQuery && haystack.includes(fullQuery)) score += 5;
+    if (fullQuery && haystack.includes(fullQuery)) relevanceScore += 5;
     for (const term of terms) {
-      if (haystack.includes(term)) score += 2;
+      if (haystack.includes(term)) relevanceScore += 2;
     }
     // For Chinese text (single token with no spaces), add character-level matching
     // so shorter substrings within the query can match relevant content
@@ -816,19 +824,28 @@ function hybridScore(entry: MemoryEntry, query: string, queryEmbedding: number[]
       const chars = [...terms[0]!];
       for (let i = 0; i < chars.length - 1; i++) {
         const bigram = chars[i]! + chars[i + 1]!;
-        if (haystack.includes(bigram)) score += 1;
+        if (haystack.includes(bigram)) relevanceScore += 1;
       }
     }
   }
 
-  if (entry.embedding && queryEmbedding.length > 0) {
-    const similarity = cosineSimilarity(entry.embedding, queryEmbedding);
-    score += similarity * 10;
-  }
+  // Semantic similarity via sparse cosine over shared feature keys. Unlike the
+  // positional number[] cosine (which compares unrelated dimensions and can
+  // report high similarity for disjoint texts), this is 0 when query and entry
+  // share no features — so unrelated memories can't sneak past the threshold.
+  const entryFeatures = textFeatureMap(`${entry.userRequest} ${entry.summary}`);
+  const similarity = sparseCosine(entryFeatures, queryFeatures);
+  relevanceScore += similarity * 10;
 
-  score += (entry.importance ?? 1) * 0.25;
-  score += Math.min(entry.accessCount ?? 0, 10) * 0.1;
-  if (entry.pinned) score += 1;
+  // Bias only acts as a tie-breaker among memories that already have query
+  // relevance. A memory with zero relevance scores 0 and is filtered out by
+  // MIN_RELEVANCE_SCORE, even if pinned or high-importance.
+  let score = 0;
+  if (relevanceScore > 0) {
+    score = relevanceScore + (entry.importance ?? 1) * 0.25;
+    score += Math.min(entry.accessCount ?? 0, 10) * 0.1;
+    if (entry.pinned) score += 1;
+  }
 
   const now = Date.now();
   const validFrom = entry.validFrom ? Date.parse(entry.validFrom) : -Infinity;
@@ -1120,16 +1137,62 @@ async function computeEmbedding(
   return embedding;
 }
 
-async function computeEmbeddingForText(text: string): Promise<number[]> {
-  const cacheKey = text.slice(0, 200);
-  if (embeddingCache.has(cacheKey)) {
-    const cached = embeddingCache.get(cacheKey);
-    if (cached) return cached;
+/**
+ * Build a sparse feature -> count map for a text. Used for key-aligned sparse
+ * cosine similarity in search. Feature extraction mirrors `simpleTextEmbedding`
+ * but preserves feature identity (the key) instead of collapsing to a positional
+ * array, so similarity is only nonzero when features actually overlap.
+ */
+function textFeatureMap(text: string): Map<string, number> {
+  const normalized = text.toLowerCase();
+  const features: string[] = [];
+  const hasCJK = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(normalized);
+
+  if (hasCJK) {
+    const chars = [...normalized];
+    for (let i = 0; i < chars.length; i++) {
+      // Unigrams: only CJK characters are meaningful single-character features.
+      // Single ASCII letters/digits/punctuation are noise that creates false
+      // similarity between unrelated texts (e.g. any text with a space or the
+      // letters g/u/b would otherwise match). ASCII contributes via tokens below.
+      const ch = chars[i]!;
+      if (/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(ch)) features.push(ch);
+      if (i + 1 < chars.length) features.push(chars[i]! + chars[i + 1]!);
+      if (i + 2 < chars.length) features.push(chars[i]! + chars[i + 1]! + chars[i + 2]!);
+    }
+    const asciiTokens = normalized.match(/[a-z][a-z0-9_\-.]*/g) || [];
+    for (const token of asciiTokens) {
+      if (token.length >= 2) features.push(token);
+    }
+  } else {
+    const words = normalized.split(/\s+/).filter(Boolean);
+    for (const word of words) features.push(word);
   }
 
-  const embedding = simpleTextEmbedding(text);
-  embeddingCache.set(cacheKey, embedding);
-  return embedding;
+  const counts = new Map<string, number>();
+  for (const f of features) counts.set(f, (counts.get(f) ?? 0) + 1);
+  return counts;
+}
+
+/**
+ * Cosine similarity between two sparse feature-count maps, aligned by feature
+ * key. Returns 0 when the maps share no keys (i.e. the texts have no overlapping
+ * features), which is the correct behavior for unrelated texts.
+ */
+function sparseCosine(a: Map<string, number>, b: Map<string, number>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let dot = 0;
+  let magA = 0;
+  let magB = 0;
+  for (const v of a.values()) magA += v * v;
+  for (const v of b.values()) magB += v * v;
+  if (magA === 0 || magB === 0) return 0;
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  for (const [k, v] of small) {
+    const w = large.get(k);
+    if (w !== undefined) dot += v * w;
+  }
+  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
 function todayString(): string {
