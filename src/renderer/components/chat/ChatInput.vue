@@ -301,15 +301,20 @@ async function handleSend(): Promise<void> {
   historyIndex = -1;
   draftBeforeHistory = '';
 
-  emit('send', text);
+  // Clear input and draft BEFORE emit to prevent onUnmount from saving
+  // the old text back to drafts (v-if/v-else switch unmounts the old
+  // ChatInput before watch(inputText) has a chance to clear the draft).
   inputText.value = '';
+  inputExpanded.value = false;
+  chatInputSessionDrafts.save(sessionsStore.activeSessionId, '');
+
+  emit('send', text);
   await nextTick();
 
   if (textareaRef.value) {
     textareaRef.value.value = '';
     textareaRef.value.style.height = '64px';
   }
-  inputExpanded.value = false;
 }
 
 // --- Input history (ArrowUp / ArrowDown cycling) ---
