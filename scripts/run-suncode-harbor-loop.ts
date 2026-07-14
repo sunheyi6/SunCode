@@ -15,6 +15,7 @@ import { runAgentLoop } from '../src/worker/agent/agent-loop';
 import { createDefaultStopHookRegistry } from '../src/worker/agent/stop-hooks';
 import { createModelRegistry } from '../src/worker/models/registry';
 import { BaseTool, obj, p } from '../src/worker/tools/types';
+import { decodeHarborSettingsPatch } from './terminal-bench-settings';
 
 interface RemoteExecResult {
   stdout: string;
@@ -524,13 +525,17 @@ async function main(): Promise<void> {
   const model = await registry.getModel(provider, modelId);
   if (!model) throw new Error(`Model not available: ${provider}/${modelId}`);
 
+  const settingsPatch = decodeHarborSettingsPatch(process.env.SUNCODE_SETTINGS_PATCH_B64);
+  const maxTurns = process.env.SUNCODE_MAX_TURNS
+    ? positiveInt(process.env.SUNCODE_MAX_TURNS, DEFAULT_SETTINGS.maxTurns)
+    : settingsPatch.maxTurns ?? DEFAULT_SETTINGS.maxTurns;
   const settings: AppSettings = {
     ...DEFAULT_SETTINGS,
+    ...settingsPatch,
     activeProvider: provider,
     activeModel: modelId,
-    maxTurns: positiveInt(process.env.SUNCODE_MAX_TURNS, 200),
+    maxTurns,
     permissionMode: 'full_access',
-    autoCompact: true,
     envApiKeys: {},
     customEndpoints,
   };
@@ -555,6 +560,10 @@ async function main(): Promise<void> {
   await writeFile(streamEventsPath, '', 'utf8');
 
   let toolStartedCount = 0;
+  let semanticCompactStarted = 0;
+  let semanticCompactCompleted = 0;
+  let semanticCompactApplied = 0;
+  let semanticCompactRejected = 0;
   let finalText = '';
   const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: instruction }] }];
 
@@ -585,6 +594,13 @@ async function main(): Promise<void> {
       appendFileSync(runtimeEventsPath, `${JSON.stringify(compactLogValue(stamped))}\n`, 'utf8');
       if (event.type === 'tool_started') {
         toolStartedCount += 1;
+      } else if (event.type === 'semantic_compact_started') {
+        semanticCompactStarted += 1;
+      } else if (event.type === 'semantic_compact_completed') {
+        semanticCompactCompleted += 1;
+        if (event.applied) semanticCompactApplied += 1;
+      } else if (event.type === 'semantic_compact_rejected') {
+        semanticCompactRejected += 1;
       }
     },
     initialTurnCount: 0,
@@ -604,6 +620,13 @@ async function main(): Promise<void> {
         toolSummary: {
           actualToolCalls: toolStartedCount,
           requestedToolCalls: toolStartedCount,
+        },
+        settingsPatch,
+        featureDiagnostics: {
+          semanticCompactStarted,
+          semanticCompactCompleted,
+          semanticCompactApplied,
+          semanticCompactRejected,
         },
         runtimeRefs: { runId, sessionId },
         runtimeEventsPath,

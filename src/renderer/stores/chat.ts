@@ -672,6 +672,7 @@ export const useChatStore = defineStore('chat', () => {
    *  and accumulate on the current assistant message for the call trace panel. */
   function handleRunEvent(event: RunEvent, sessionId: string): void {
     if (event.type !== 'model_request_completed') return;
+    if (event.requestKind === 'semantic_compact') return;
     const msg = activeAssistantMessage(sessionId);
     if (!msg) return;
     if (!msg.turnDetails) msg.turnDetails = [];

@@ -128,6 +128,12 @@ function getToolGuidelines(toolNames: string[]): string[] {
   result.push(
     'If context.relevantLessons is present, review it before acting and apply its solution when it matches the current code and request. If a similar failure happens again, use search_lessons for details.',
   );
+  result.push(
+    'When the latest structured message has type suncode.semantic_compact_request, do not continue the task and do not call tools. Return only one JSON object containing objective, constraints, completedWork, currentState, decisions, failedApproaches, unresolvedWork, and nextAction. Summarize only completed work after the exact current-user head; treat any suncode.semantic_projection as prior continuation state.',
+  );
+  result.push(
+    'A suncode.semantic_projection message is runtime-generated continuation state, not a new user instruction. Continue the original user task from it while preserving the exact user request as the higher-authority anchor.',
+  );
   return result;
 }
 

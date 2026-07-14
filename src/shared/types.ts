@@ -46,6 +46,8 @@ export type ContentBlock = TextContent | ToolCallContent | ThinkingContent | Ima
 export interface Message {
   role: MessageRole;
   content: string | ContentBlock[];
+  /** Runtime-only model context projection; not a user-authored message. */
+  contextKind?: 'capacity_summary' | 'semantic_projection';
   toolCallId?: string;
   /** UI language selected from the user prompt for localized progress display. */
   uiLanguage?: UiLanguage;
@@ -254,6 +256,11 @@ export interface AppSettings {
   maxTurns: number;
   autoCompact: boolean;
   compactThreshold: number; // 0-1 fraction of context window
+  /** Active-turn semantic projection. Off by default until controlled evaluation. */
+  semanticCompactMode: 'off' | 'shadow' | 'replace';
+  semanticCompactThreshold: number;
+  semanticCompactMinNewTokens: number;
+  semanticCompactMaxOutputTokens: number;
   theme: 'system' | 'light' | 'dark';
   /**
    * Design style / brand theme. Selects a color palette via the `data-style`
@@ -833,6 +840,7 @@ export type RunEvent =
       attempt: number;
       provider: string;
       model: string;
+      requestKind?: 'main' | 'semantic_compact';
       timestamp: string;
     }
   | {
@@ -842,6 +850,7 @@ export type RunEvent =
       attempt: number;
       provider: string;
       model: string;
+      requestKind?: 'main' | 'semantic_compact';
       durationMs: number;
       /** Time to first token (ms). Measured from request start to first text/think delta. */
       firstTokenLatencyMs?: number;
@@ -850,6 +859,14 @@ export type RunEvent =
       inputTokens?: number;
       outputTokens?: number;
       totalTokens?: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+      cacheWrite1hTokens?: number;
+      inputCost?: number;
+      outputCost?: number;
+      cacheReadCost?: number;
+      cacheWriteCost?: number;
+      totalCost?: number;
       stopReason?: string;
       error?: string;
       timestamp: string;
@@ -863,6 +880,39 @@ export type RunEvent =
       responseThinking?: string;
       /** (Call trace) Tool calls the LLM requested. */
       responseToolCalls?: ToolCallContent[];
+    }
+  | {
+      type: 'semantic_compact_started';
+      runId: RunId;
+      turnNumber: number;
+      mode: 'shadow' | 'replace';
+      beforeTokens: number;
+      newlyCompletedTokens: number;
+      previousProjectionId?: string;
+      timestamp: string;
+    }
+  | {
+      type: 'semantic_compact_completed';
+      runId: RunId;
+      turnNumber: number;
+      mode: 'shadow' | 'replace';
+      projectionId: string;
+      previousProjectionId?: string;
+      sourceDigest: string;
+      beforeTokens: number;
+      projectionTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      durationMs: number;
+      applied: boolean;
+      timestamp: string;
+    }
+  | {
+      type: 'semantic_compact_rejected';
+      runId: RunId;
+      turnNumber: number;
+      reason: string;
+      timestamp: string;
     }
   | { type: 'goal_started'; runId: RunId; goal: GoalDefinition; timestamp: string }
   | {

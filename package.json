@@ -28,6 +28,7 @@
     "test:ai": "bun run scripts/test-ai.ts",
     "test:deep-swe": "bun run scripts/run-deep-swe.ts",
     "test:terminal-bench": "bun run scripts/run-terminal-bench.ts",
+    "test:terminal-bench:ab": "bun run scripts/run-terminal-bench-ab.ts",
     "update:commands": "bun run scripts/fetch-windows-commands.ts"
   },
   "dependencies": {

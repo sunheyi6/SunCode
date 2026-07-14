@@ -21,6 +21,7 @@ interface RunnerOptions {
   attempts: string;
   concurrency: string;
   dataset: string;
+  datasetPath: string | undefined;
   dryRun: boolean;
   environment: string;
   envFile: string | undefined;
@@ -30,6 +31,8 @@ interface RunnerOptions {
   provider: Provider;
   proxy: string;
   quiet: boolean;
+  requireApiKey: boolean;
+  settingsPatchB64: string | undefined;
   task: string[];
   excludeTask: string[];
   taskLimit: string | undefined;
@@ -51,6 +54,7 @@ const defaultOptions: RunnerOptions = {
   attempts: process.env.HARBOR_ATTEMPTS || '1',
   concurrency: process.env.HARBOR_CONCURRENCY || '1',
   dataset: process.env.HARBOR_DATASET || 'terminal-bench/terminal-bench-2',
+  datasetPath: process.env.HARBOR_DATASET_PATH,
   dryRun: false,
   environment: process.env.HARBOR_ENV || 'docker',
   envFile: process.env.HARBOR_ENV_FILE,
@@ -59,7 +63,9 @@ const defaultOptions: RunnerOptions = {
   model: defaultModel,
   provider: parseProvider(process.env.SUNCODE_PROVIDER || providerFromModel(defaultModel)),
   proxy: defaultProxy,
- quiet: false,
+  quiet: false,
+  requireApiKey: false,
+  settingsPatchB64: process.env.SUNCODE_SETTINGS_PATCH_B64,
   task: process.env.HARBOR_TASK ? [process.env.HARBOR_TASK] : [],
   excludeTask: process.env.HARBOR_EXCLUDE_TASK ? [process.env.HARBOR_EXCLUDE_TASK] : [],
   taskLimit: process.env.HARBOR_TASK_LIMIT,
@@ -109,6 +115,9 @@ function parseArgs(argv: string[]): RunnerOptions {
     } else if (arg === '--dataset') {
       options.dataset = takeValue(argv, index, arg);
       index += 1;
+    } else if (arg === '--path') {
+      options.datasetPath = takeValue(argv, index, arg);
+      index += 1;
     } else if (arg === '--env') {
       options.environment = takeValue(argv, index, arg);
       index += 1;
@@ -136,6 +145,11 @@ function parseArgs(argv: string[]): RunnerOptions {
     } else if (arg === '--proxy') {
       options.proxy = takeValue(argv, index, arg);
       index += 1;
+    } else if (arg === '--settings-patch-b64') {
+      options.settingsPatchB64 = takeValue(argv, index, arg);
+      index += 1;
+    } else if (arg === '--require-api-key') {
+      options.requireApiKey = true;
     } else if (arg === '--no-proxy') {
       options.proxy = '';
     } else if (arg === '--quiet') {
@@ -163,8 +177,7 @@ function parseArgs(argv: string[]): RunnerOptions {
 function buildHarborArgs(options: RunnerOptions, proxyOverlayPath?: string): string[] {
   const args = [
     'run',
-    '--dataset',
-    options.dataset,
+    ...(options.datasetPath ? ['--path', resolve(options.datasetPath)] : ['--dataset', options.dataset]),
     '--agent',
     options.agent,
     '--model',
@@ -193,9 +206,17 @@ function buildHarborArgs(options: RunnerOptions, proxyOverlayPath?: string): str
         `SUNCODE_CUSTOM_ENDPOINTS_B64=${Buffer.from(customEndpoints, 'utf8').toString('base64')}`,
       );
     }
+    if (options.settingsPatchB64) {
+      args.push('--agent-env', `SUNCODE_SETTINGS_PATCH_B64=${options.settingsPatchB64}`);
+    }
     const apiKeyName = providerApiKeys[options.provider as BuiltinProvider];
     if (apiKeyName) {
       const apiKey = loadApiKey(apiKeyName, options.provider);
+      if (options.requireApiKey && !apiKey) {
+        throw new Error(
+          `${apiKeyName} is required for provider ${options.provider}; set it in the environment or SunCode config`,
+        );
+      }
       if (apiKey) {
         args.push('--agent-env', `${apiKeyName}=${apiKey}`);
       }
@@ -383,7 +404,10 @@ function quoteArg(arg: string): string {
 }
 
 function maskSensitiveArg(arg: string): string {
-  return arg.replace(/((?:API_KEY|TOKEN|SECRET|CUSTOM_ENDPOINTS(?:_B64)?)=).+/i, '$1***');
+  return arg.replace(
+    /((?:API_KEY|TOKEN|SECRET|CUSTOM_ENDPOINTS(?:_B64)?|SETTINGS_PATCH_B64)=).+/i,
+    '$1***',
+  );
 }
 
 function printUsage(): void {
@@ -403,6 +427,7 @@ Options:
   --provider <name>       deepseek | anthropic | openai | google (default: from model)
   --model <name>          Harbor model (default: deepseek/deepseek-v4-flash)
   --dataset <name>        Harbor dataset (default: terminal-bench/terminal-bench-2)
+  --path <path>           Local Harbor task or dataset directory (avoids registry access)
   --env <name>            Harbor environment (default: docker)
   --env-file <path>       Optional Harbor env file
   --jobs-dir <path>       Harbor jobs output directory (default: jobs/terminal-bench)
@@ -413,6 +438,9 @@ Options:
   --task-limit <n>        Limit number of dataset tasks
   --proxy <url>           Proxy for Harbor network calls (default: ${defaultProxy})
   --no-proxy              Disable proxy injection
+  --settings-patch-b64 <base64>
+                          Validated AppSettings patch used by A/B runs
+  --require-api-key       Fail before Harbor when a built-in provider credential is missing
   --quiet                 Pass Harbor quiet mode
   --dry-run               Print the harbor command without running it
 `);

@@ -92,7 +92,8 @@ export function compactMessages(
   const summaryText = summarizeTurns(oldTurns);
 
   const summaryMessage: Message = {
-    role: 'system',
+    role: 'user',
+    contextKind: 'capacity_summary',
     content: `[Previous conversation summary]\n${summaryText}`,
   };
 

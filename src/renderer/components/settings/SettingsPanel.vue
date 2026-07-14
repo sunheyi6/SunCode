@@ -366,6 +366,19 @@ function updateAutoCompact(event: Event): void {
   settingsStore.update({ autoCompact: (event.target as HTMLInputElement).checked });
 }
 
+function updateSemanticCompactMode(event: Event): void {
+  const semanticCompactMode = (event.target as HTMLSelectElement)
+    .value as AppSettings['semanticCompactMode'];
+  settingsStore.update({ semanticCompactMode });
+}
+
+function updateSemanticCompactThreshold(event: Event): void {
+  const value = Number.parseInt((event.target as HTMLInputElement).value, 10);
+  if (Number.isFinite(value) && value >= 30 && value <= 90) {
+    settingsStore.update({ semanticCompactThreshold: value / 100 });
+  }
+}
+
 function themeLabel(theme: AppSettings['theme']): string {
   if (theme === 'system') return '系统';
   if (theme === 'light') return '浅色';
@@ -594,6 +607,43 @@ function resetBackgroundColor(): void {
                     @input="updateCompactThreshold"
                   />
                   <span>{{ Math.round(settingsStore.settings.compactThreshold * 100) }}%</span>
+                </span>
+              </label>
+
+              <label class="setting-row">
+                <span class="setting-copy">
+                  <strong>语义注意力压缩</strong>
+                  <small>使用主模型的缓存前缀生成当前任务 continuation projection。实验功能，默认关闭。</small>
+                </span>
+                <select
+                  class="setting-select"
+                  :value="settingsStore.settings.semanticCompactMode"
+                  @change="updateSemanticCompactMode"
+                >
+                  <option value="off">关闭</option>
+                  <option value="shadow">Shadow（仅观测）</option>
+                  <option value="replace">Replace（应用投影）</option>
+                </select>
+              </label>
+
+              <label
+                v-if="settingsStore.settings.semanticCompactMode !== 'off'"
+                class="setting-row"
+              >
+                <span class="setting-copy">
+                  <strong>语义压缩触发阈值</strong>
+                  <small>达到模型上下文窗口比例，且新增已完成内容足够大时触发。</small>
+                </span>
+                <span class="range-control">
+                  <input
+                    type="range"
+                    min="30"
+                    max="90"
+                    step="5"
+                    :value="Math.round(settingsStore.settings.semanticCompactThreshold * 100)"
+                    @input="updateSemanticCompactThreshold"
+                  />
+                  <span>{{ Math.round(settingsStore.settings.semanticCompactThreshold * 100) }}%</span>
                 </span>
               </label>
             </div>

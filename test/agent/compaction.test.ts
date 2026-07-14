@@ -7,6 +7,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@shared/types';
 import { estimateTokens, compactMessages } from '../../src/worker/agent/compaction';
+import {
+  applySemanticProjection,
+  buildSemanticCompactRequest,
+  createSemanticProjection,
+  selectSemanticCompactCandidate,
+} from '../../src/worker/agent/semantic-compact';
 import { CHARS_PER_TOKEN, CONTEXT_SAFETY_MARGIN } from '@shared/constants';
 
 // ── Message factories ──
@@ -110,7 +116,8 @@ describe('compactMessages', () => {
     expect(result.compactedCount).toBeGreaterThan(0);
     // Should have system + summary + 2 recent turns
     expect(result.compactedMessages[0].role).toBe('system');
-    expect(result.compactedMessages[1].role).toBe('system'); // summary message
+    expect(result.compactedMessages[1].role).toBe('user'); // visible provider context
+    expect(result.compactedMessages[1].contextKind).toBe('capacity_summary');
     expect(result.compactedMessages[1].content).toContain('[Previous conversation summary]');
   });
 
@@ -139,7 +146,10 @@ describe('compactMessages', () => {
     expect(result.wasCompacted).toBe(true);
     // Summary should reference old user questions
     const summaryMsg = result.compactedMessages.find(
-      (m) => m.role === 'system' && typeof m.content === 'string' && m.content.includes('[Previous conversation summary]'),
+      (m) =>
+        m.contextKind === 'capacity_summary' &&
+        typeof m.content === 'string' &&
+        m.content.includes('[Previous conversation summary]'),
     );
     expect(summaryMsg).toBeDefined();
   });
@@ -202,5 +212,168 @@ describe('compactMessages', () => {
     // No system messages in original
     const originalSystemMsgs = msgs.filter((m) => m.role === 'system');
     expect(originalSystemMsgs).toHaveLength(0);
+  });
+});
+
+describe('semantic compact projection', () => {
+  const validProjection = JSON.stringify({
+    objective: 'Finish the requested implementation',
+    constraints: ['Keep the current user request exact'],
+    completedWork: ['Inspected the runtime'],
+    currentState: ['Tool results are complete'],
+    decisions: ['Use cache-safe fork'],
+    failedApproaches: [],
+    unresolvedWork: ['Apply the patch'],
+    nextAction: 'Edit the runtime',
+  });
+
+  it('selects only completed messages after the immutable head', () => {
+    const head = user('current task');
+    const messages = [
+      system('system'),
+      user('prior task'),
+      assistant('prior answer'),
+      head,
+      assistant('x'.repeat(400)),
+      user('y'.repeat(400)),
+    ];
+    const result = selectSemanticCompactCandidate({
+      messages,
+      headAnchor: head,
+      contextWindow: 100,
+      threshold: 0.1,
+      minNewTokens: 10,
+    });
+
+    expect(result.candidate?.headIndex).toBe(3);
+    expect(result.candidate?.sourceStartIndex).toBe(4);
+    expect(result.candidate?.sourceMessages).toEqual(messages.slice(4));
+  });
+
+  it('describes the projection field types in the compact request', () => {
+    const head = user('current task');
+    const candidate = selectSemanticCompactCandidate({
+      messages: [head, assistant('raw')],
+      headAnchor: head,
+      contextWindow: 1,
+      threshold: 0.1,
+      minNewTokens: 1,
+    }).candidate!;
+    const request = JSON.parse(buildSemanticCompactRequest(candidate));
+
+    expect(request.requirements).toMatchObject({
+      output: 'json_only_no_markdown',
+      schema: {
+        type: 'object',
+        properties: {
+          objective: { type: 'string' },
+          currentState: { type: 'array', items: { type: 'string' } },
+          nextAction: { type: 'string' },
+        },
+      },
+    });
+  });
+
+  it('creates a bounded projection and replaces the covered middle span', () => {
+    const head = user('current task');
+    const messages = [system('system'), user('prior'), assistant('done'), head, assistant('raw')];
+    const eligibility = selectSemanticCompactCandidate({
+      messages,
+      headAnchor: head,
+      contextWindow: 10,
+      threshold: 0.1,
+      minNewTokens: 1,
+    });
+    const candidate = eligibility.candidate!;
+    const created = createSemanticProjection({
+      outputText: validProjection,
+      headAnchor: head,
+      candidate,
+      maxProjectionTokens: 1000,
+    });
+
+    expect(created.projection).toBeDefined();
+    expect(created.message?.contextKind).toBe('semantic_projection');
+    const projected = applySemanticProjection({
+      messages,
+      headAnchor: head,
+      projectionMessage: created.message!,
+    });
+    expect(projected).toEqual([...messages.slice(0, 4), created.message]);
+    expect(JSON.stringify(projected)).not.toContain('"raw"');
+  });
+
+  it('uses the previous projection as the rolling boundary', () => {
+    const head = user('current task');
+    const previousProjection: Message = {
+      role: 'user',
+      contextKind: 'semantic_projection',
+      content: JSON.stringify({ projectionId: 'projection-1' }),
+    };
+    const newRaw = assistant('z'.repeat(400));
+    const messages = [system('system'), head, previousProjection, newRaw];
+    const result = selectSemanticCompactCandidate({
+      messages,
+      headAnchor: head,
+      contextWindow: 100,
+      threshold: 0.1,
+      minNewTokens: 10,
+    });
+
+    expect(result.candidate?.previousProjectionId).toBe('projection-1');
+    expect(result.candidate?.sourceMessages).toEqual([newRaw]);
+  });
+
+  it('fails closed on malformed projection output', () => {
+    const head = user('current task');
+    const messages = [head, assistant('raw')];
+    const candidate = selectSemanticCompactCandidate({
+      messages,
+      headAnchor: head,
+      contextWindow: 1,
+      threshold: 0.1,
+      minNewTokens: 1,
+    }).candidate!;
+    const created = createSemanticProjection({
+      outputText: '{"objective":"missing fields"}',
+      headAnchor: head,
+      candidate,
+      maxProjectionTokens: 1000,
+    });
+
+    expect(created.projection).toBeUndefined();
+    expect(created.reason).toBe('invalid_projection_output');
+  });
+
+  it('normalizes scalar list fields from compatible model output', () => {
+    const head = user('current task');
+    const candidate = selectSemanticCompactCandidate({
+      messages: [head, assistant('raw')],
+      headAnchor: head,
+      contextWindow: 1,
+      threshold: 0.1,
+      minNewTokens: 1,
+    }).candidate!;
+    const created = createSemanticProjection({
+      outputText: JSON.stringify({
+        objective: 'Finish the task',
+        constraints: 'Keep the requested scope',
+        completedWork: 'Inspected the implementation',
+        currentState: 'The root cause is known',
+        decisions: 'Patch the validation boundary',
+        failedApproaches: 'The first test command was too broad',
+        unresolvedWork: 'Run the verifier',
+        nextAction: 'Apply the patch',
+      }),
+      headAnchor: head,
+      candidate,
+      maxProjectionTokens: 1000,
+    });
+
+    expect(created.projection?.state).toMatchObject({
+      constraints: ['Keep the requested scope'],
+      currentState: ['The root cause is known'],
+      unresolvedWork: ['Run the verifier'],
+    });
   });
 });

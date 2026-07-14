@@ -21,6 +21,8 @@ export interface StreamHandlerInput {
   requestAttempt: number;
   requestStartTime: number;
   requestMsgSummaries: RequestMessageTrace[];
+  requestKind?: 'main' | 'semantic_compact';
+  emitToStream?: boolean;
   /** Optional: called immediately when a tool_use block is complete during streaming. */
   onToolCallComplete?: (toolCall: ToolCallContent) => void;
 }
@@ -30,7 +32,21 @@ export interface StreamHandlerOutput {
   thinkingText: string;
   toolCalls: ToolCallContent[];
   assistantMsgRaw: Record<string, unknown> | null;
-  tokenUsage: { input: number; output: number; total: number };
+  tokenUsage: {
+    input: number;
+    output: number;
+    total: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cacheWrite1h: number;
+    cost: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      total: number;
+    };
+  };
 }
 
 export async function handleStream(input: StreamHandlerInput): Promise<StreamHandlerOutput> {
@@ -46,6 +62,8 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     requestAttempt,
     requestStartTime,
     requestMsgSummaries,
+    requestKind = 'main',
+    emitToStream = true,
     onToolCallComplete,
   } = input;
 
@@ -53,10 +71,18 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
   const toolCalls: ToolCallContent[] = [];
   let thinkingText = '';
   let assistantMsgRaw: Record<string, unknown> | null = null;
-  const tokenUsage = { input: 0, output: 0, total: 0 };
+  const tokenUsage = {
+    input: 0,
+    output: 0,
+    total: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cacheWrite1h: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
   let firstTokenTime: number | undefined;
 
-  onStream({ type: 'message_start' });
+  if (emitToStream) onStream({ type: 'message_start' });
 
   for await (const event of stream) {
     switch (event.type) {
@@ -68,42 +94,46 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
       case 'text_delta':
         firstTokenTime = firstTokenTime ?? Date.now();
         assistantText += event.delta;
-        onRunEvent({
-          type: 'content.part',
-          runId,
-          turnNumber: turnCount,
-          part: { kind: 'text', text: event.delta },
-          timestamp: '',
-        });
-        onStream({
-          type: 'message_update',
-          data: {
-            text: sanitizeStructuredMessageLeakStreaming(assistantText),
-            thinking: thinkingText,
-            toolCalls: [...toolCalls],
-          },
-        });
+        if (emitToStream) {
+          onRunEvent({
+            type: 'content.part',
+            runId,
+            turnNumber: turnCount,
+            part: { kind: 'text', text: event.delta },
+            timestamp: '',
+          });
+          onStream({
+            type: 'message_update',
+            data: {
+              text: sanitizeStructuredMessageLeakStreaming(assistantText),
+              thinking: thinkingText,
+              toolCalls: [...toolCalls],
+            },
+          });
+        }
         break;
       case 'text_end':
         break;
       case 'thinking_delta':
         firstTokenTime = firstTokenTime ?? Date.now();
         thinkingText += event.delta;
-        onRunEvent({
-          type: 'content.part',
-          runId,
-          turnNumber: turnCount,
-          part: { kind: 'thinking', thinking: event.delta },
-          timestamp: '',
-        });
-        onStream({
-          type: 'message_update',
-          data: {
-            text: sanitizeStructuredMessageLeakStreaming(assistantText),
-            thinking: thinkingText,
-            toolCalls: [...toolCalls],
-          },
-        });
+        if (emitToStream) {
+          onRunEvent({
+            type: 'content.part',
+            runId,
+            turnNumber: turnCount,
+            part: { kind: 'thinking', thinking: event.delta },
+            timestamp: '',
+          });
+          onStream({
+            type: 'message_update',
+            data: {
+              text: sanitizeStructuredMessageLeakStreaming(assistantText),
+              thinking: thinkingText,
+              toolCalls: [...toolCalls],
+            },
+          });
+        }
         break;
       case 'toolcall_start':
         break;
@@ -121,14 +151,16 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
         // Notify streaming executor immediately — don't wait for stream to end
         onToolCallComplete?.(tc);
 
-        onStream({
-          type: 'message_update',
-          data: {
-            text: sanitizeStructuredMessageLeakStreaming(assistantText),
-            thinking: thinkingText,
-            toolCalls: [...toolCalls],
-          },
-        });
+        if (emitToStream) {
+          onStream({
+            type: 'message_update',
+            data: {
+              text: sanitizeStructuredMessageLeakStreaming(assistantText),
+              thinking: thinkingText,
+              toolCalls: [...toolCalls],
+            },
+          });
+        }
         break;
       }
       case 'done':
@@ -137,6 +169,14 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
           tokenUsage.input += event.message.usage.input || 0;
           tokenUsage.output += event.message.usage.output || 0;
           tokenUsage.total += event.message.usage.totalTokens || 0;
+          tokenUsage.cacheRead += event.message.usage.cacheRead || 0;
+          tokenUsage.cacheWrite += event.message.usage.cacheWrite || 0;
+          tokenUsage.cacheWrite1h += event.message.usage.cacheWrite1h || 0;
+          tokenUsage.cost.input += event.message.usage.cost?.input || 0;
+          tokenUsage.cost.output += event.message.usage.cost?.output || 0;
+          tokenUsage.cost.cacheRead += event.message.usage.cost?.cacheRead || 0;
+          tokenUsage.cost.cacheWrite += event.message.usage.cost?.cacheWrite || 0;
+          tokenUsage.cost.total += event.message.usage.cost?.total || 0;
         }
         break;
       case 'error': {
@@ -178,7 +218,21 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
   const firstTokenLatencyMs =
     firstTokenTime === undefined ? undefined : firstTokenTime - requestStartTime;
   const usage = assistantMsgRaw?.usage as
-    | { input?: number; output?: number; totalTokens?: number }
+    | {
+        input?: number;
+        output?: number;
+        totalTokens?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        cacheWrite1h?: number;
+        cost?: {
+          input?: number;
+          output?: number;
+          cacheRead?: number;
+          cacheWrite?: number;
+          total?: number;
+        };
+      }
     | undefined;
   onRunEvent({
     type: 'model_request_completed',
@@ -187,6 +241,7 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     attempt: requestAttempt,
     provider: settings.activeProvider,
     model: settings.activeModel,
+    requestKind,
     durationMs,
     firstTokenLatencyMs,
     streamDurationMs:
@@ -194,6 +249,14 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     inputTokens: usage?.input,
     outputTokens: usage?.output,
     totalTokens: usage?.totalTokens,
+    cacheReadTokens: usage?.cacheRead,
+    cacheWriteTokens: usage?.cacheWrite,
+    cacheWrite1hTokens: usage?.cacheWrite1h,
+    inputCost: usage?.cost?.input,
+    outputCost: usage?.cost?.output,
+    cacheReadCost: usage?.cost?.cacheRead,
+    cacheWriteCost: usage?.cost?.cacheWrite,
+    totalCost: usage?.cost?.total,
     stopReason: assistantMsgRaw?.stopReason as string | undefined,
     error: undefined,
     timestamp: '',

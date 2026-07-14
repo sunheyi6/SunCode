@@ -25,7 +25,13 @@ import { DiagLogger } from '../utils/diag-logger';
 // ===== Helpers =====
 import { getAgentDataSubdir } from './agent-data-dir';
 import { quickMatchLesson } from './lessons';
-import { buildStructuredTextMessage } from './model-structured-content';
+import { buildStructuredTaskPrompt, buildStructuredTextMessage } from './model-structured-content';
+import {
+  applySemanticProjection,
+  buildSemanticCompactRequest,
+  createSemanticProjection,
+  selectSemanticCompactCandidate,
+} from './semantic-compact';
 import { handleStream } from './stream-handler';
 import { StreamingToolExecutor } from './streaming-executor';
 import { buildSystemPrompt } from './system-prompt';
@@ -194,6 +200,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     })());
 
   const contextMessages: Message[] = [...initialMessages];
+  const headAnchor = [...contextMessages].reverse().find((message) => message.role === 'user');
+  let shadowCoveredThrough: Message | undefined;
   let turnCount = initialTurnCount;
   const tokenUsage = { input: 0, output: 0, total: 0 };
 
@@ -324,6 +332,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         attempt: requestAttempt,
         provider: settings.activeProvider,
         model: settings.activeModel,
+        requestKind: 'main',
         timestamp: '',
       });
 
@@ -683,8 +692,179 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         timestamp: '',
       });
 
+      let semanticProjectionApplied = false;
+      if (settings.semanticCompactMode !== 'off' && headAnchor) {
+        const modelContextWindow = extractContextWindow(model);
+        const eligibility = selectSemanticCompactCandidate({
+          messages: contextMessages,
+          headAnchor,
+          contextWindow: modelContextWindow,
+          threshold: settings.semanticCompactThreshold,
+          minNewTokens: settings.semanticCompactMinNewTokens,
+          shadowCoveredThrough,
+        });
+        const candidate = eligibility.candidate;
+
+        if (candidate) {
+          const compactStartedAt = Date.now();
+          onRunEvent({
+            type: 'semantic_compact_started',
+            runId,
+            turnNumber: turnCount,
+            mode: settings.semanticCompactMode,
+            beforeTokens: candidate.beforeTokens,
+            newlyCompletedTokens: candidate.newlyCompletedTokens,
+            previousProjectionId: candidate.previousProjectionId,
+            timestamp: '',
+          });
+
+          try {
+            const compactRequest = buildSemanticCompactRequest(candidate);
+            const compactProviderMessages = contextMessages
+              .filter((message) => message.role !== 'system')
+              .map(convertMessage);
+            compactProviderMessages.push({ role: 'user', content: compactRequest });
+            const compactContext = {
+              systemPrompt,
+              messages: compactProviderMessages,
+              tools: toolDefs.map(convertToolDef),
+            };
+            const compactRequestMessages = contextMessages
+              .filter((message) => message.role !== 'system')
+              .slice(-2)
+              .map((message) => {
+                const content = getModelMessageTraceContent(message);
+                return {
+                  role: message.role,
+                  length: content.length,
+                  preview: content.slice(0, 200),
+                  content: truncateTraceContent(content),
+                };
+              });
+            compactRequestMessages.push({
+              role: 'user',
+              length: compactRequest.length,
+              preview: compactRequest.slice(0, 200),
+              content: truncateTraceContent(compactRequest),
+            });
+
+            onRunEvent({
+              type: 'model_request_started',
+              runId,
+              turnNumber: turnCount,
+              attempt: 1,
+              provider: settings.activeProvider,
+              model: settings.activeModel,
+              requestKind: 'semantic_compact',
+              timestamp: '',
+            });
+            diag.enter('LLM', 'semantic_compact', {
+              turn: turnCount,
+              msgs: compactContext.messages.length,
+              tools: compactContext.tools.length,
+            });
+
+            const compactStream = streamSimpleFn(model, compactContext, {
+              reasoning: settings.thinkingLevel,
+              maxTokens: settings.semanticCompactMaxOutputTokens,
+              signal: abortSignal,
+              cacheRetention: 'long',
+              sessionId,
+              apiKey: getModelApiKey(model),
+            });
+            const compactResult = await handleStream({
+              stream: compactStream,
+              onStream,
+              onRunEvent: (event) => onRunEvent(event),
+              diag,
+              settings,
+              systemPrompt,
+              runId,
+              turnCount,
+              requestAttempt: 1,
+              requestStartTime: compactStartedAt,
+              requestMsgSummaries: compactRequestMessages,
+              requestKind: 'semantic_compact',
+              emitToStream: false,
+            });
+            tokenUsage.input += compactResult.tokenUsage.input;
+            tokenUsage.output += compactResult.tokenUsage.output;
+            tokenUsage.total += compactResult.tokenUsage.total;
+
+            if (compactResult.toolCalls.length > 0) {
+              onRunEvent({
+                type: 'semantic_compact_rejected',
+                runId,
+                turnNumber: turnCount,
+                reason: 'semantic_compact_tool_call',
+                timestamp: '',
+              });
+            } else {
+              const created = createSemanticProjection({
+                outputText: compactResult.assistantText,
+                headAnchor,
+                candidate,
+                maxProjectionTokens: settings.semanticCompactMaxOutputTokens,
+              });
+              if (!created.projection || !created.message) {
+                onRunEvent({
+                  type: 'semantic_compact_rejected',
+                  runId,
+                  turnNumber: turnCount,
+                  reason: created.reason ?? 'invalid_projection_output',
+                  timestamp: '',
+                });
+              } else {
+                if (settings.semanticCompactMode === 'replace') {
+                  const projectedMessages = applySemanticProjection({
+                    messages: contextMessages,
+                    headAnchor,
+                    projectionMessage: created.message,
+                  });
+                  if (projectedMessages) {
+                    contextMessages.length = 0;
+                    contextMessages.push(...projectedMessages);
+                    semanticProjectionApplied = true;
+                    shadowCoveredThrough = undefined;
+                  }
+                } else {
+                  shadowCoveredThrough = contextMessages.at(-1);
+                }
+
+                onRunEvent({
+                  type: 'semantic_compact_completed',
+                  runId,
+                  turnNumber: turnCount,
+                  mode: settings.semanticCompactMode,
+                  projectionId: created.projection.id,
+                  previousProjectionId: created.projection.previousProjectionId,
+                  sourceDigest: created.projection.sourceDigest,
+                  beforeTokens: candidate.beforeTokens,
+                  projectionTokens: created.projection.estimatedTokens,
+                  cacheReadTokens: compactResult.tokenUsage.cacheRead,
+                  cacheWriteTokens: compactResult.tokenUsage.cacheWrite,
+                  durationMs: Date.now() - compactStartedAt,
+                  applied: semanticProjectionApplied,
+                  timestamp: '',
+                });
+              }
+            }
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            console.warn(`[SemanticCompact] Rejected: ${reason}`);
+            onRunEvent({
+              type: 'semantic_compact_rejected',
+              runId,
+              turnNumber: turnCount,
+              reason: `request_failed: ${reason}`,
+              timestamp: '',
+            });
+          }
+        }
+      }
+
       // Allow hook to trim context or adjust state before the next turn
-      if (prepareNextTurn) {
+      if (prepareNextTurn && !semanticProjectionApplied) {
         const beforeMsgs = contextMessages.length;
         const modelContextWindow = extractContextWindow(model);
         const result2 = prepareNextTurn({
@@ -769,6 +949,21 @@ function convertMessage(msg: Message): Record<string, unknown> {
       role: 'toolResult' as const,
       content,
       toolCallId: msg.toolCallId || '',
+    };
+  }
+
+  if (msg.contextKind) {
+    if (msg.contextKind === 'semantic_projection') {
+      return {
+        role: 'user' as const,
+        content: getMessageTextContent(msg),
+      };
+    }
+    return {
+      role: 'user' as const,
+      content: buildStructuredTaskPrompt(msg.contextKind, {
+        text: getMessageTextContent(msg),
+      }),
     };
   }
 

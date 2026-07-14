@@ -189,6 +189,7 @@ class SunCodeAgent(BaseInstalledAgent):
             "SUNCODE_CELL_TIMEOUT_SEC",
             "SUNCODE_CUSTOM_ENDPOINTS",
             "SUNCODE_CUSTOM_ENDPOINTS_B64",
+            "SUNCODE_SETTINGS_PATCH_B64",
         ):
             value = self._get_env(key)
             if value:
@@ -232,6 +233,8 @@ class SunCodeAgent(BaseInstalledAgent):
             "suncode_prompt_hash": output.get("promptHash"),
             "suncode_cell_output": str(self.logs_dir / self._CELL_OUTPUT_FILENAME),
             "suncode_runtime_events": output.get("runtimeEventsPath"),
+            "suncode_settings_patch": output.get("settingsPatch"),
+            "suncode_feature_diagnostics": output.get("featureDiagnostics"),
         }
         self._write_trajectory(output)
 

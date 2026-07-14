@@ -80,6 +80,95 @@ describe('runAgentLoop — mid-run guidance injection', () => {
     process.env.SUNCODE_APP_DATA = tempDataDir;
   });
 
+  it('forks semantic compact from the exact main prefix and consumes the accepted projection', async () => {
+    const captured: Array<{
+      messages: unknown[];
+      systemPrompt?: unknown;
+      tools?: unknown;
+      options?: Record<string, unknown>;
+    }> = [];
+    const projection = JSON.stringify({
+      objective: 'Complete the current task',
+      constraints: ['Keep the head exact'],
+      completedWork: ['Ran a tool'],
+      currentState: ['Tool result is complete'],
+      decisions: ['Continue from projection'],
+      failedApproaches: [],
+      unresolvedWork: ['Finish'],
+      nextAction: 'Return the result',
+    });
+    let call = 0;
+    const streamImpl = (
+      _model: unknown,
+      context: Record<string, unknown>,
+      options?: Record<string, unknown>,
+    ): AsyncIterable<AssistantMessageEvent> => {
+      const currentCall = call++;
+      captured.push({
+        messages: (context.messages as unknown[]) ?? [],
+        systemPrompt: context.systemPrompt,
+        tools: context.tools,
+        options,
+      });
+      return (async function* () {
+        if (currentCall === 0) {
+          yield {
+            type: 'toolcall_end',
+            contentIndex: 0,
+            toolCall: { type: 'toolCall', id: 'call-1', name: 'missing_tool', arguments: {} },
+            partial: {},
+          } as unknown as AssistantMessageEvent;
+          yield {
+            type: 'done',
+            reason: 'toolUse',
+            message: { stopReason: 'toolUse', usage: { input: 10, output: 2, totalTokens: 12 } },
+          } as unknown as AssistantMessageEvent;
+          return;
+        }
+        const text = currentCall === 1 ? projection : 'final answer';
+        yield {
+          type: 'text_delta',
+          contentIndex: 0,
+          delta: text,
+          partial: {},
+        } as unknown as AssistantMessageEvent;
+        yield {
+          type: 'done',
+          reason: 'stop',
+          message: { stopReason: 'stop', usage: { input: 10, output: 2, totalTokens: 12 } },
+        } as unknown as AssistantMessageEvent;
+      })();
+    };
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      semanticCompactMode: 'replace' as const,
+      semanticCompactThreshold: 0.000001,
+      semanticCompactMinNewTokens: 1,
+    } as AppSettings;
+
+    await runAgentLoop(
+      buildInput({
+        messages: [userMsg('original task')],
+        streamImpl,
+        settings,
+      }),
+    );
+
+    expect(captured).toHaveLength(3);
+    const mainA = captured[0];
+    const compactB = captured[1];
+    const mainC = captured[2];
+    expect(compactB.systemPrompt).toBe(mainA.systemPrompt);
+    expect(compactB.tools).toEqual(mainA.tools);
+    expect(compactB.options?.sessionId).toBe(mainA.options?.sessionId);
+    expect(compactB.messages.slice(0, mainA.messages.length)).toEqual(mainA.messages);
+    expect(JSON.stringify(compactB.messages.at(-1))).toContain(
+      'suncode.semantic_compact_request',
+    );
+    expect(JSON.stringify(mainC.messages)).toContain('suncode.semantic_projection');
+    expect(JSON.stringify(mainC.messages)).not.toContain('missing_tool');
+  });
+
   afterEach(() => {
     delete process.env.SUNCODE_APP_DATA;
     rmSync(tempDataDir, { recursive: true, force: true });

@@ -445,7 +445,10 @@ describe('applyContextBudget', () => {
     expect(diagnostic.changed).toBe(true);
     // Should have a summary message after compaction
     const summaryMsg = messages.find(
-      (m) => m.role === 'system' && typeof m.content === 'string' && (m.content as string).includes('[Previous conversation summary]'),
+      (m) =>
+        m.contextKind === 'capacity_summary' &&
+        typeof m.content === 'string' &&
+        (m.content as string).includes('[Previous conversation summary]'),
     );
     expect(summaryMsg).toBeDefined();
   });
