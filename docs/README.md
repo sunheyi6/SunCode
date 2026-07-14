@@ -7,7 +7,7 @@
 | [项目信息](project-info.md) | 运行时路径、数据目录、日志路径、构建信息、架构约定（Agent 回答"日志在哪""路径是什么"时优先读这个） |
 | [系统提示词设计](system-prompt-design.md) | System Prompt 构建：角色定义、Tool Discipline 反循环规则、一行式工具摘要、XML 结构化上下文、Token 优化 |
 | [工具调用设计](tool-calling-design.md) | 工具架构：回合事件 (turn_start/end)、参数验证、前端工具卡片 (Command/File/Inspect)、数据流 |
-| [上下文压缩设计](context-compaction-design.md) | 通过 `prepareNextTurn` 钩子自动压缩：触发策略、消息保留、与 Agent Loop 集成 |
+| [上下文压缩设计](context-compaction-design.md) | 容量保护 pipeline + 缓存友好的主动语义 projection：A/B/C 请求结构、失败保护、配置与 Terminal-Bench 验证 |
 | [任务规划系统](task-planning-system.md) | 强制执行规划：三道防线、Plan Gate、Plan Parser、右侧面板统一、断路器机制 |
 | [任务结束判断机制](task-completion-mechanism.md) | `needs_follow_up` 决策、Goal 自主循环、Stop Hooks、双字段输出模型 |
 | [运行事件日志](run-event-logging-design.md) | JSONL 持久化：run_started/run_completed/model_request/turn_detail、CallTracePanel 回溯、Token 用量统计 |
@@ -49,6 +49,7 @@
 | Memory 记忆系统 | 每次 session 结束自动生成记忆摘要存入 `.suncode/memories/`,下次对话根据语义检索注入上下文 |
 | Lessons 教训系统 | 失败时自动提取教训存入 `.suncode/lessons/`,后续相关任务检索注入,避免重复踩坑 |
 | `prepareNextTurn` 钩子 | 回合间上下文压缩 + 未来动态换模型的扩展点 |
+| 主动语义压缩 | 复用主请求 prefix 追加 projection 请求，支持 shadow/replace、rolling lineage、fail-closed 与 Harbor A/B 诊断 |
 | `turn_start` / `turn_end` 事件 | 回合边界感知,前端展示进度(第N轮)|
 | 工具参数运行时验证 | 必填参数检查 + 类型强制转换 |
 | 前端工具卡片优化 | FileInspectCard (read/glob/grep)、思考区自动折叠、输入历史导航 |
@@ -78,7 +79,8 @@
 | Skills 加载器 | `src/worker/agent/skills.ts` |
 | Memory 记忆系统 | `src/worker/agent/memory.ts` |
 | Lessons 教训系统 | `src/worker/agent/lessons.ts` |
-| 上下文压缩 | `src/worker/agent/context-budget.ts` |
+| 容量保护压缩 | `src/worker/agent/context-budget.ts` |
+| 主动语义压缩 | `src/worker/agent/semantic-compact.ts` / `src/worker/agent/agent-loop.ts` |
 | 子智能体调度器 | `src/worker/agent/subagent.ts` |
 | 工具注册中心 | `src/worker/tools/registry.ts` |
 | 工具实现 | `src/worker/tools/*.ts` |

@@ -1,369 +1,297 @@
-# 上下文压缩设计文档
+# 上下文压缩设计
 
-## 1. 问题背景
+> 状态：已实现；主动语义压缩仍为实验功能，默认关闭。本文以 2026-07-15 的运行时代码为准。
 
-Coding agent 的每次请求都需要将**完整对话历史**发送给 LLM。随着对话增长：
+## 1. 目标与边界
 
-- 对话历史很快超过模型的 context window（如 128K tokens）
-- 即使不超限，长上下文也会导致：响应变慢、费用增加、模型注意力分散
+长任务的上下文问题不只是在接近 context window 时避免请求失败，还包括：
 
-**上下文压缩（Context Compaction）** 是解决这个问题的核心机制。
+- 重复发送已经完成的工具轨迹，增加输入 token 与延迟；
+- 中间历史过长，稀释模型对当前目标和下一步动作的注意力；
+- 压缩请求本身可能破坏 provider prefix cache，抵消压缩收益；
+- 摘要错误可能让任务基于过时或虚构状态继续执行。
 
----
+SunCode 因此保留两条互补路径：
 
-## 2. 设计目标
+| 路径 | 目的 | 是否调用 LLM | 默认状态 |
+|---|---|---:|---|
+| 容量保护压缩（capacity compaction） | 防止历史无限增长，裁剪旧工具结果和旧 turn | 否 | `autoCompact=true` |
+| 主动语义压缩（semantic compaction） | 将当前长任务的已完成轨迹替换为 continuation projection | 是 | `semanticCompactMode=off` |
 
-- **透明**：对用户无感知，自动触发
-- **保真**：压缩后不丢失关键信息（已做的修改、重要的发现）
-- **可控**：用户可以手动触发，可配置触发阈值
-- **渐进**：不是一次性删掉历史，而是逐步替换为摘要
+两条路径不互相替代。主动语义压缩成功应用后，本轮跳过容量保护压缩；如果主动压缩未触发、失败或只运行在 shadow 模式，容量保护路径仍可继续执行。
 
----
+## 2. 共同原则
 
-## 3. 压缩策略
+1. **精确保留当前用户请求**：运行开始时最后一条 user message 是 `headAnchor`，projection 不能替代或改写它。
+2. **只压缩已完成历史**：主动压缩发生在一次带工具调用的 turn 完成之后，不压缩尚未闭合的协议片段。
+3. **System Prompt 和工具定义保持稳定**：它们既决定模型行为，也是 provider prefix cache 的组成部分。
+4. **失败关闭（fail closed）**：输出不合法、超预算、发生工具调用或 provider 请求失败时，不替换原始上下文。
+5. **可审计**：projection 带 coverage、digest 和 lineage，运行事件记录触发、成功、拒绝、token 与耗时。
+6. **模型元数据必须准确**：阈值由 `contextWindow × ratio` 计算；自定义模型未声明 context window 时会回退到 128K。
 
-### 3.1 触发条件
+## 3. 容量保护压缩
 
-```
-estimatedTokens(allMessages) > model.contextWindow × compactThreshold
-```
+### 3.1 触发位置
 
-默认 `compactThreshold = 0.7`，即使用到 70% 上下文窗口时触发。
+`autoCompact=true` 时，Agent Loop 在中间 turn 完成后调用 `prepareNextTurn`。历史预算为：
 
-### 3.2 保留策略
-
-```
-┌────────────────────────────────────────────┐
-│  System Prompt (永远保留)                   │  ← 角色 + 工具 + 环境
-├────────────────────────────────────────────┤
-│  [压缩摘要]                                 │  ← 早期轮次的总结
-│  "User asked about X. Assistant did Y..."  │
-├────────────────────────────────────────────┤
-│  Turn N-2 (完整保留)                        │  ← 最近 3 轮
-│  Turn N-1 (完整保留)                        │
-│  Turn N   (完整保留，最当前)                 │
-└────────────────────────────────────────────┘
+```text
+maxHistoryTokens = model.contextWindow × compactThreshold
 ```
 
-**为什么保留最近 3 轮？**
+默认 `compactThreshold=0.7`。
 
-- 最近轮次有"上下文局部性"——当前操作大概率引用最近的对话
-- 3 轮是一个经验值：够用但不浪费空间
-- 可配置：`keepRecentTurns` 参数允许调整
+### 3.2 Pipeline
 
-### 3.3 压缩粒度：以 Turn 为单位
+`applyContextBudget()` 支持五层由低到高的处理：
 
-一个 "Turn" = 一个用户消息 + 该消息触发的所有 assistant/tool 消息：
-
-```
-Turn:
-  User: "fix the login bug"
-  Assistant: "Let me read auth.ts"  → tool_call: read
-  Tool Result: (file contents)
-  Assistant: "I found the issue..." → tool_call: edit
-  Tool Result: (edit success)
-  Assistant: "Fixed! The issue was..."
-```
-
-压缩时整个 Turn 被替换为一条摘要消息。
-
----
-
-## 4. 摘要生成
-
-### 4.1 当前方案：规则式摘要
-
-V1 使用简单的启发式规则生成摘要，不依赖 LLM：
-
-```typescript
-function summarizeTurns(turns: Message[][]): string {
-  for (const turn of turns) {
-    const userMsg = turn.find(m => m.role === 'user');
-    
-    // 用户消息：截取前 100 字符
-    "User asked: 'fix the login bug in auth...'"
-    
-    // Assistant 消息：计数工具调用 + 截取响应
-    "  Assistant: Used 2 tool(s). Found the issue in..."
-  }
-}
-```
-
-**优点**：
-- 速度快，不消耗额外 token
-- 确定性，不会引入 LLM 幻觉
-
-**缺点**：
-- 摘要质量一般，丢失细粒度信息
-- 无法识别关键决策点
-
-### 4.2 V2 方案（计划）：LLM 驱动摘要
-
-使用 cheap model（如 gpt-4.1-nano 或 claude-haiku）对历史轮次做专门摘要：
-
-```
-SYSTEM: Summarize this conversation. Keep:
-  1. What the user asked
-  2. What changes were made (file paths + what changed)
-  3. Any important discoveries or decisions
-  4. What still needs to be done
-
-USER: [旧轮次的完整对话]
-```
-
-**优点**：
-- 摘要质量高，保留关键决策路径
-- 可结构化输出（JSON Schema）
-
-**缺点**：
-- 需要额外 API 调用
-- 有延迟和费用
-
----
-
-## 5. Token 估算
-
-### 5.1 字符启发式
-
-```typescript
-const CHARS_PER_TOKEN = 4;
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
-```
-
-**为什么用字符数 / 4？**
-
-- 英文中 1 token ≈ 4 字符（经验值）
-- 不需要加载 tiktoken（减少 3MB 依赖）
-- 对于压缩触发判断，±20% 的误差可以接受
-
-### 5.2 精确计算（V2 方案）
-
-使用 `@anthropic-ai/tokenizer` 或 `tiktoken` 做精确计数：
-
-| 语言 | chars/token | 用 /4 的误差 |
-|------|------------|------------|
-| 英文 | 4.0 | 基准 |
-| 中文 | ~1.5 | 低估 2.7x |
-| 代码 | ~3.5 | 高估 14% |
-| 混合 | ~3.0 | 高估 33% |
-
-中英文混合场景下字符启发式误差较大，V2 应引入精确 tokenizer。
-
----
-
-## 6. 实现流程 (v2026-06 已实现)
-
-压缩通过 `prepareNextTurn` 钩子集成到 Agent Loop 中：
-
-```
-Agent Loop 每轮结束后 (turn_end 发送后):
-
-    │
-    ▼
-prepareNextTurn(ctx) 被调用 (如果 autoCompact 开启)
-    │
-    ▼
-ctx.contextMessages.length > compactThreshold × 100 ?
-    │
-    ├── 否 → return undefined → 继续
-    │
-    └── 是 → 执行压缩:
-        1. 找到 System Message（保留）
-        2. 从非 System 消息中保留最近 50% (compactThreshold/2)
-        3. 拼接: [system] + [recent half]
-        4. 返回 { contextMessages: compacted }
-                │
-                ▼
-        agent-loop.ts 用 compacted 替换 contextMessages
-        日志: "[Agent] Context compacted: 42 → 21 messages"
-```
-
-**当前实现** (`src/worker/agent/agent.ts`):
-```typescript
-prepareNextTurn: this.settings.autoCompact
-  ? (ctx) => {
-      if (ctx.contextMessages.length <= compactThresholdMsgs) return;
-      const systemMsg = ctx.contextMessages.find(m => m.role === 'system');
-      const rest = ctx.contextMessages.filter(m => m.role !== 'system');
-      const trimmed = rest.slice(-Math.floor(compactThresholdMsgs / 2));
-      return { contextMessages: systemMsg ? [systemMsg, ...trimmed] : trimmed };
-    }
-  : undefined
-```
-
-**设计选择**：
-- V1 使用消息数阈值而非精确 token 计数——简单、快速、对大多数场景足够
-- `compactThreshold = 0.8` (默认)，即 ~80 条消息时触发，保留最近 ~40 条
-- 不做 LLM 摘要——保留原始消息，只是截断旧的
-- 通过 `prepareNextTurn` 钩子实现，符合 pi 项目的架构约定
-
----
-
-## 7. 压缩效果
-
-### 典型 session 压缩前后对比
-
-```
-压缩前 (15 turns, ~85K tokens):
-┌──────────────────────────────────┐
-│ System Prompt          ~3K       │
-│ Turn 1-12 (完整)       ~70K      │
-│ Turn 13 (完整)         ~5K       │
-│ Turn 14 (完整)         ~4K       │
-│ Turn 15 (完整)         ~3K       │
-│ Total:                 ~85K      │
-└──────────────────────────────────┘
-
-压缩后 (keepRecentTurns=3, ~25K tokens):
-┌──────────────────────────────────┐
-│ System Prompt          ~3K       │
-│ [摘要: Turns 1-12]     ~1K       │ ← 70K → 1K (98.6% 压缩)
-│ Turn 13 (完整)         ~5K       │
-│ Turn 14 (完整)         ~4K       │
-│ Turn 15 (完整)         ~3K       │
-│ Total:                 ~16K      │
-└──────────────────────────────────┘
-```
-
-节省了 ~69K tokens，对于 Claude Opus ($15/M input) 约节省 $1。
-
----
-
-## 8. 设计经验
-
-### ✅ 有效实践
-
-1. **保守触发**：70% 阈值留有 30% 余量给当前轮次的工具调用开销
-2. **Turn 级别的摘要**：保持对话的语义边界，不会在中间截断
-3. **System 消息永远不压缩**：角色定义和工具 Schema 丢失会导致模型行为异常
-4. **压缩标记**：摘要消息添加 `[Previous conversation summary]` 前缀，让模型知道这是压缩过的
-
-### ❌ 常见陷阱
-
-1. **过早压缩**：阈值设太低（如 50%），模型可能丢失重要上下文
-2. **丢失文件状态**：压缩掉关键的文件修改信息，模型后续操作基于过时假设
-3. **摘要质量差**：只保留用户问题不保留 assistant 做了什么，模型不知道进度
-4. **忘记压缩 token 也会累积**：摘要本身也占 token，无限循环压缩不会无限节省
-
-### 📊 压缩触发频率
-
-| 模型 | Context Window | 典型触发 Turn | 说明 |
-|------|---------------|-------------|------|
-| Claude Haiku | 200K | ~30 turns | 很少需要压缩 |
-| GPT-5.1 Codex | 128K | ~20 turns | 中等频率 |
-| Gemini Flash | 1M | ~150 turns | 几乎不需要 |
-
----
-
-## 9. V2：Tool Result Prune（工具结果裁剪）— 2026-06 实现
-
-### 9.1 动机
-
-Maka Agent 的实践表明：对 tool result 做激进裁剪（超长结果 → 结构化占位符），推理质量几乎不变。原因有三：
-
-1. **信息已被蒸馏进 Assistant Message**——每次 tool result 之后，模型都会输出 Assistant Message 表达理解和下一步决策，这是一次语义蒸馏
-2. **Attention 在长上下文里本来就稀疏**——"Lost in the Middle" 证明模型更关注开头和最近几轮，中间段的 tool result 信息密度低
-3. **决策点已经过去**——5 轮之后，旧 tool result 早已不是边际信息
-
-SunCode 当前只有 V1 的消息数截断，缺少这一层"细粒度裁剪"。
-
-### 9.2 三层压缩架构
-
-```
+```text
 原始 contextMessages
-    │
-    ▼
-[1] Stale Tool Result Prune     ← 单条裁剪：超长 tool result → 占位符
-    │
-    ▼
-[2] Token Budget Turn 截断       ← 按 token 预算保留最近 N 个 turn
-    │
-    ▼
-[3] History Compact（高水位触发）  ← 折叠旧 turn → 摘要消息
-    │
-    ▼
-压缩后的 contextMessages
+  → Snip：移除不再被引用的旧工具结果
+  → Stale Tool Result Prune：超长旧工具结果替换为结构化占位符
+  → Context Collapse：对工具密集的旧 turn 做读取时投影
+  → Token Budget Turn Cap：从新到旧按 token 预算保留完整 turn
+  → History Compact：高水位时用规则式摘要折叠旧 turn
 ```
 
-### 9.3 第一层：Stale Tool Result Prune
+当前 `buildContextBudgetPolicy()` 实际启用的是 Stale Tool Result Prune、Token Budget Turn Cap 和 History Compact。Snip 与 Context Collapse 的实现及默认策略已经存在，但尚未从当前设置构建函数传入，因此不应把它们当作线上已启用能力。
 
-**算法**：
-1. 将消息按 turn 分组（turn = user message + 后续所有非 user message）
-2. 保护最近 `minRecentTurnsFull`（默认 1）个 turn 的 tool result 不裁剪
-3. 对保护窗口之外的每个 `role: 'tool'` 消息：
-   - 估算 content 的 token 数
-   - 如果 > `maxResultTokens`（默认 2048）→ 替换为占位符
+### 3.3 保留与摘要
 
-**占位符格式**（~180 字符 / 45 tokens）：
+- system message 永远保留；
+- 最近至少 2 个 turn 保留；
+- 最近 1 个 turn 的工具结果不做 stale prune；
+- 单个旧工具结果超过 2048 tokens 时，替换为包含 `toolCallId`、hash、原始大小和原因的占位符；
+- History Compact 保留最近 3 个 turn；
+- 规则式摘要使用 `role=user`、`contextKind=capacity_summary`，避免伪造新的 system 指令。
+
+容量保护压缩不调用 provider，成本低、确定性强，但语义保真度低于 LLM projection，因此只承担容量兜底职责。
+
+## 4. 主动语义压缩
+
+### 4.1 模式
+
+| 模式 | 行为 |
+|---|---|
+| `off` | 不选择候选，也不发送压缩请求 |
+| `shadow` | 生成并验证 projection，只记录指标，不替换上下文 |
+| `replace` | projection 验证通过后替换覆盖范围 |
+
+### 4.2 触发条件
+
+一次中间 turn 完成后，同时满足以下条件才生成候选：
+
+```text
+estimatedTokens(contextMessages) >= model.contextWindow × semanticCompactThreshold
+estimatedTokens(newlyCompletedHistory) >= semanticCompactMinNewTokens
+```
+
+候选范围从以下边界中最靠后的一个位置之后开始：
+
+- 精确的 `headAnchor`；
+- 已有 `semantic_projection`；
+- shadow 模式已经覆盖到的消息。
+
+第一次压缩覆盖 `headAnchor` 之后本次已完成的 raw span；rolling compaction 只覆盖 previous projection 之后新完成的 raw span，并通过 `previousProjectionId` 形成 lineage。
+
+## 5. A → B → C：缓存友好的请求结构
+
+### 5.1 A：正常主模型请求
+
+```text
+system prompt
++ tools
++ prior replay
++ exact current-user head anchor
++ completed raw trajectory
+```
+
+### 5.2 B：压缩请求
+
+B 是一次独立 provider call，但不再使用一套全新的“压缩专用 system prompt”。它复用 A 的 provider-visible 前缀，只在消息尾部追加一条结构化压缩请求：
+
+```text
+same system prompt as A
++ same tools as A
++ same context messages as A
++ suncode.semantic_compact_request
+```
+
+请求继续使用相同模型、`sessionId` 和 `cacheRetention=long`。这样 B 的前缀与 A 相同，具备复用 A prefix cache 的条件。
+
+这里保留 tools 是有意设计：tool schema 通常也是缓存前缀的一部分，从 B 中移除会提前破坏 prefix。System Prompt 明确要求模型在 semantic compact 请求下只返回 JSON、不得继续任务或调用工具；如果模型仍产生 tool call，运行时拒绝 projection 并保留原始历史。
+
+### 5.3 C：压缩后的下一次主模型请求
+
+`replace` 成功后，下一次主请求为：
+
+```text
+same system prompt and tools
++ prior replay before the current task
++ exact current-user head anchor
++ accepted semantic projection
++ verbatim open tail, when present
+```
+
+当前实现只在已完成 turn 的边界执行压缩，因此正常情况下 open tail 为空；`applySemanticProjection()` 保留了 `openTail` 接口，供未来存在未闭合协议尾部的场景使用。
+
+C 仍会在 raw trajectory 被 projection 替换的位置发生一次 prefix 变化。这是主动购买的 attention shaping 成本。该设计消除的是旧方案中 B 自身不复用 A 前缀造成的额外缓存破坏，不能也不试图消除 C 的必要变化。
+
+## 6. Projection 协议
+
+### 6.1 请求
+
+`suncode.semantic_compact_request` 包含：
+
+- `sourceStartIndex` / `sourceEndIndex`；
+- `sourceDigest`；
+- `previousProjectionId`；
+- `preserveExactUserHead=true`；
+- `summarizePriorReplay=false`；
+- 完整 JSON Schema 和 `json_only_no_markdown` 输出要求。
+
+### 6.2 输出状态
+
+模型必须返回以下字段：
+
+```typescript
+interface SemanticProjectionState {
+  objective: string;
+  constraints: string[];
+  completedWork: string[];
+  currentState: string[];
+  decisions: string[];
+  failedApproaches: string[];
+  unresolvedWork: string[];
+  nextAction: string;
+}
+```
+
+为兼容部分模型，数组字段返回单个字符串时会规范化为单元素数组；字段缺失、类型不兼容或无法解析为 JSON 时仍然拒绝。
+
+### 6.3 Projection message
+
+验证通过后生成 `role=user`、`contextKind=semantic_projection` 的运行时消息，包含：
+
+- `projectionId`；
+- `previousProjectionId`；
+- `headDigest`；
+- `sourceDigest`；
+- continuation state。
+
+它不是新的用户指令。System Prompt 要求模型把 projection 当作运行时 continuation state，并始终以精确保留的用户 head 为更高优先级。
+
+## 7. 验证与拒绝策略
+
+以下情况不会替换原始消息：
+
+| 原因 | 行为 |
+|---|---|
+| `head_missing` | 不发送 B |
+| `below_pressure` | 等待上下文继续增长 |
+| `insufficient_new_history` | 等待更多已完成历史 |
+| `semantic_compact_tool_call` | 拒绝模型输出 |
+| `invalid_projection_output` | 拒绝格式或结构错误的 projection |
+| `projection_over_budget` | 拒绝超过输出 token 上限的 projection |
+| `request_failed:*` | 记录错误，保留 raw history |
+
+拒绝后不删除任何原始消息。若 `autoCompact=true`，容量保护压缩仍可作为兜底继续运行。
+
+## 8. 配置与模型元数据
+
+当前默认值：
+
 ```json
 {
-  "kind": "suncode.archived_tool_result",
-  "toolCallId": "tc_abc123",
-  "toolName": "bash",
-  "bodyHash": "sha256-a1b2c3d4...",
-  "originalTokens": 5230,
-  "originalChars": 20918,
-  "reason": "pruned_exceeds_budget"
+  "autoCompact": true,
+  "compactThreshold": 0.7,
+  "semanticCompactMode": "off",
+  "semanticCompactThreshold": 0.5,
+  "semanticCompactMinNewTokens": 4096,
+  "semanticCompactMaxOutputTokens": 4096
 }
 ```
 
-**效果**：一条 5000 token 的工具返回被替换为 ~45 token 的占位符，节省 ~99%。
+自定义模型必须显式配置真实 context window：
 
-### 9.4 第二层：Token Budget Turn 截断
-
-替代 V1 的"消息数阈值"，改为 token 预算控制：
-
-1. 从最新 turn 往前累计 estimated tokens
-2. 保护 `minRecentTurns`（默认 2）个 turn 一定保留
-3. 超过 `maxHistoryTokens` 时停止保留更早的 turn
-4. 可结合模型 context window 自动计算合理预算
-
-### 9.5 第三层：History Compact（复用）
-
-当裁剪+截断后仍然超过高水位（默认 80% context window），触发 turn 级别的折叠压缩。复用 V1 的 `compactMessages()` 函数，用规则式摘要替代旧 turn。
-
-### 9.6 集成方式
-
-通过 `prepareNextTurn` 钩子集成到 agent loop，每轮结束后自动调用：
-
-```typescript
-prepareNextTurn: (ctx) => {
-  const policy = buildContextBudgetPolicy(settings, modelContextWindow);
-  const result = applyContextBudget(ctx.contextMessages, policy);
-  return { contextMessages: result.messages };
+```json
+{
+  "id": "glm-5.2:cloud",
+  "contextWindow": 1000000
 }
 ```
 
-### 9.7 配置
+缺少该字段时，Model Registry 和 Agent Loop 都回退到 128K。对于 `glm-5.2:cloud` 这会把百分比阈值计算错约 7.8 倍，导致压缩过早且频繁。
 
-```typescript
-interface ContextBudgetPolicy {
-  maxHistoryTokens?: number;       // 先验历史的最大 token 预算
-  maxHistoryTurns?: number;        // 保留的最大 turn 数
-  minRecentTurns?: number;         // 最小保留 turn 数（默认 2）
-  charsPerToken?: number;          // token 估算比例（默认 4）
-  staleToolResultPrune?: {
-    enabled: boolean;              // 默认 true
-    maxResultTokens?: number;      // 超过此值的 tool result 被替换（默认 2048）
-    minRecentTurnsFull?: number;   // 最近 N 个 turn 的结果不裁剪（默认 1）
-  };
-  historyCompact?: {
-    enabled: boolean;              // 默认 true
-    highWaterRatio?: number;       // 触发阈值（默认 0.8）
-    keepRecentTurns?: number;      // 压缩时保留的最近 turn 数（默认 3）
-  };
-}
-```
+百分比阈值并不天然跨模型可迁移：3% 在 1M 模型上约为 30K，在 128K 模型上只有约 3.8K。产品化前应考虑增加绝对 token 下限或“绝对阈值 + 比例阈值”的组合策略。
 
-### 9.8 设计决策
+## 9. GLM-5.2 1M A/B 验证
 
-| 决策 | 取值 | 理由 |
-|---|---|---|
-| prune 阈值 | 2048 estimated tokens | 约 8000 字符，覆盖短结果；长的才裁剪 |
-| 保护窗口 | 最近 1 个 turn | 模型正在"用"的信息不裁剪 |
-| 占位符格式 | 结构化 JSON (~180 chars) | 保留元数据，为 V3 archive retrieval 留接口 |
-| 不持久化存档 | V2 暂不做 | 先验证裁剪本身的效果 |
-| 默认开启 | autoCompact=true 时自动启用 | 对用户透明 |
+2026-07-15 使用 SunCode 自身的 Harbor adapter，在 Terminal-Bench 2.0 hard 任务 `fix-code-vulnerability` 上完成一次 paired run：
+
+- 模型：Ollama 官方库 `glm-5.2:cloud`；
+- 测试进程覆盖 `contextWindow=1_000_000`；
+- baseline：`semanticCompactMode=off`；
+- candidate：`replace`、阈值 3%、`minNewTokens=4096`、`maxOutputTokens=2048`；
+- verifier 通过宿主机 `127.0.0.1:7897` 代理联网；
+- 两组官方 reward 均为 1.0。
+
+该比较复用了先前的 baseline 结果，并单独运行 1M metadata candidate，不是同一 Harbor job 内的随机交替重复。Baseline 的自定义模型 metadata 当时仍回退为 128K，但 semantic compaction 关闭，且容量保护没有达到触发水位；Ollama 实际服务的仍是同一个 `glm-5.2:cloud` 百万上下文模型。这个差异不改变本次已观察到的请求内容，但后续正式多任务实验应让两组都显式使用相同的 1M metadata。
+
+| 指标 | Baseline | Candidate | 变化 |
+|---|---:|---:|---:|
+| Agent 执行时间 | 311.312 s | 225.809 s | -27.5% |
+| 模型请求累计耗时 | 186.386 s | 95.083 s | -49.0% |
+| Provider 请求数 | 28 | 33 | +17.9% |
+| 总输入 token | 902,451 | 594,347 | -34.1% |
+| 主请求输入 token | 902,451 | 552,444 | -38.8% |
+| 总输出 token | 6,059 | 5,320 | -12.2% |
+| 平均主请求输入 | 32,230 | 17,264 | -46.4% |
+| Semantic compaction | 0 | 1 started / 1 applied / 0 rejected | 成功 |
+
+该结果说明在这一次长任务中，projection 保持任务质量并降低了 provider-visible input 与模型耗时。但它仍只是单任务、单次重复的方向性证据，不能直接外推为所有模型的默认参数。
+
+Ollama 的 OpenAI-compatible usage 在两组中都报告 `cacheReadTokens=0`，因此本次无法量化 provider 端真实 prefix cache 命中率。能够确认的是 B 的请求结构已经满足前缀复用条件，以及 C 之后主请求输入确实下降。
+
+当前设置 UI 的语义压缩阈值范围是 30%–90%；本次 3% 参数由 A/B settings patch 注入，只是实验配置，不是已发布默认值。
+
+## 10. 可观测性与 A/B 方法
+
+运行事件：
+
+- `model_request_started/completed`，通过 `requestKind=main | semantic_compact` 区分；
+- `semantic_compact_started`；
+- `semantic_compact_completed`；
+- `semantic_compact_rejected`。
+
+Harbor 结果 metadata 汇总：
+
+- `semanticCompactStarted`；
+- `semanticCompactCompleted`；
+- `semanticCompactApplied`；
+- `semanticCompactRejected`。
+
+A/B 必须使用 SunCode-vs-SunCode：相同任务、模型、adapter、权限和 verifier，只通过 `SUNCODE_SETTINGS_PATCH_B64` 改变功能设置。比较时至少分开记录：
+
+1. 官方 reward / verifier 质量；
+2. main 与 compactor 的请求数、输入输出 token；
+3. Agent execution 时间和模型请求累计时间；
+4. compaction started/applied/rejected；
+5. provider cache read/write（仅在 provider 实际上报时使用）。
+
+Verifier 下载依赖的时间属于基础设施噪声，不应混入模型性能结论。
+
+## 11. 相关源码
+
+| 模块 | 路径 |
+|---|---|
+| 主动语义候选、协议、projection 验证 | `src/worker/agent/semantic-compact.ts` |
+| A/B/C 请求编排与事件 | `src/worker/agent/agent-loop.ts` |
+| 容量保护 pipeline | `src/worker/agent/context-budget.ts` |
+| 规则式 history summary | `src/worker/agent/compaction.ts` |
+| 压缩协议 System Prompt | `src/worker/agent/system-prompt.ts` |
+| 默认设置与容量策略 | `src/shared/constants.ts` |
+| 设置、事件和 projection 类型 | `src/shared/types.ts` |
+| A/B runner | `scripts/run-terminal-bench-ab.ts` |
+| Settings patch 校验 | `scripts/terminal-bench-settings.ts` |
+| Terminal-Bench runner | `scripts/run-terminal-bench.ts` |
