@@ -308,6 +308,64 @@ describe('memory storage', () => {
     expect(getAllMemories(workingDir).find((entry) => entry.slug === 'project-note')).toBeUndefined();
   });
 
+  it('moves a memory when its scope is updated', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+
+    await saveMemory(
+      workingDir,
+      {
+        date: '2026-07-11',
+        slug: 'session-note',
+        scope: 'session',
+        userRequest: '会话约束',
+        toolsUsed: {},
+        summary: '只属于当前会话',
+      },
+      undefined,
+      undefined,
+      'session-1',
+    );
+
+    updateMemory(
+      workingDir,
+      '2026-07-11',
+      'session-note',
+      { scope: 'project', summary: '升级为项目约束' },
+      'session-1',
+    );
+
+    expect(getAllMemories(workingDir, 'session-1').find((entry) => entry.slug === 'session-note'))
+      .toMatchObject({ scope: 'project', summary: '升级为项目约束' });
+    expect(getAllMemories(workingDir, 'session-1', 'session')).toEqual([]);
+  });
+
+  it('counts memories injected into an agent context and searches structured facts', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+
+    await saveMemory(workingDir, {
+      date: '2026-07-11',
+      slug: 'fixed-port',
+      scope: 'project',
+      userRequest: '项目服务配置',
+      toolsUsed: {},
+      summary: '开发服务配置',
+      facts: [
+        {
+          type: 'fact',
+          subject: '项目',
+          predicate: '端口固定为',
+          object: '5173',
+          validity: { start: '2026-07-11' },
+          confidence: 1,
+        },
+      ],
+    });
+
+    await expect(loadMemories(workingDir, '5173', 'session-1')).resolves.toContain('5173');
+    expect(getAllMemories(workingDir, 'session-1', 'project').find((entry) => entry.slug === 'fixed-port'))
+      .toMatchObject({ accessCount: 1 });
+  });
+
   it('groups similar memories into scenes', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');
 
@@ -416,7 +474,8 @@ describe('memory storage', () => {
       validFrom: '2026-07-11',
     });
 
-    const memories = await loadMemories(workingDir, '任务', undefined);
+    const memories = await loadMemories(workingDir, '配置', undefined);
+    expect(memories).not.toContain('已过期的临时任务');
     expect(memories).toContain('当前有效的项目配置');
   });
 

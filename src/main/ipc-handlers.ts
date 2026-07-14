@@ -7,6 +7,7 @@ import { Worker } from 'node:worker_threads';
 import {
   DEFAULT_SETTINGS,
   LITE_MODELS,
+  MAX_SESSION_TITLE_LENGTH,
   RECOMMENDED_MODELS,
   TITLE_GENERATION_PROMPT,
 } from '@shared/constants';
@@ -1381,6 +1382,26 @@ export function registerIpcHandlers(wm: WindowManager): void {
   );
 
   ipcMain.handle(
+    'memory:update',
+    async (
+      _event,
+      workingDir: string,
+      date: string,
+      slug: string,
+      updates: Record<string, unknown>,
+      sessionId?: string,
+    ) => {
+      try {
+        const { updateMemory } = await import('../worker/agent/memory');
+        updateMemory(workingDir, date, slug, updates, sessionId);
+      } catch (err) {
+        console.error('[Main] memory:update failed:', (err as Error).message);
+        throw err;
+      }
+    },
+  );
+
+  ipcMain.handle(
     'memory:delete',
     async (_event, workingDir: string, date: string, slug: string, sessionId?: string) => {
       try {
@@ -1440,7 +1461,8 @@ export function registerIpcHandlers(wm: WindowManager): void {
  *
  * Uses the rules defined in TITLE_GENERATION_PROMPT:
  * - Use the user's primary language.
- * - Use 3-7 words when possible.
+ * - Use 2-6 short words when possible.
+ * - Keep the title to at most MAX_SESSION_TITLE_LENGTH characters.
  * - Keep it recognizable in a session list.
  * - Preserve important proper nouns, file names, APIs, and technology names.
  * - No markdown, numbering, quotes, trailing punctuation.
@@ -1498,9 +1520,11 @@ function extractTitle(message: Message): string | null {
   }
 
   // Truncate to a safe max length as final guard
-  const maxLen = 50;
-  if (cleaned.length > maxLen) {
-    cleaned = cleaned.slice(0, maxLen).replace(/\s+\S*$/, '');
+  if (cleaned.length > MAX_SESSION_TITLE_LENGTH) {
+    cleaned = cleaned
+      .slice(0, MAX_SESSION_TITLE_LENGTH)
+      .replace(/\s+\S*$/, '')
+      .trim();
   }
 
   return cleaned || null;
@@ -1601,9 +1625,11 @@ async function generateTitleWithAI(targetSession: string, userMessage: Message):
       .replace(/^["']|["']$/g, '')
       .replace(/[.。,，!！?？;；:：]+$/, '')
       .trim();
-    const maxLen = 50;
-    if (title.length > maxLen) {
-      title = title.slice(0, maxLen).replace(/\s+\S*$/, '');
+    if (title.length > MAX_SESSION_TITLE_LENGTH) {
+      title = title
+        .slice(0, MAX_SESSION_TITLE_LENGTH)
+        .replace(/\s+\S*$/, '')
+        .trim();
     }
 
     // Update session meta

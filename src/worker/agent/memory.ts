@@ -120,8 +120,7 @@ function isSocialQuery(query: string): boolean {
 
   // Very short text without technical indicators → likely social
   if (trimmed.length <= 6) {
-    if (/^[a-zA-Z]{3,}$/.test(trimmed) && !/^(hi|hey|yes|no|ok|bye)$/i.test(trimmed)) return false;
-    return true;
+    return /^(hi|hey|yes|no|ok|bye|你好|嗨|哈哈|嘻嘻|嘿嘿|呵呵)$/i.test(trimmed);
   }
 
   // Greeting patterns
@@ -144,7 +143,9 @@ export async function loadMemoriesWithEntries(
   const entries = [
     ...loadScopedMemoryEntries(globalMemoryDir(), 'global'),
     ...loadScopedMemoryEntries(projectMemoryDir(workingDir), 'project'),
-    ...loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session'),
+    ...(sessionId
+      ? loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session')
+      : []),
   ];
   if (entries.length === 0) return { content: '', entries: [] };
 
@@ -157,6 +158,8 @@ export async function loadMemoriesWithEntries(
     ? await searchMemories(entries, query)
     : entries.slice(0, Math.min(entries.length, MAX_RETRIEVED_MEMORIES));
 
+  recordMemoryAccess(workingDir, selectedEntries, sessionId);
+
   const content = formatMemoryIndex(selectedEntries);
   return { content: content.slice(0, 4000), entries: selectedEntries };
 }
@@ -167,14 +170,9 @@ export async function saveMemory(
   provider?: string,
   modelId?: string,
   sessionId?: string,
-): Promise<void> {
+): Promise<MemoryEntry> {
   const scope = entry.scope ?? (sessionId ? 'session' : 'project');
-  const memDir =
-    scope === 'global'
-      ? globalMemoryDir()
-      : scope === 'project'
-        ? projectMemoryDir(workingDir)
-        : sessionMemoryDir(workingDir, sessionId);
+  const memDir = memoryDirForScope(workingDir, scope, sessionId);
   if (!existsSync(memDir)) {
     mkdirSync(memDir, { recursive: true });
   }
@@ -221,6 +219,7 @@ export async function saveMemory(
 
   pruneOldMemories(memDir);
   rebuildIndexes(memDir);
+  return finalEntry;
 }
 
 export async function searchMemories(
@@ -250,23 +249,32 @@ export function updateMemory(
   updates: Partial<MemoryEntry>,
   sessionId?: string,
 ): void {
-  const finalScope = updates.scope;
-  const memDir =
-    finalScope === 'global'
-      ? globalMemoryDir()
-      : finalScope === 'project' || !sessionId
-        ? projectMemoryDir(workingDir)
-        : sessionMemoryDir(workingDir, sessionId);
-  const sessionPath = join(memDir, `${date}-${slug}.md`);
-
-  if (!existsSync(sessionPath)) {
+  const fileName = `${date}-${slug}.md`;
+  const source = findMemoryLocation(workingDir, fileName, sessionId, updates.scope);
+  if (!source) {
     throw new Error(`Memory not found: ${date}-${slug}`);
   }
 
-  const entry = parseSessionMemory(readFileSync(sessionPath, 'utf-8'));
+  const entry = parseSessionMemory(readFileSync(join(source.memDir, fileName), 'utf-8'));
   Object.assign(entry, updates, { updatedAt: new Date().toISOString() });
-  writeFileSync(sessionPath, formatSessionMemory(entry), 'utf-8');
-  rebuildIndexes(memDir);
+  const targetScope = updates.scope ?? entry.scope ?? source.scope;
+  const targetDir = memoryDirForScope(workingDir, targetScope, sessionId);
+  entry.scope = targetScope;
+  if (targetDir !== source.memDir) entry.sceneId = undefined;
+
+  if (updates.userRequest !== undefined || updates.summary !== undefined) {
+    entry.embedding = simpleTextEmbedding(`${entry.userRequest} ${entry.summary}`);
+  }
+
+  if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+  writeFileSync(join(targetDir, fileName), formatSessionMemory(entry), 'utf-8');
+  if (targetDir !== source.memDir) {
+    unlinkSync(join(source.memDir, fileName));
+    sceneCache.delete(source.memDir);
+    rebuildIndexes(source.memDir);
+  }
+  sceneCache.delete(targetDir);
+  rebuildIndexes(targetDir);
 }
 
 export function deleteMemory(
@@ -293,6 +301,35 @@ export function deleteMemory(
   }
 
   throw new Error(`Memory not found: ${date}-${slug}`);
+}
+
+function memoryDirForScope(workingDir: string, scope: MemoryScope, sessionId?: string): string {
+  if (scope === 'global') return globalMemoryDir();
+  if (scope === 'project') return projectMemoryDir(workingDir);
+  return sessionMemoryDir(workingDir, sessionId);
+}
+
+function findMemoryLocation(
+  workingDir: string,
+  fileName: string,
+  sessionId?: string,
+  preferredScope?: MemoryScope,
+): { memDir: string; scope: MemoryScope } | null {
+  const candidates: Array<{ memDir: string; scope: MemoryScope }> = [
+    { memDir: globalMemoryDir(), scope: 'global' },
+    { memDir: projectMemoryDir(workingDir), scope: 'project' },
+    ...(sessionId
+      ? [{ memDir: sessionMemoryDir(workingDir, sessionId), scope: 'session' as const }]
+      : []),
+  ];
+  const ordered = preferredScope
+    ? [...candidates].sort((left, right) => {
+        if (left.scope === preferredScope) return -1;
+        if (right.scope === preferredScope) return 1;
+        return 0;
+      })
+    : candidates;
+  return ordered.find(({ memDir }) => existsSync(join(memDir, fileName))) ?? null;
 }
 
 export function getAllMemories(
@@ -520,7 +557,10 @@ function loadMemScenes(memDir: string): MemoryScene[] {
 }
 
 function sessionMemoryDir(workingDir: string, sessionId?: string): string {
-  return getAgentDataSubdir(workingDir, MEMORIES_DIR, sessionId);
+  if (process.env.SUNCODE_APP_DATA && sessionId) {
+    return getAgentDataSubdir(workingDir, MEMORIES_DIR, sessionId);
+  }
+  return join(workingDir, MEMORIES_DIR, 'session', sessionId || 'default');
 }
 
 function globalMemoryDir(): string {
@@ -797,6 +837,29 @@ function loadAllMemoryEntries(memDir: string): MemoryEntry[] {
   return loadScopedMemoryEntries(memDir, 'session');
 }
 
+/** Persist the fact that a memory was injected into an agent context. */
+function recordMemoryAccess(workingDir: string, entries: MemoryEntry[], sessionId?: string): void {
+  const changedDirs = new Set<string>();
+
+  for (const entry of entries) {
+    const memDir = memoryDirForScope(workingDir, entry.scope ?? 'session', sessionId);
+    const filePath = join(memDir, `${entry.date}-${entry.slug}.md`);
+    if (!existsSync(filePath)) continue;
+
+    entry.accessCount = (entry.accessCount ?? 0) + 1;
+    try {
+      const persisted = parseSessionMemory(readFileSync(filePath, 'utf-8'));
+      persisted.accessCount = entry.accessCount;
+      writeFileSync(filePath, formatSessionMemory(persisted), 'utf-8');
+      changedDirs.add(memDir);
+    } catch {
+      // Access tracking is best-effort and must never block a run.
+    }
+  }
+
+  for (const memDir of changedDirs) rebuildIndexes(memDir);
+}
+
 function hybridScore(
   entry: MemoryEntry,
   query: string,
@@ -809,7 +872,7 @@ function hybridScore(
   let relevanceScore = 0;
 
   const haystack =
-    `${entry.userRequest} ${entry.summary} ${(entry.tags ?? []).join(' ')}`.toLowerCase();
+    `${entry.userRequest} ${entry.summary} ${(entry.tags ?? []).join(' ')} ${formatFacts(entry.facts)}`.toLowerCase();
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
 
   if (terms.length > 0) {
@@ -833,7 +896,9 @@ function hybridScore(
   // positional number[] cosine (which compares unrelated dimensions and can
   // report high similarity for disjoint texts), this is 0 when query and entry
   // share no features — so unrelated memories can't sneak past the threshold.
-  const entryFeatures = textFeatureMap(`${entry.userRequest} ${entry.summary}`);
+  const entryFeatures = textFeatureMap(
+    `${entry.userRequest} ${entry.summary} ${formatFacts(entry.facts)}`,
+  );
   const similarity = sparseCosine(entryFeatures, queryFeatures);
   relevanceScore += similarity * 10;
 
@@ -855,6 +920,12 @@ function hybridScore(
   }
 
   return score;
+}
+
+function formatFacts(facts?: StructuredFact[]): string {
+  return (facts ?? [])
+    .map((fact) => `${fact.type} ${fact.subject} ${fact.predicate} ${fact.object}`)
+    .join(' ');
 }
 
 function memoryRetentionScore(entry: MemoryEntry): number {

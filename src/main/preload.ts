@@ -522,6 +522,17 @@ const suncodeAPI = {
     return ipcRenderer.invoke('memory:save', workingDir, memory, sessionId);
   },
 
+  /** Update an existing memory, optionally moving it to another scope */
+  async updateMemory(
+    workingDir: string,
+    date: string,
+    slug: string,
+    updates: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<void> {
+    return ipcRenderer.invoke('memory:update', workingDir, date, slug, updates, sessionId);
+  },
+
   /** Delete a memory */
   async deleteMemory(
     workingDir: string,

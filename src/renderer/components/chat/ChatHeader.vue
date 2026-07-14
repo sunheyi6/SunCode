@@ -296,6 +296,9 @@ onBeforeUnmount(() => {
 
 .header-title {
   display: block;
+  min-width: 0;
+  max-width: 260px;
+  flex: 0 1 auto;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;

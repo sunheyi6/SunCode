@@ -221,6 +221,13 @@ declare global {
         memory: Record<string, unknown>,
         sessionId?: string,
       ): Promise<void>;
+      updateMemory(
+        workingDir: string,
+        date: string,
+        slug: string,
+        updates: Record<string, unknown>,
+        sessionId?: string,
+      ): Promise<void>;
       deleteMemory(
         workingDir: string,
         date: string,

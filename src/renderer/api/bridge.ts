@@ -347,6 +347,16 @@ export const bridge = {
     return api().saveMemory(workingDir, memory, sessionId);
   },
 
+  async updateMemory(
+    workingDir: string,
+    date: string,
+    slug: string,
+    updates: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<void> {
+    return api().updateMemory(workingDir, date, slug, updates, sessionId);
+  },
+
   async deleteMemory(
     workingDir: string,
     date: string,

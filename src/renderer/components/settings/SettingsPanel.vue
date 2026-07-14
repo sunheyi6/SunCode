@@ -140,6 +140,26 @@ async function handleDeleteMemory(): Promise<void> {
     console.error('[SettingsPanel] deleteMemory failed:', e);
   }
 }
+
+async function handleUpdateMemory(updates: Partial<MemoryEntry>): Promise<void> {
+  if (!selectedMemory.value) return;
+  try {
+    const workingDir = await bridge.getWorkingDir();
+    await bridge.updateMemory(
+      workingDir,
+      selectedMemory.value.date,
+      selectedMemory.value.slug,
+      updates,
+      sessionsStore.activeSessionId ?? undefined,
+    );
+    showToast('记忆已更新', 'success');
+    await loadMemories();
+    handleCloseDetail();
+  } catch (e) {
+    showToast('更新记忆失败', 'error');
+    console.error('[SettingsPanel] updateMemory failed:', e);
+  }
+}
 const enabledSkillCount = computed(
   () =>
     loadedSkills.value.filter(
@@ -1056,6 +1076,7 @@ function resetBackgroundColor(): void {
         :visible="showMemoryDetail"
         @close="handleCloseDetail"
         @delete="handleDeleteMemory"
+        @update="handleUpdateMemory"
       />
 
       <MemoryAddDialog

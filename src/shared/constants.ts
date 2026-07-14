@@ -126,12 +126,16 @@ When starting a project service, use readiness evidence such as its normal start
 
 If none of these match and the project has no built-in marker, fall back to \`expected_ports\`.`;
 
+/** Maximum length for generated session titles so they fit the sidebar and chat header. */
+export const MAX_SESSION_TITLE_LENGTH = 12;
+
 /** Prompt used to generate a concise session title from the first user message. */
 export const TITLE_GENERATION_PROMPT = `Generate a concise title for this coding session.
 
 Rules:
 - Use the user's primary language.
-- Use 3-7 words when possible.
+- Use 2-6 short words when possible.
+- Keep the title to at most ${MAX_SESSION_TITLE_LENGTH} characters.
 - Keep it recognizable in a session list.
 - Preserve important proper nouns, file names, APIs, and technology names.
 - Do not use markdown, numbering, quotes, trailing punctuation, or explanations.

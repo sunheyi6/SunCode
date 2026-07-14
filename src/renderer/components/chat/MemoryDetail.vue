@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { MemoryEntry, StructuredFact } from '@shared/types';
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { bridge } from '../../api/bridge';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
@@ -19,7 +19,20 @@ const props = withDefaults(
 const emit = defineEmits<{
   close: [];
   delete: [];
+  update: [updates: Partial<MemoryEntry>];
 }>();
+
+const editing = ref(false);
+const saving = ref(false);
+const draft = ref<MemoryEntry>({ ...props.memory });
+
+watch(
+  () => props.memory,
+  (memory) => {
+    draft.value = { ...memory, tags: memory.tags ? [...memory.tags] : [] };
+  },
+  { immediate: true },
+);
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const kindLabels: Record<string, string> = {
@@ -73,6 +86,47 @@ const toolList = computed(() =>
 );
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function startEditing(): void {
+  draft.value = { ...props.memory, tags: props.memory.tags ? [...props.memory.tags] : [] };
+  editing.value = true;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function cancelEditing(): void {
+  editing.value = false;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function updateTags(event: Event): void {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  draft.value.tags = input.value
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+async function saveEditing(): Promise<void> {
+  saving.value = true;
+  try {
+    emit('update', {
+      summary: draft.value.summary,
+      kind: draft.value.kind,
+      scope: draft.value.scope,
+      importance: draft.value.importance,
+      tags: draft.value.tags ?? [],
+      validFrom: draft.value.validFrom || undefined,
+      expiresAt: draft.value.expiresAt || undefined,
+      pinned: draft.value.pinned ?? false,
+    });
+    editing.value = false;
+  } finally {
+    saving.value = false;
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 async function handleDelete(): Promise<void> {
   const confirmed = await bridge.confirm('删除记忆', '确定要删除这条记忆吗？');
   if (confirmed) emit('delete');
@@ -102,7 +156,17 @@ function formatFact(fact: StructuredFact): string {
             </div>
             <div class="header-actions">
               <button
-                v-if="showDelete"
+                v-if="!editing"
+                class="action-btn"
+                type="button"
+                title="编辑"
+                aria-label="编辑"
+                @click="startEditing"
+              >
+                <AppIcon name="pencil" :size="14" />
+              </button>
+              <button
+                v-if="showDelete && !editing"
                 class="action-btn delete-btn"
                 type="button"
                 title="删除记忆"
@@ -123,7 +187,71 @@ function formatFact(fact: StructuredFact): string {
             </div>
           </header>
 
-          <div class="detail-body">
+          <div v-if="editing" class="detail-body edit-body">
+            <form class="memory-edit-form" @submit.prevent="saveEditing">
+              <label class="edit-field">
+                <span>摘要</span>
+                <textarea v-model="draft.summary" rows="4" placeholder="用一句话概括这条记忆" />
+              </label>
+              <div class="edit-grid">
+                <label class="edit-field">
+                  <span>类型</span>
+                  <select v-model="draft.kind">
+                    <option value="task_summary">任务摘要</option>
+                    <option value="project_fact">项目事实</option>
+                    <option value="decision">决策</option>
+                    <option value="preference">偏好</option>
+                    <option value="lesson">经验教训</option>
+                    <option value="ephemeral">临时</option>
+                  </select>
+                </label>
+                <label class="edit-field">
+                  <span>作用域</span>
+                  <select v-model="draft.scope">
+                    <option value="global">全局级</option>
+                    <option value="project">项目级</option>
+                    <option value="session">会话级</option>
+                  </select>
+                </label>
+              </div>
+              <label class="edit-field">
+                <span>标签（逗号分隔）</span>
+                <input
+                  :value="(draft.tags ?? []).join(', ')"
+                  type="text"
+                  @input="updateTags"
+                />
+              </label>
+              <div class="edit-grid">
+                <label class="edit-field">
+                  <span>重要度：{{ draft.importance || 1 }}/5</span>
+                  <input v-model.number="draft.importance" type="range" min="1" max="5" />
+                </label>
+                <label class="edit-check">
+                  <input v-model="draft.pinned" type="checkbox" />
+                  <span>置顶记忆</span>
+                </label>
+              </div>
+              <div class="edit-grid">
+                <label class="edit-field">
+                  <span>生效日期</span>
+                  <input v-model="draft.validFrom" type="date" />
+                </label>
+                <label class="edit-field">
+                  <span>过期日期</span>
+                  <input v-model="draft.expiresAt" type="date" />
+                </label>
+              </div>
+              <div class="edit-actions">
+                <button class="cancel-button" type="button" @click="cancelEditing">取消</button>
+                <button class="submit-button" type="submit" :disabled="saving">
+                  {{ saving ? '保存中...' : '保存修改' }}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div v-else class="detail-body">
             <div class="detail-badges">
               <span
                 class="kind-badge"
@@ -218,6 +346,20 @@ function formatFact(fact: StructuredFact): string {
 </template>
 
 <style scoped>
+.edit-body { padding-bottom: 22px; }
+.memory-edit-form { display: flex; flex-direction: column; gap: 16px; }
+.edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.edit-field, .edit-check { display: flex; flex-direction: column; gap: 7px; color: var(--color-text-secondary); font-size: 12px; }
+.edit-field textarea, .edit-field input, .edit-field select { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); background: var(--color-bg-tertiary); color: var(--color-text); font: inherit; }
+.edit-field textarea, .edit-field input[type='text'], .edit-field input[type='date'], .edit-field select { padding: 9px 10px; }
+.edit-field textarea { resize: vertical; }
+.edit-check { flex-direction: row; align-items: center; align-self: end; padding-bottom: 10px; }
+.edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.cancel-button, .submit-button { padding: 8px 13px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); font: inherit; font-size: 12px; cursor: pointer; }
+.cancel-button { background: transparent; color: var(--color-text-secondary); }
+.submit-button { border-color: var(--color-accent); background: var(--color-accent); color: #fff; }
+.submit-button:disabled { cursor: wait; opacity: 0.65; }
+
 .memory-detail-modal {
   position: fixed;
   inset: 0;
@@ -319,4 +461,5 @@ function formatFact(fact: StructuredFact): string {
 .meta-value { color: var(--color-text-secondary); font-size: 13px; }
 .modal-enter-active, .modal-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .modal-enter-from, .modal-leave-to { opacity: 0; transform: translateY(8px) scale(0.98); }
+@media (max-width: 560px) { .edit-grid { grid-template-columns: 1fr; } }
 </style>

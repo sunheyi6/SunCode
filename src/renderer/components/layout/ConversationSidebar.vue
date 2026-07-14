@@ -1321,7 +1321,7 @@ function formatTime(value: string): string {
   height: 22px;
   transform: translateY(-50%);
   border-radius: 50%;
-  background: var(--sidebar-panel-surface);
+  background: transparent;
   font-size: 13px;
 }
 

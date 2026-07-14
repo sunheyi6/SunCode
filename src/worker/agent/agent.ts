@@ -31,9 +31,11 @@ import { parseInitCommand } from './init-handler';
 import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
 import {
   buildSessionSnapshot,
+  getAllMemories,
   loadMemories,
   loadMemoriesWithEntries,
   type MemoryEntry,
+  type StructuredFact,
   saveMemory,
   saveSessionSnapshot,
 } from './memory';
@@ -920,14 +922,23 @@ export class Agent {
         userRequest: userRequest.slice(0, 200),
         toolsUsed,
         summary: '',
+        scope: 'session',
       };
 
-      await saveMemory(
+      const savedEntry = await saveMemory(
         this.workingDir,
         entry,
         this.settings.activeProvider,
         this.settings.activeModel,
         this.sessionId,
+      );
+      await promoteExplicitDurableFacts(
+        this.workingDir,
+        this.sessionId,
+        userRequest,
+        savedEntry,
+        this.settings.activeProvider,
+        this.settings.activeModel,
       );
     } catch {
       // Best-effort — never let memory failures break the agent
@@ -1026,6 +1037,87 @@ export class Agent {
   getWorkingDir(): string {
     return this.workingDir;
   }
+}
+
+async function promoteExplicitDurableFacts(
+  workingDir: string,
+  sessionId: string,
+  userRequest: string,
+  sessionEntry: MemoryEntry,
+  provider: string,
+  modelId: string,
+): Promise<void> {
+  if (!isExplicitDurableMemoryRequest(userRequest)) return;
+
+  const durableFacts = (sessionEntry.facts ?? []).filter(
+    (fact) =>
+      fact.confidence >= 0.8 &&
+      (fact.type === 'preference' || fact.type === 'fact' || fact.type === 'decision'),
+  );
+  if (durableFacts.length === 0) return;
+
+  const grouped = new Map<StructuredFact['type'], StructuredFact[]>();
+  for (const fact of durableFacts) {
+    const facts = grouped.get(fact.type) ?? [];
+    facts.push(fact);
+    grouped.set(fact.type, facts);
+  }
+
+  for (const [factType, facts] of grouped) {
+    const scope = factType === 'preference' ? 'global' : 'project';
+    const existing = getAllMemories(workingDir, sessionId, scope);
+    const hasSameFacts = existing.some((entry) =>
+      facts.some((fact) => (entry.facts ?? []).some((stored) => sameFact(stored, fact))),
+    );
+    if (hasSameFacts) continue;
+
+    const kind =
+      factType === 'preference'
+        ? 'preference'
+        : factType === 'decision'
+          ? 'decision'
+          : 'project_fact';
+    const stableSlug = `durable-${kind}-${facts
+      .map((fact) => `${fact.subject}-${fact.predicate}-${fact.object}`)
+      .join('-')
+      .replace(/[^a-zA-Z0-9一-鿿]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 100)}`;
+
+    await saveMemory(
+      workingDir,
+      {
+        date: new Date().toISOString().slice(0, 10),
+        slug: stableSlug || `durable-${kind}`,
+        userRequest: userRequest.slice(0, 200),
+        toolsUsed: {},
+        summary: sessionEntry.summary,
+        scope,
+        kind,
+        importance: 4,
+        tags: [kind, 'auto-promoted'],
+        facts,
+      },
+      provider,
+      modelId,
+      sessionId,
+    );
+  }
+}
+
+function isExplicitDurableMemoryRequest(request: string): boolean {
+  return /记住|记一下|别忘了|不要忘|以后(?:请|都)?|长期|我的偏好|我喜欢|我习惯|默认使用|remember|don't forget|always|my preference|i prefer/i.test(
+    request,
+  );
+}
+
+function sameFact(left: StructuredFact, right: StructuredFact): boolean {
+  return (
+    left.type === right.type &&
+    left.subject === right.subject &&
+    left.predicate === right.predicate &&
+    left.object === right.object
+  );
 }
 
 function latestUserText(messages: Message[]): string {
