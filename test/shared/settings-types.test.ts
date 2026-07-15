@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@shared/constants';
 import { normalizeCustomEndpointBaseUrl } from '@shared/custom-endpoints';
-import type { AppSettings, CustomApiFormat, CustomEndpoint, CustomModelEntry } from '@shared/types';
+import type {
+  AppearanceStyle,
+  AppSettings,
+  CustomApiFormat,
+  CustomEndpoint,
+  CustomModelEntry,
+} from '@shared/types';
 
 describe('customEndpoints data model', () => {
   it('DEFAULT_SETTINGS.customEndpoints 初始化为空数组', () => {
@@ -11,6 +17,10 @@ describe('customEndpoints data model', () => {
   it('DEFAULT_SETTINGS 满足 AppSettings 形状', () => {
     const s: AppSettings = { ...DEFAULT_SETTINGS } as AppSettings;
     expect(Array.isArray(s.customEndpoints)).toBe(true);
+  });
+
+  it('accepts Raft as an appearance style', () => {
+    expect('raft' satisfies AppearanceStyle).toBe('raft');
   });
 
   it('CustomEndpoint / CustomModelEntry 字段齐备', () => {

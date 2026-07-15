@@ -83,7 +83,7 @@ export const useSettingsStore = defineStore('settings', () => {
   function applyTheme(theme: AppSettings['theme'], resolved = resolveTheme(theme)): void {
     document.documentElement.setAttribute('data-theme', resolved);
     resolvedTheme.value = resolved;
-    // Theme tokens change via CSS; re-apply custom bg so it still overrides.
+    // Theme tokens change via CSS; re-apply custom bg and native window chrome.
     applyBackgroundColor(settings.value.backgroundColor);
   }
 
@@ -105,6 +105,8 @@ export const useSettingsStore = defineStore('settings', () => {
     } else {
       root.setAttribute('data-style', style);
     }
+    // Keep the native min/max/close strip on the same palette as the app.
+    applyBackgroundColor(settings.value.backgroundColor);
   }
 
   function setAppearance(style: AppearanceStyle): void {
@@ -202,7 +204,14 @@ export const useSettingsStore = defineStore('settings', () => {
     try {
       const normalized = normalizeBackgroundColor(color);
       if (!normalized) {
-        bridge.setChromeColors(null);
+        const rootStyle = getComputedStyle(document.documentElement);
+        const background =
+          rootStyle.getPropertyValue('--window-chrome-bg').trim() ||
+          rootStyle.getPropertyValue('--color-bg-secondary').trim();
+        const foreground =
+          rootStyle.getPropertyValue('--window-chrome-fg').trim() ||
+          rootStyle.getPropertyValue('--color-text-muted').trim();
+        bridge.setChromeColors(background && foreground ? { background, foreground } : null);
         return;
       }
       const isDarkBg = luminanceFromHex(normalized) < 0.45;

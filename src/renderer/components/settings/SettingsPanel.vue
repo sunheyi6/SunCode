@@ -463,6 +463,14 @@ const STYLE_PRESETS: ReadonlyArray<StylePreset> = [
     lightBg: '#f8f8f8',
     lightAccent: '#1db954',
   },
+  {
+    value: 'raft',
+    label: 'Raft',
+    bg: '#141111',
+    accent: '#ffd440',
+    lightBg: '#fffaef',
+    lightAccent: '#ff4f8b',
+  },
 ];
 
 /** Preview swatch colors follow the currently resolved light/dark mode. */

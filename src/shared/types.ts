@@ -246,7 +246,8 @@ export type AppearanceStyle =
   | 'cursor'
   | 'notion'
   | 'stripe'
-  | 'spotify';
+  | 'spotify'
+  | 'raft';
 
 /** Application settings */
 export interface AppSettings {
