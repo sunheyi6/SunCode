@@ -51,6 +51,8 @@ const containerClass = computed(() => ({
 .streaming-text :deep([data-custom-id="chat"]) {
   color: inherit;
   font: inherit;
+  --inline-code-fg: var(--color-accent);
+  --inline-code-bg: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 .streaming-text :deep(p) {

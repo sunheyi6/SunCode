@@ -55,6 +55,8 @@ const isDark = computed(() => settingsStore.resolvedTheme === 'dark');
 .tool-markdown-output :deep([data-custom-id="tool-output"]) {
   color: inherit;
   font: inherit;
+  --inline-code-fg: var(--color-accent);
+  --inline-code-bg: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 .tool-markdown-output :deep(pre) {
