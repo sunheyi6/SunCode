@@ -103,7 +103,7 @@ describe('bash tool details', () => {
   });
 
   test('auto-backgrounds direct Electron launch commands', async () => {
-    const command = 'cd D:/project/maka-agent/apps/desktop; npx electron . 2>&1';
+    const command = 'cd D:/project/another-app/apps/desktop; npx electron . 2>&1';
     const result = await createBashTool(process.cwd()).execute({ command });
 
     expect(result.success).toBe(true);
@@ -129,13 +129,13 @@ describe('bash tool details', () => {
     await writeFile(
       join(desktopDir, 'package.json'),
       JSON.stringify({
-        name: '@maka/desktop',
+        name: '@another/desktop',
         scripts: { start: 'electron .' },
       }),
     );
 
     try {
-      const command = 'npm --workspace @maka/desktop run start';
+      const command = 'npm --workspace @another/desktop run start';
       const result = await createBashTool(dir, undefined, windowsPowerShellOptions).execute({
         command,
       });
@@ -155,34 +155,34 @@ describe('bash tool details', () => {
   });
 
   test('allows Electron launch commands when background mode is requested', () => {
-    const command = 'cd D:/project/maka-agent/apps/desktop; npx electron .';
+    const command = 'cd D:/project/another-app/apps/desktop; npx electron .';
 
     expect(isForegroundElectronLaunch(command, true)).toBe(false);
   });
 
   test('uses the launch command directory as process evidence root', () => {
     const root = resolveProjectEvidenceRoot(
-      'cd D:/project/maka-agent/apps/desktop; npx electron .',
+      'cd D:/project/another-app/apps/desktop; npx electron .',
       'D:/project/SunCode',
     );
 
-    expect(root.replace(/\\/g, '/')).toBe('D:/project/maka-agent/apps/desktop');
+    expect(root.replace(/\\/g, '/')).toBe('D:/project/another-app/apps/desktop');
   });
 
   test('process evidence lookup excludes the launcher pid', () => {
     const script = buildWindowsProjectProcessEvidenceCommand(
-      'D:/project/maka-agent/apps/desktop',
+      'D:/project/another-app/apps/desktop',
       1234,
     );
 
     expect(script).toContain('$_.ProcessId -ne 1234');
-    expect(script).toContain('maka-agent/apps/desktop');
+    expect(script).toContain('another-app/apps/desktop');
     expect(script).toContain('CommandLine');
     expect(script).toContain('ExecutablePath');
   });
 
   test('blocks SunCode startup marker for another project launch', async () => {
-    const command = 'cd D:/project/maka-agent && npm run dev';
+    const command = 'cd D:/project/another-app && npm run dev';
     const result = await createBashTool(process.cwd()).execute({
       command,
       run_in_background: true,
