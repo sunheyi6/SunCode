@@ -26,6 +26,7 @@ import { DiagLogger } from '../utils/diag-logger';
 import { getAgentDataSubdir } from './agent-data-dir';
 import { quickMatchLesson } from './lessons';
 import { buildStructuredTaskPrompt, buildStructuredTextMessage } from './model-structured-content';
+import { createProgressGuardState, updateSimpleTaskProgressGuard } from './progress-guard';
 import {
   applySemanticProjection,
   buildSemanticCompactRequest,
@@ -35,6 +36,7 @@ import {
 import { handleStream } from './stream-handler';
 import { StreamingToolExecutor } from './streaming-executor';
 import { buildSystemPrompt } from './system-prompt';
+import { isSimpleTask } from './task-policy';
 import { executeTools } from './tool-executor';
 import { formatToolResultForModel } from './tool-result-content';
 import { computeNeedsFollowUp } from './turn-decision';
@@ -201,6 +203,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
   const contextMessages: Message[] = [...initialMessages];
   const headAnchor = [...contextMessages].reverse().find((message) => message.role === 'user');
+  const latestUserPrompt = headAnchor ? getMessageTextContent(headAnchor) : '';
+  const guardSimpleTask = isSimpleTask(latestUserPrompt);
+  let progressGuardState = createProgressGuardState();
+  const configuredLoopTurnLimit = settings.maxTurns || MAX_TURNS;
+  let loopTurnLimit = configuredLoopTurnLimit;
   let shadowCoveredThrough: Message | undefined;
   let turnCount = initialTurnCount;
   const tokenUsage = { input: 0, output: 0, total: 0 };
@@ -209,7 +216,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const diag = new DiagLogger(workingDir, runId);
   diag.enter(
     'RUN',
-    `model=${settings.activeProvider}/${settings.activeModel} tools=${tools.length} maxTurns=${settings.maxTurns || MAX_TURNS}`,
+    `model=${settings.activeProvider}/${settings.activeModel} tools=${tools.length} maxTurns=${loopTurnLimit}`,
   );
 
   let lastSystemPrompt = '';
@@ -227,7 +234,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   );
 
   // Main loop
-  while (turnCount < (settings.maxTurns || MAX_TURNS)) {
+  while (turnCount < loopTurnLimit) {
     if (abortSignal.aborted) {
       const err = new Error('已中止') as Error & { name: string };
       err.name = 'AbortError';
@@ -235,13 +242,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     turnCount++;
-    console.log(`[AgentLoop] Turn ${turnCount}/${settings.maxTurns}`);
-    diag.enter('TURN', `${turnCount}/${settings.maxTurns || MAX_TURNS}`, {
+    console.log(`[AgentLoop] Turn ${turnCount}/${loopTurnLimit}`);
+    diag.enter('TURN', `${turnCount}/${loopTurnLimit}`, {
       msgs: contextMessages.length,
     });
-    onStream({ type: 'turn_start', turnCount, maxTurns: settings.maxTurns || MAX_TURNS });
+    onStream({ type: 'turn_start', turnCount, maxTurns: loopTurnLimit });
     onRunEvent({ type: 'turn_started', runId, turnNumber: turnCount, timestamp: '' });
-    input.onTurnStart?.(turnCount, settings.maxTurns || MAX_TURNS, { ...tokenUsage });
+    input.onTurnStart?.(turnCount, loopTurnLimit, { ...tokenUsage });
 
     // Drain mid-run guidance: each queued guidance becomes a user message in
     // contextMessages so this turn's model request sees it. The agent also
@@ -418,7 +425,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const { decision: turnDecision } = computeNeedsFollowUp({
         toolCalls: toolCalls,
         hasPendingInput: Boolean(inputHasPending),
-        isMaxTurnsReached: turnCount >= (settings.maxTurns || MAX_TURNS),
+        isMaxTurnsReached: turnCount >= loopTurnLimit,
         isAborted: false,
         assistantText,
         hasTaskComplete: false,
@@ -479,7 +486,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             toolCalls,
             toolResults: [],
             turnCount,
-            maxTurns: settings.maxTurns || MAX_TURNS,
+            maxTurns: loopTurnLimit,
             tokenUsage,
           });
 
@@ -669,6 +676,39 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           content,
           toolCallId: tr.toolCallId,
         });
+      }
+
+      if (guardSimpleTask) {
+        const materialChangeWasMade = progressGuardState.materialChangeMade;
+        const guardUpdate = updateSimpleTaskProgressGuard(
+          progressGuardState,
+          toolCalls,
+          toolResults,
+        );
+        progressGuardState = guardUpdate.state;
+        if (!materialChangeWasMade && progressGuardState.materialChangeMade) {
+          // If the forced-action reminder worked, leave room for targeted
+          // verification plus a final answer instead of stopping immediately.
+          loopTurnLimit = Math.max(loopTurnLimit, Math.min(configuredLoopTurnLimit, turnCount + 3));
+        }
+        if (guardUpdate.guidance) {
+          const guidance: Message = { role: 'user', content: guardUpdate.guidance };
+          contextMessages.push(guidance);
+          onStream({ type: 'guidance_injected', text: guardUpdate.guidance });
+          onRunEvent({
+            type: 'guidance_injected',
+            runId,
+            text: guardUpdate.guidance,
+            timestamp: '',
+          });
+          diag.milestone('PROGRESS_GUARD', 'guidance injected', {
+            investigationTurns: progressGuardState.investigationTurns,
+          });
+        }
+        if (guardUpdate.forceFinishWithinTurns !== undefined) {
+          loopTurnLimit = Math.min(loopTurnLimit, turnCount + guardUpdate.forceFinishWithinTurns);
+          diag.milestone('PROGRESS_GUARD', 'turn limit tightened', { loopTurnLimit });
+        }
       }
 
       // Emit turn_end for intermediate (tool-use) turns
@@ -873,7 +913,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           toolResults,
           contextMessages,
           turnCount,
-          maxTurns: settings.maxTurns || MAX_TURNS,
+          maxTurns: loopTurnLimit,
           modelContextWindow,
         });
         if (result2?.contextMessages) {
@@ -898,12 +938,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
   // Max turns reached
   console.log(
-    `[AgentLoop] === LOOP EXIT: max turns (${settings.maxTurns || MAX_TURNS}) ===` +
+    `[AgentLoop] === LOOP EXIT: max turns (${loopTurnLimit}) ===` +
       `\n  turns=${turnCount} tokens={in:${tokenUsage.input} out:${tokenUsage.output} total:${tokenUsage.total}}` +
       `\n  finalMsgs=${contextMessages.length}`,
   );
   diag.exit('LOOP', 'max_turns', {
-    maxTurns: settings.maxTurns || MAX_TURNS,
+    maxTurns: loopTurnLimit,
     turns: turnCount,
     tokensTotal: tokenUsage.total,
     msgs: contextMessages.length,
@@ -915,7 +955,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       content: [
         {
           type: 'text' as const,
-          text: `已达到最大轮次限制（${settings.maxTurns}轮）。请尝试更具体的提问，或调整设置中的最大轮次。`,
+          text: `已达到当前任务的轮次限制（${loopTurnLimit}轮）。请查看已完成的进展；如需继续，可补充更具体的方向。`,
         },
       ],
       taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),

@@ -43,6 +43,7 @@ import {
 import { createSkillsLoader, preloadSkills } from './skills';
 import { createDefaultStopHookRegistry } from './stop-hooks';
 import { SubagentDispatcher } from './subagent';
+import { applyOrdinaryTaskPolicy } from './task-policy';
 
 export class Agent {
   private workingDir: string;
@@ -548,16 +549,20 @@ export class Agent {
     this.dispatcher?.updateMemoryContent(memoryContent);
     this.dispatcher?.updateRelevantLessonsContent(relevantLessonsContent);
 
-    // Build context budget policy from settings + model info
+    // Summary mode is one text-only turn. Ordinary small edits get a tighter
+    // turn/thinking policy so a global xhigh setting cannot make them sprawl.
+    const effectiveSettings = summaryMode
+      ? { ...this.settings, maxTurns: 1 }
+      : applyOrdinaryTaskPolicy(this.settings, userQuery);
+
+    // Build context budget policy from the effective settings + model info
     const contextBudgetPolicy = buildContextBudgetPolicy(
-      this.settings,
+      effectiveSettings,
       contextWindowFromModel(model),
     );
 
     // Build plan mode instructions if active
     const effectiveTools = summaryMode ? [] : this.getEffectiveTools();
-    // Summary mode: single turn, no tools (text-only wrap-up)
-    const effectiveSettings = summaryMode ? { ...this.settings, maxTurns: 1 } : this.settings;
 
     const result = await runAgentLoop({
       model,
@@ -602,7 +607,7 @@ export class Agent {
       initialTurnCount: this.turnCount,
       // Drain mid-run guidance at each turn boundary (no abort/restart).
       drainGuidance: () => this.drainGuidance(),
-      prepareNextTurn: this.settings.autoCompact
+      prepareNextTurn: effectiveSettings.autoCompact
         ? (ctx) => {
             const policy = contextBudgetPolicy;
             // Adjust max tokens based on model context window if available
@@ -1313,7 +1318,7 @@ function getDefaultDefinitions(): SubagentDefinition[] {
       systemPrompt:
         '你是代码库探索专家。使用 read、grep、glob 工具查找相关文件、符号和测试。返回简洁发现，包含文件路径和行号引用。不要修改任何文件。',
       tools: ['read', 'grep', 'glob'],
-      // No maxTurns limit — explore should be thorough
+      maxTurns: 8,
     },
     {
       name: 'review',

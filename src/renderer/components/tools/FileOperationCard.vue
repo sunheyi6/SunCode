@@ -45,7 +45,7 @@ const isEditing = computed(() => view.value.label === '编辑中');
 
 <template>
   <details class="file-operation-details" :class="statusClass">
-    <summary class="file-summary">
+    <summary class="file-summary" :class="{ 'running-scan': isEditing }">
       <span class="file-icon"><AppIcon name="file" :size="13" /></span>
       <span v-if="isEditing" class="file-breathe-dot" />
       <span class="file-path" :title="view.filePath">{{ view.filePath }}</span>

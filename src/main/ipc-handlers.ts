@@ -11,8 +11,10 @@ import {
   RECOMMENDED_MODELS,
   TITLE_GENERATION_PROMPT,
 } from '@shared/constants';
+import { runtimeIdentityEnvironment } from '@shared/runtime-identity';
 import { getVendorSkillDirectories } from '@shared/skill-directories';
 import type {
+  AppRuntimeIdentity,
   AppSettings,
   DayStats,
   DiscoveredSkill,
@@ -26,7 +28,7 @@ import type {
   WorkerOutMessage,
 } from '@shared/types';
 import { app, dialog, ipcMain, Notification, nativeTheme, shell } from 'electron';
-import { IS_DEV } from './app-identity';
+import { APP_RUNTIME_IDENTITY, getAppRuntimeIdentity, IS_DEV } from './app-identity';
 import {
   checkForUpdates,
   downloadUpdate,
@@ -42,7 +44,7 @@ import {
   removeWorktreeForSession,
   validateWorktreePath,
 } from './git-worktree';
-import { getLogPath } from './logger';
+import { getLogPath, logger } from './logger';
 import { getAppDataDir } from './paths';
 import { appendEvent, getEvents, getTokenUsageAggregate, listRuns, startRun } from './run-store';
 import {
@@ -69,7 +71,10 @@ function loadSettings(): AppSettings {
   try {
     if (existsSync(CONFIG_PATH)) {
       const raw = readFileSync(CONFIG_PATH, 'utf-8');
-      const saved = JSON.parse(raw);
+      const saved = JSON.parse(raw) as Partial<AppSettings>;
+      // Migrate the old 200-turn default. Goal mode has its own explicit budget;
+      // ordinary tasks should not inherit an effectively unbounded legacy value.
+      if (saved.maxTurns === 200) saved.maxTurns = DEFAULT_SETTINGS.maxTurns;
       return { ...DEFAULT_SETTINGS, ...saved };
     }
   } catch (e) {
@@ -184,12 +189,18 @@ function getAgentWorker(): Worker {
     // process.env inheritance — Vite's Worker bundling in dev mode can bypass
     // the default env propagation, causing SUNCODE_APP_DATA to be undefined
     // inside the Worker and all data to fall back to the project working dir.
-    process.env.SUNCODE_APP_DATA = getAppDataDir();
-    agentWorker = new Worker(workerPath, {
-      env: { ...process.env },
+    const worker = new Worker(workerPath, {
+      env: {
+        ...process.env,
+        ...runtimeIdentityEnvironment(APP_RUNTIME_IDENTITY),
+        SUNCODE_APP_DATA: getAppDataDir(),
+        SUNCODE_IS_DEV: IS_DEV ? '1' : '0',
+      },
     });
+    agentWorker = worker;
+    logger.info('[Worker] Created agent worker', getAppRuntimeIdentity(worker.threadId));
 
-    agentWorker.on('message', async (msg: WorkerOutMessage) => {
+    worker.on('message', async (msg: WorkerOutMessage) => {
       console.log('[Main] Worker message:', msg.type);
 
       // Runtime events and completed messages must be durable even when the
@@ -197,11 +208,12 @@ function getAgentWorker(): Worker {
       // still receives these events when available, but it is no longer the
       // only owner of assistant-message persistence.
       if (msg.type === 'runEvent') {
-        const evt = msg.event;
+        const runtime: AppRuntimeIdentity = getAppRuntimeIdentity(worker.threadId);
+        const evt = msg.event.type === 'run_started' ? { ...msg.event, runtime } : msg.event;
         const sid = msg.sessionId;
         if (evt.type !== 'metadata') {
           if (evt.type === 'run_started') {
-            await startRun(sid, evt.runId);
+            await startRun(sid, evt.runId, runtime);
           }
           await appendEvent(sid, evt.runId, evt);
         }

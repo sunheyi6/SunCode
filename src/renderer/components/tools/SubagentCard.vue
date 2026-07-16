@@ -76,7 +76,7 @@ watch(
 <template>
   <div class="subagent-card" :class="{ running: isRunning, done: isDone, error: isError }">
     <!-- Header -->
-    <div class="card-header" @click="toggleExpand()">
+    <div class="card-header" :class="{ 'running-scan': isRunning }" @click="toggleExpand()">
       <span class="status-dot" />
       <span class="agent-icon"><AppIcon name="bot" :size="14" /></span>
       <span class="agent-label">

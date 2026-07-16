@@ -54,6 +54,7 @@
 - `bun run electron:build` 本地打包当前平台
 - 推送 `v*` 格式 tag 触发 GitHub Actions 三平台构建
 - 构建产物：Windows `.exe` (NSIS + Portable)、macOS `.dmg` (arm64)、Linux `.AppImage` + `.deb`
+- **版本号一致性**：git tag、`package.json` 的 `version`、打包产物版本三者必须对齐。tag 使用 `v` 前缀（如 `v0.1.34`），`package.json` 与产物文件名不带前缀（如 `0.1.34`），electron-builder 自动剥离 `v` 前缀。推 tag 前先确认 `package.json` 版本已同步更新到对应值，避免错位
 
 ## 代码质量守门
 

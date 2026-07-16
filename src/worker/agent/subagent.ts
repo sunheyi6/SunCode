@@ -9,6 +9,7 @@
  * - Named persistent sessions (in-memory Map, keyed by parentSession + agent + handle)
  */
 import { cpus } from 'node:os';
+import { CHARS_PER_TOKEN } from '@shared/constants';
 import type {
   AppSettings,
   Message,
@@ -27,6 +28,12 @@ import { createModelRegistry } from '../models/registry';
 import { createToolRegistry } from '../tools/registry';
 import type { Tool } from '../tools/types';
 import { type AgentLoopResult, runAgentLoop } from './agent-loop';
+import { estimateMessagesTokens } from './context-budget';
+import {
+  resolveSubagentMaxTurns,
+  resolveSubagentThinkingLevel,
+  SUBAGENT_BUDGET,
+} from './subagent-budget';
 import { buildSystemPrompt } from './system-prompt';
 
 // ===== Types =====
@@ -56,7 +63,6 @@ export interface SubagentDispatchOptions {
 
 const MAX_DEPTH = 3;
 const MAX_NAMED_SESSIONS = 50;
-const FALLBACK_MAX_TURNS = 50; // used when neither definition nor settings specify
 
 // ===== SubagentDispatcher =====
 
@@ -177,11 +183,20 @@ export class SubagentDispatcher {
     const onParentAbort = (): void => subAbort.abort();
     this.opts.abortSignal.addEventListener('abort', onParentAbort, { once: true });
 
-    // Timeout: 5 minutes
-    const timeout = setTimeout(() => subAbort.abort(), 300_000);
+    let budgetExceededReason: string | undefined;
+    const exceedBudget = (reason: string): void => {
+      if (budgetExceededReason) return;
+      budgetExceededReason = reason;
+      subAbort.abort();
+    };
+
+    const timeout = setTimeout(
+      () => exceedBudget(`子 Agent 已达到 ${SUBAGENT_BUDGET.maxWallTimeMs / 1000} 秒时间预算`),
+      SUBAGENT_BUDGET.maxWallTimeMs,
+    );
 
     try {
-      const result = await this.runSubagent(def, call, executionId, subAbort.signal);
+      const result = await this.runSubagent(def, call, executionId, subAbort.signal, exceedBudget);
       clearTimeout(timeout);
       this.opts.abortSignal.removeEventListener('abort', onParentAbort);
 
@@ -190,15 +205,19 @@ export class SubagentDispatcher {
         thinking?: string;
         internalCalls?: ToolCallContent[];
       };
+      const turnBudgetExhausted = result.decision.reason === 'max_turns';
       const subResult: SubagentResult = {
         agent: call.agent,
         session: call.session,
-        success: true,
+        success: !turnBudgetExhausted,
         output: text,
-        toolCalls: result.turnCount,
+        toolCalls: extras.internalCalls?.length ?? 0,
         tokenUsage: result.tokenUsage,
         thinking: extras.thinking,
         internalCalls: extras.internalCalls,
+        error: turnBudgetExhausted
+          ? `子 Agent 已达到 ${resolveSubagentMaxTurns(def.maxTurns)} 轮预算`
+          : undefined,
       };
 
       this.opts.callbacks.onSubagentEnd(executionId, subResult);
@@ -215,7 +234,7 @@ export class SubagentDispatcher {
         output: '',
         toolCalls: 0,
         tokenUsage: { input: 0, output: 0, total: 0 },
-        error: isAbort ? '子 Agent 执行被取消或超时' : (err as Error).message,
+        error: budgetExceededReason ?? (isAbort ? '子 Agent 执行被取消' : (err as Error).message),
       };
 
       this.opts.callbacks.onSubagentEnd(executionId, subResult);
@@ -228,6 +247,7 @@ export class SubagentDispatcher {
     call: SubagentCall,
     executionId: string,
     signal: AbortSignal,
+    exceedBudget: (reason: string) => void,
   ) {
     // Build isolated messages
     const messages: Message[] = [];
@@ -273,6 +293,13 @@ export class SubagentDispatcher {
     // Task prompt
     messages.push({ role: 'user', content: call.prompt });
 
+    const initialInputTokens = estimateMessagesTokens(messages, CHARS_PER_TOKEN);
+    if (initialInputTokens >= SUBAGENT_BUDGET.maxInputTokens) {
+      throw new Error(
+        `子 Agent 初始上下文约 ${initialInputTokens} tokens，超过 ${SUBAGENT_BUDGET.maxInputTokens} 输入 token 预算`,
+      );
+    }
+
     // Build tool whitelist
     const allowedTools = this.buildToolWhitelist(def.tools);
     console.log(
@@ -305,7 +332,8 @@ export class SubagentDispatcher {
       tools: allowedTools,
       settings: {
         ...this.opts.settings,
-        maxTurns: def.maxTurns ?? (this.opts.settings.maxTurns || FALLBACK_MAX_TURNS),
+        maxTurns: resolveSubagentMaxTurns(def.maxTurns),
+        thinkingLevel: resolveSubagentThinkingLevel(this.opts.settings.thinkingLevel, def.thinking),
       },
       workingDir: this.opts.workingDir,
       skillsContent: '',
@@ -334,6 +362,9 @@ export class SubagentDispatcher {
       },
       onToolStart: (toolCall: ToolCallContent) => {
         subToolCalls.push({ ...toolCall, status: 'running' });
+        if (subToolCalls.length >= SUBAGENT_BUDGET.maxToolCalls) {
+          exceedBudget(`子 Agent 已达到 ${SUBAGENT_BUDGET.maxToolCalls} 次工具调用预算`);
+        }
         this.opts.callbacks.onSubagentProgress(executionId, call.agent, {
           type: 'tool_start',
           toolCall: { ...toolCall, status: 'running' },
@@ -358,6 +389,11 @@ export class SubagentDispatcher {
         // The sub-agent's runId (executionId) differs from the parent runId, so events
         // are written to a separate JSONL file under the same session.
         this.opts.callbacks.onRunEvent(event);
+      },
+      onTurnStart: (_turnCount, _maxTurns, tokens) => {
+        if (tokens.input >= SUBAGENT_BUDGET.maxInputTokens) {
+          exceedBudget(`子 Agent 已达到 ${SUBAGENT_BUDGET.maxInputTokens} 输入 token 预算`);
+        }
       },
       initialTurnCount: 0,
     });

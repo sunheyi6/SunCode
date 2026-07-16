@@ -132,3 +132,41 @@ input:focus, textarea:focus {
 .gap-sm { gap: var(--spacing-sm); }
 .gap-md { gap: var(--spacing-md); }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Slow activity sweep for tool and command rows that are still executing. */
+.running-scan {
+  position: relative;
+  overflow: hidden;
+}
+
+.running-scan::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent 38%,
+    color-mix(in srgb, var(--color-accent) 7%, transparent) 44%,
+    color-mix(in srgb, var(--color-accent) 24%, transparent) 50%,
+    color-mix(in srgb, var(--color-accent) 7%, transparent) 56%,
+    transparent 62%,
+    transparent 100%
+  );
+  transform: translateX(-110%);
+  animation: running-scan-sweep 3.2s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes running-scan-sweep {
+  to {
+    transform: translateX(110%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running-scan::before {
+    animation: none;
+    opacity: 0;
+  }
+}

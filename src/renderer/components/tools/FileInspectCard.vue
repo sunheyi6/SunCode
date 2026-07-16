@@ -83,7 +83,7 @@ const isRunning = computed(() => props.call.status === 'running');
 
 <template>
   <details class="file-inspect" :class="{ 'inspect-failed': isFailed, 'inspect-running': isRunning }">
-    <summary class="inspect-summary">
+    <summary class="inspect-summary" :class="{ 'running-scan': isRunning }">
       <span class="inspect-icon">
         <AppIcon :name="isFailed ? 'x' : 'file'" :size="13" />
       </span>

@@ -11,6 +11,8 @@
 
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { threadId } from 'node:worker_threads';
+import { readRuntimeIdentityEnvironment } from '@shared/runtime-identity';
 
 const IS_DEV = process.env.SUNCODE_IS_DEV === '1';
 
@@ -26,6 +28,10 @@ export class DiagLogger {
       mkdirSync(dirname(this.logPath), { recursive: true });
     } catch {
       // Best-effort: don't crash if we can't create the directory
+    }
+    const runtime = readRuntimeIdentityEnvironment(process.env, threadId);
+    if (runtime) {
+      this.log('INSTANCE', 'runtime identity', { ...runtime });
     }
   }
 

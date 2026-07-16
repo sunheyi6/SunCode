@@ -760,6 +760,16 @@ export interface TurnDetail {
 /** Unique identifier for an agent run. */
 export type RunId = string;
 
+/** Identifies the exact SunCode process instance that produced a log or run. */
+export interface AppRuntimeIdentity {
+  appInstanceId: string;
+  appMode: 'development' | 'production';
+  appVersion: string;
+  mainPid: number;
+  /** Worker threads share the main process PID, so their thread ID is recorded separately. */
+  workerThreadId?: number;
+}
+
 /** Wire protocol version — bumped on breaking event schema changes. */
 export const WIRE_PROTOCOL_VERSION = 1;
 
@@ -778,8 +788,20 @@ export type ContentPart = TextPart | ThinkPart;
 
 /** Events recorded in the per-run JSONL event log. */
 export type RunEvent =
-  | { type: 'metadata'; protocol_version: number; created_at: number; timestamp?: string }
-  | { type: 'run_started'; runId: RunId; timestamp: string; modelName?: string }
+  | {
+      type: 'metadata';
+      protocol_version: number;
+      created_at: number;
+      timestamp?: string;
+      runtime?: AppRuntimeIdentity;
+    }
+  | {
+      type: 'run_started';
+      runId: RunId;
+      timestamp: string;
+      modelName?: string;
+      runtime?: AppRuntimeIdentity;
+    }
   | { type: 'turn.prompt'; runId: RunId; input: string; timestamp: string }
   | { type: 'turn_started'; runId: RunId; turnNumber: number; timestamp: string }
   | { type: 'stream_event'; runId: RunId; event: StreamEvent; timestamp: string }

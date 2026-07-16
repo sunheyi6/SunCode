@@ -106,8 +106,9 @@ export function applyContextBudget(
       // Build message→turn map for accurate filtering
       const msgTurnMap = buildMessageTurnMap(working);
       working = working.filter((msg) => {
-        // Always keep system messages
-        if (msg.role === 'system') return true;
+        // System instructions and user objectives are anchors. Only old
+        // assistant/tool iterations are eligible for dropping.
+        if (msg.role === 'system' || msg.role === 'user') return true;
         const turnId = msgTurnMap.get(msg);
         return turnId ? keptTurnIds.has(turnId) : true;
       });
@@ -220,8 +221,10 @@ export function pruneStaleToolResults(
 // ============================================================================
 
 /**
- * Group messages by turn. A turn starts at each user message and includes
- * all subsequent non-user messages until the next user message.
+ * Group messages by model-tool iteration. A user message starts a fresh group,
+ * and every later assistant response starts another group with its following
+ * tool results. This lets a single long-running user request shed old loop
+ * iterations instead of treating the entire run as one protected turn.
  */
 export function groupMessagesByTurn(
   messages: Message[],
@@ -231,32 +234,34 @@ export function groupMessagesByTurn(
   let currentGroup: Message[] = [];
   let turnIndex = 0;
 
+  const flushCurrentGroup = (): void => {
+    if (currentGroup.length === 0) return;
+    groups.push(buildTurnGroup(`turn-${turnIndex}`, currentGroup, charsPerToken));
+    currentGroup = [];
+    turnIndex += 1;
+  };
+
   for (const msg of messages) {
     // System messages belong to turn 0 (always kept)
     if (msg.role === 'system') {
       // Flush current group if any
-      if (currentGroup.length > 0) {
-        groups.push(buildTurnGroup(`turn-${turnIndex}`, currentGroup, charsPerToken));
-        currentGroup = [];
-      }
+      flushCurrentGroup();
       // System messages form their own "turn"
       groups.push(buildTurnGroup('system', [msg], charsPerToken));
       continue;
     }
 
-    if (msg.role === 'user' && currentGroup.length > 0) {
-      groups.push(buildTurnGroup(`turn-${turnIndex}`, currentGroup, charsPerToken));
-      currentGroup = [];
-      turnIndex += 1;
+    if (msg.role === 'user') {
+      flushCurrentGroup();
+    } else if (msg.role === 'assistant' && currentGroup.some((item) => item.role === 'assistant')) {
+      flushCurrentGroup();
     }
 
     currentGroup.push(msg);
   }
 
   // Flush any remaining messages as the last turn
-  if (currentGroup.length > 0) {
-    groups.push(buildTurnGroup(`turn-${turnIndex}`, currentGroup, charsPerToken));
-  }
+  flushCurrentGroup();
 
   return groups;
 }

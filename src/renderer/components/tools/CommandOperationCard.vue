@@ -77,7 +77,7 @@ const exitCodeLabel = computed(() => {
 
 <template>
   <details class="command-operation" :class="{ 'command-failed': isFailed, 'command-running': isRunning }" :open="isRunning">
-    <summary class="command-summary">
+    <summary class="command-summary" :class="{ 'running-scan': isRunning }">
       <span class="command-icon"><AppIcon name="terminal" :size="13" /></span>
       <span v-if="isRunning" class="command-breathe-dot" />
       <span class="command-title">{{ title }}</span>

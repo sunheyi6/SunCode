@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS = {
   activeModel: 'deepseek-v4-pro',
   activeProvider: 'deepseek',
   thinkingLevel: 'low' as const,
-  maxTurns: 200,
+  maxTurns: 50,
   autoCompact: true,
   compactThreshold: 0.7,
   semanticCompactMode: 'off' as const,
@@ -146,7 +146,7 @@ Rules:
 - Return only JSON in this shape: {"title":"..."}`;
 
 /** Maximum number of turns before forcing a stop */
-export const MAX_TURNS = 100;
+export const MAX_TURNS = 50;
 
 /** Token estimation: rough chars per token */
 export const CHARS_PER_TOKEN = 4;

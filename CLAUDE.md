@@ -54,6 +54,7 @@
 - `bun run electron:build` 本地打包当前平台
 - 推送 `v*` 格式 tag 触发 GitHub Actions 三平台构建
 - 构建产物：Windows `.exe` (NSIS + Portable)、macOS `.dmg` (arm64)、Linux `.AppImage` + `.deb`
+- **版本号一致性**：git tag、`package.json` 的 `version`、打包产物版本三者必须对齐。tag 使用 `v` 前缀（如 `v0.1.34`），`package.json` 与产物文件名不带前缀（如 `0.1.34`），electron-builder 自动剥离 `v` 前缀。推 tag 前先确认 `package.json` 版本已同步更新到对应值，避免错位
 
 ## 代码质量守门
 
@@ -63,6 +64,25 @@
 - CI（`.github/workflows/validate.yml`）在 push/PR 时运行 lint + typecheck，作为远程守门
 - biome 配置策略：真实 bug 类规则（`noUnsafeOptionalChaining`、`noAssignInExpressions`、`noImplicitAnyLet` 等）设为 error；风格偏好类（`noNonNullAssertion`、`noExplicitAny`）设为 warn，允许带注释的 `any`（pi-ai 库类型 cast 等场景）
 - Vue SFC 中模板引用的变量若被 biome 误报 unused，用 `// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.` 抑制
+
+## 内置设计文档（自认识）
+
+设计文档打包在 `docs/` 目录下，随应用发版。用户询问项目设计、架构、路径等信息时，按需读取：
+
+| 文档 | 用途 |
+|------|------|
+| `docs/project-info.md` | **运行时信息**：数据目录、日志路径、存储路径、构建信息、项目约束（Agent 回答"日志在哪""路径是什么"时优先读这个） |
+| `docs/README.md` | 完整设计文档索引（含所有功能设计文档列表） |
+| `docs/system-prompt-design.md` | System Prompt 构建细节 |
+| `docs/tool-calling-design.md` | 工具调用架构 |
+| `docs/memory-system-design.md` | 记忆系统设计 |
+| `docs/failure-lessons-design.md` | 教训系统设计 |
+| `docs/task-planning-system.md` | 任务计划系统 |
+| `docs/streaming-output-design.md` | 流式输出渲染 |
+| `docs/session-switch-performance.md` | 会话切换性能优化 |
+
+> 发版后 docs 目录位于 `process.resourcesPath/docs/`，开发模式下在项目根目录 `docs/`。
+> 通过 `read` 工具直接读取，路径为 `docs/{filename}`（代理会自动拼接工作目录）。
 
 ## 架构约定
 

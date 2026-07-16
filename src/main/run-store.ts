@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { appendFile, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { DayStats, ModelStats, RunEvent, RunId } from '@shared/types';
+import type { AppRuntimeIdentity, DayStats, ModelStats, RunEvent, RunId } from '@shared/types';
 import { WIRE_PROTOCOL_VERSION } from '@shared/types';
 import { getAppDataDir } from './paths';
 
@@ -109,7 +109,11 @@ export async function getTokenUsageAggregate(): Promise<{
 }
 
 /** Create the run directory and write the metadata header as the first JSONL line. */
-export async function startRun(sessionId: string, runId: RunId): Promise<void> {
+export async function startRun(
+  sessionId: string,
+  runId: RunId,
+  runtime?: AppRuntimeIdentity,
+): Promise<void> {
   const dir = runsDir(sessionId);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -121,6 +125,7 @@ export async function startRun(sessionId: string, runId: RunId): Promise<void> {
       type: 'metadata',
       protocol_version: WIRE_PROTOCOL_VERSION,
       created_at: Date.now(),
+      runtime,
     };
     await appendFile(filePath, `${JSON.stringify(metadataEvent)}\n`, 'utf-8');
   }

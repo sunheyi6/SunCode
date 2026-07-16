@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, nativeTheme, shell } from 'electron';
 // app-identity MUST be the first local import: it sets the dev app name before
 // any other module resolves app.getPath('userData') at import time.
-import { IS_DEV } from './app-identity';
+import { APP_RUNTIME_IDENTITY, IS_DEV } from './app-identity';
 import { initAutoUpdater } from './auto-updater';
 import { registerIpcHandlers } from './ipc-handlers';
 import { getLogPath, logger } from './logger';
@@ -208,7 +208,7 @@ async function initApp(): Promise<void> {
 
 // App lifecycle
 logger.info('[App] Starting SunCode', {
-  version: app.getVersion(),
+  ...APP_RUNTIME_IDENTITY,
   platform: process.platform,
   arch: process.arch,
   nodeVersion: process.version,

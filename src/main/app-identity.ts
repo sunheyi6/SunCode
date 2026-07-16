@@ -13,10 +13,26 @@
  * it here and importing this module before anything else, we guarantee that
  * ordering regardless of where other modules resolve userData.
  */
+import { randomUUID } from 'node:crypto';
+import type { AppRuntimeIdentity } from '@shared/types';
 import { app } from 'electron';
 
 export const IS_DEV = !app.isPackaged;
 
 if (IS_DEV) {
   app.setName('SunCode Dev');
+}
+
+/** Stable for this launch only, so PID reuse and side-by-side dev/prod runs stay distinguishable. */
+export const APP_RUNTIME_IDENTITY: AppRuntimeIdentity = Object.freeze({
+  appInstanceId: randomUUID(),
+  appMode: IS_DEV ? 'development' : 'production',
+  appVersion: app.getVersion(),
+  mainPid: process.pid,
+});
+
+export function getAppRuntimeIdentity(workerThreadId?: number): AppRuntimeIdentity {
+  return workerThreadId === undefined
+    ? APP_RUNTIME_IDENTITY
+    : { ...APP_RUNTIME_IDENTITY, workerThreadId };
 }

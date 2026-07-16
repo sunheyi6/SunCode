@@ -194,8 +194,9 @@ function streamingToolText(entry: InlineCallTraceEntry): string {
 
 function streamingToolClass(entry: InlineCallTraceEntry): string {
   if (entry.kind !== 'tools') return '';
-  const call = entry.toolCalls[0];
-  return call ? toolStatusClass(call) : '';
+  if (entry.hasRunning) return 'running';
+  if (entry.hasFailed) return 'failed';
+  return 'done';
 }
 </script>
 
@@ -235,7 +236,7 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
         class="streaming-tool-details"
         :class="[streamingToolClass(entry), { current: entry.isCurrent }]"
       >
-        <summary class="streaming-tool-row">
+        <summary class="streaming-tool-row" :class="{ 'running-scan': entry.hasRunning }">
           <span class="streaming-tool-dot" :class="streamingToolClass(entry)" />
           <span class="streaming-tool-text">{{ streamingToolText(entry) }}</span>
         </summary>
@@ -258,7 +259,10 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
               :key="call.id"
               class="streaming-tool-call"
             >
-              <summary class="streaming-tool-call-summary">
+              <summary
+                class="streaming-tool-call-summary"
+                :class="{ 'running-scan': call.status === 'running' }"
+              >
                 <span class="streaming-tool-dot" :class="toolStatusClass(call)" />
                 <span class="streaming-tool-call-title">{{ toolTitle(call) }}</span>
               </summary>
@@ -378,7 +382,10 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
             :class="toolStatusClass(call)"
             :open="call.status === 'running' && toolHasOutput(call)"
           >
-            <summary class="trace-tool-item-summary">
+            <summary
+              class="trace-tool-item-summary"
+              :class="{ 'running-scan': call.status === 'running' }"
+            >
               <span class="trace-tool-status">{{ toolStatus(call) }}</span>
               <span class="trace-tool-title">{{ toolTitle(call) }}</span>
             </summary>
@@ -530,26 +537,6 @@ function streamingToolClass(entry: InlineCallTraceEntry): string {
 
 .streaming-tool-details.running .streaming-tool-row {
   color: var(--color-accent);
-}
-
-.streaming-tool-details.running.current .streaming-tool-row {
-  position: relative;
-  overflow: hidden;
-}
-
-.streaming-tool-details.running.current .streaming-tool-row::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    110deg,
-    transparent 0%,
-    color-mix(in srgb, var(--color-accent) 18%, transparent) 45%,
-    transparent 70%
-  );
-  transform: translateX(-120%);
-  animation: trace-shimmer-sweep 2.4s ease-in-out infinite;
-  pointer-events: none;
 }
 
 .streaming-tool-dot {

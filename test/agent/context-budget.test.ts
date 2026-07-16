@@ -260,6 +260,32 @@ describe('groupMessagesByTurn', () => {
     expect(turn0.messages.length).toBe(4); // user + assistant + 2 tools
   });
 
+  it('splits repeated model-tool iterations inside one user request', () => {
+    const msgs: Message[] = [
+      system('System'),
+      user('Fix the color'),
+      assistant('Inspecting styles', [
+        { type: 'tool_call', id: 'tc1', name: 'read', arguments: '{}' },
+      ]),
+      toolResult('tc1', 'old styles'),
+      assistant('Inspecting tokens', [
+        { type: 'tool_call', id: 'tc2', name: 'read', arguments: '{}' },
+      ]),
+      toolResult('tc2', 'token values'),
+      assistant('Applying change', [
+        { type: 'tool_call', id: 'tc3', name: 'edit', arguments: '{}' },
+      ]),
+      toolResult('tc3', 'updated'),
+    ];
+
+    const groups = groupMessagesByTurn(msgs);
+
+    expect(groups).toHaveLength(4);
+    expect(groups.slice(1).map((group) => group.messages.length)).toEqual([3, 2, 2]);
+    expect(groups[1]!.messages[0]!.role).toBe('user');
+    expect(groups[2]!.messages[0]!.role).toBe('assistant');
+  });
+
   it('handles messages with only system prompt', () => {
     const msgs: Message[] = [system('System')];
     const groups = groupMessagesByTurn(msgs);
@@ -328,6 +354,26 @@ describe('selectTurnsByBudget', () => {
     expect(kept.has('turn-1')).toBe(true);
     // turn-0 should be dropped
     expect(kept.has('turn-0')).toBe(false);
+  });
+
+  it('keeps the original user objective when old model-tool iterations are dropped', () => {
+    const msgs: Message[] = [
+      user('Original objective'),
+      assistant('a'.repeat(400)),
+      toolResult('tc1', 'b'.repeat(400)),
+      assistant('c'.repeat(400)),
+      toolResult('tc2', 'd'.repeat(400)),
+      assistant('recent'),
+      toolResult('tc3', 'recent result'),
+    ];
+
+    const { messages } = applyContextBudget(
+      msgs,
+      defaultPolicy({ maxHistoryTokens: 50, minRecentTurns: 1 }),
+    );
+
+    expect(messages).toContain(msgs[0]);
+    expect(messages.filter((message) => message.role === 'assistant').length).toBeLessThan(3);
   });
 
   it('always keeps system turns', () => {

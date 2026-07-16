@@ -16,7 +16,7 @@
 
 import { join } from 'node:path';
 import log from 'electron-log/main';
-import { IS_DEV } from './app-identity';
+import { APP_RUNTIME_IDENTITY, IS_DEV } from './app-identity';
 import { getAppDataDir } from './paths';
 
 // ── Resolve log path to <userData>/.suncode/app.log ───────────────────
@@ -27,6 +27,12 @@ log.transports.file.resolvePathFn = () => LOG_PATH;
 log.transports.file.fileName = 'app.log';
 log.transports.file.maxSize = 2 * 1024 * 1024; // 2 MB before rotation → app.old.log
 log.transports.file.level = IS_DEV ? 'debug' : 'info';
+log.variables.appMode = APP_RUNTIME_IDENTITY.appMode;
+log.variables.appVersion = APP_RUNTIME_IDENTITY.appVersion;
+log.variables.mainPid = String(APP_RUNTIME_IDENTITY.mainPid);
+log.variables.appInstanceId = APP_RUNTIME_IDENTITY.appInstanceId;
+log.transports.file.format =
+  '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] [{appMode} v{appVersion} pid={mainPid} instance={appInstanceId}]{scope} {text}';
 
 // Console transport: verbose in dev (terminal-attached), reduced in production
 log.transports.console.level = IS_DEV ? 'debug' : 'warn';

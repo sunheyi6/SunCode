@@ -367,7 +367,10 @@ function detectOutputLang(tc: ToolCallContent): string | undefined {
                         :call="tc"
                       />
                       <details v-else class="trace-generic-tool">
-                        <summary class="trace-generic-summary">
+                        <summary
+                          class="trace-generic-summary"
+                          :class="{ 'running-scan': tc.status === 'running' }"
+                        >
                           <span class="trace-generic-name">{{ tc.name }}</span>
                           <span class="trace-generic-text">{{ toolSummary(tc) }}</span>
                           <span

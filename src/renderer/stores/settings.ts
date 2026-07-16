@@ -8,7 +8,7 @@ export const useSettingsStore = defineStore('settings', () => {
     activeModel: 'claude-sonnet-4-5',
     activeProvider: 'anthropic',
     thinkingLevel: 'low',
-    maxTurns: 200,
+    maxTurns: 50,
     autoCompact: true,
     compactThreshold: 0.7,
     semanticCompactMode: 'off',
