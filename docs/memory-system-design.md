@@ -97,10 +97,9 @@ export interface MemoryEntry {
   summary: string;               // 记忆摘要
   scope?: MemoryScope;           // 作用域
   kind?: MemoryKind;             // 类型
-  embedding?: number[];          // 向量嵌入（用于相似度计算）
   importance?: number;           // 重要度 1-5
   tags?: string[];               // 标签
-  accessCount?: number;          // 访问次数
+  accessCount?: number;          // 访问次数（检索路径只累加内存计数，写操作时才落盘）
   updatedAt?: string;            // 最后更新时间
   expiresAt?: string;            // 过期时间
   validFrom?: string;            // 生效时间
@@ -112,10 +111,11 @@ export interface MemoryEntry {
 
 export interface MemoryScene {
   id: string;
-  centroid: number[];      // 场景中心向量
-  entries: string[];       // 包含的记忆 slug
-  summary: string;         // 场景摘要
-  tags: string[];          // 场景标签
+  features: Record<string, number>;  // 稀疏特征 → 权重中心（与 textFeatureMap 同特征空间）
+  entryCount: number;          // 已并入中心的条目数（用于加权更新）
+  entries: string[];           // 包含的记忆 slug
+  summary: string;             // 场景摘要
+  tags: string[];              // 场景标签
   updatedAt: string;
   createdAt: string;
 }
@@ -143,36 +143,29 @@ export interface MemoryScene {
 
 ### 单条记忆文件格式
 
+frontmatter 中的 `meta` 行是机器读取的唯一真源（完整 JSON，无损往返）；
+其余字段和 Markdown 正文仅供人阅读。旧格式文件（无 `meta` 行）仍按正文小节解析。
+
 ```yaml
 ---
+meta: {"date":"2026-07-11","slug":"manual-1718078400000","kind":"project_fact",...}
 date: "2026-07-11"
-slug: "manual-1718078400000"
-kind: "project_fact"
 scope: "project"
+kind: "project_fact"
 importance: 3
 tags: ["Vue", "component"]
-updatedAt: "2026-07-11T10:00:00Z"
-validFrom: "2026-07-11"
 ---
 
-用户请求：创建一个记忆管理组件
+## 创建一个记忆管理组件
 
-记忆摘要：用户希望能够手动添加项目记忆，用于在后续会话中被 AI 引用。
+**工具使用**:
+  - read x1
 
----
+**摘要**:
+用户希望能够手动添加项目记忆，用于在后续会话中被 AI 引用。
 
-## 结构化事实
-
-- **事实**: 项目使用 Vue 3 框架
-- **偏好**: 用户喜欢简洁的 UI 设计
-- **决策**: 使用组件化架构
-
----
-
-## 工具使用
-
-- read: 1 次
-- edit: 2 次
+**结构化事实**:
+- fact: 项目 使用 Vue 3
 ```
 
 ---

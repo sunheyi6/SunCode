@@ -1306,7 +1306,6 @@ export interface MemoryEntry {
   summary: string;
   scope?: MemoryScope;
   kind?: MemoryKind;
-  embedding?: number[];
   importance?: number;
   tags?: string[];
   accessCount?: number;

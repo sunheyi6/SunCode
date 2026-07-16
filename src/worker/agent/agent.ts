@@ -31,13 +31,17 @@ import { parseInitCommand } from './init-handler';
 import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
 import {
   buildSessionSnapshot,
+  deleteMemory,
+  flushMemoryAccessCounts,
   getAllMemories,
+  isMemoryWorthSaving,
   loadMemories,
   loadMemoriesWithEntries,
   type MemoryEntry,
   type StructuredFact,
   saveMemory,
   saveSessionSnapshot,
+  updateMemory,
 } from './memory';
 
 import { createSkillsLoader, preloadSkills } from './skills';
@@ -342,6 +346,10 @@ export class Agent {
         this.isRunning = false;
         this.abortController = null;
       }
+      // The read path only buffers access-count increments in memory; flush
+      // them once the run is done so counters persist even in read-only
+      // sessions that never trigger a `saveMemory`.
+      flushMemoryAccessCounts();
     }
 
     // After the main run, inject a summary turn if the user requested a soft stop
@@ -390,6 +398,10 @@ export class Agent {
         this.isRunning = false;
         this.abortController = null;
       }
+      // The read path only buffers access-count increments in memory; flush
+      // them once the continuation is done so counters persist even in
+      // read-only sessions that never trigger a `saveMemory`.
+      flushMemoryAccessCounts();
     }
   }
 
@@ -508,6 +520,10 @@ export class Agent {
     } finally {
       this.isRunning = false;
       this.abortController = null;
+      // The read path only buffers access-count increments in memory; flush
+      // them once the summary run is done so counters persist even in
+      // read-only sessions that never trigger a `saveMemory`.
+      flushMemoryAccessCounts();
     }
   }
 
@@ -533,9 +549,15 @@ export class Agent {
     // Load .agents.md (Codex convention): project-level, then user-level
     const agentsMdContent = await loadAgentsMd(this.workingDir);
 
-    // Load auto-generated memories from prior sessions (with semantic search)
+    // Load auto-generated memories from prior sessions (with semantic search).
+    // The retrieval query joins recent user turns so pronoun-only follow-ups
+    // ("继续改一下") still match memories from earlier in the conversation.
     const userQuery = latestUserText(this.messages);
-    const memoryResult = await loadMemoriesWithEntries(this.workingDir, userQuery, this.sessionId);
+    const memoryResult = await loadMemoriesWithEntries(
+      this.workingDir,
+      recentUserText(this.messages),
+      this.sessionId,
+    );
     const memoryContent = memoryResult.content;
     const memoryEntries = memoryResult.entries;
     const relevantLessonsContent = loadRelevantLessons(
@@ -914,6 +936,16 @@ export class Agent {
         }
       }
 
+      // Skip trivial interactions (greetings, short chats without tool use);
+      // explicit durable-memory requests always get recorded.
+      const totalToolCalls = Object.values(toolsUsed).reduce((sum, count) => sum + count, 0);
+      if (
+        !isMemoryWorthSaving(userRequest, totalToolCalls) &&
+        !isExplicitDurableMemoryRequest(userRequest)
+      ) {
+        return;
+      }
+
       const slug =
         userRequest
           .slice(0, 40)
@@ -1044,7 +1076,7 @@ export class Agent {
   }
 }
 
-async function promoteExplicitDurableFacts(
+export async function promoteExplicitDurableFacts(
   workingDir: string,
   sessionId: string,
   userRequest: string,
@@ -1076,6 +1108,28 @@ async function promoteExplicitDurableFacts(
     );
     if (hasSameFacts) continue;
 
+    // A durable fact with the same type/subject/predicate but a different
+    // object contradicts the stored one (e.g. "项目 使用 Vue" → "项目 使用
+    // React"). Remove only the contradicting facts from the stored entry so
+    // retrieval never surfaces both sides of a contradiction; any co-stored
+    // facts that are still valid are preserved. The whole entry is deleted
+    // only once every fact in it has been superseded.
+    const supersededSlugs: string[] = [];
+    for (const entry of existing) {
+      const storedFacts = entry.facts ?? [];
+      if (storedFacts.length === 0) continue;
+      const kept = storedFacts.filter(
+        (stored) =>
+          !facts.some((fact) => sameFactStem(stored, fact) && stored.object !== fact.object),
+      );
+      if (kept.length === storedFacts.length) continue;
+      if (kept.length === 0) {
+        supersededSlugs.push(entry.slug);
+      } else {
+        updateMemory(workingDir, entry.date, entry.slug, { facts: kept }, sessionId);
+      }
+    }
+
     const kind =
       factType === 'preference'
         ? 'preference'
@@ -1102,11 +1156,21 @@ async function promoteExplicitDurableFacts(
         importance: 4,
         tags: [kind, 'auto-promoted'],
         facts,
+        supersedes: supersededSlugs.length > 0 ? supersededSlugs : undefined,
       },
       provider,
       modelId,
       sessionId,
     );
+
+    for (const slug of supersededSlugs) {
+      try {
+        const match = existing.find((entry) => entry.slug === slug);
+        if (match) deleteMemory(workingDir, match.date, match.slug, sessionId);
+      } catch {
+        // Best-effort cleanup of fully-superseded memories.
+      }
+    }
   }
 }
 
@@ -1125,6 +1189,13 @@ function sameFact(left: StructuredFact, right: StructuredFact): boolean {
   );
 }
 
+/** Same fact "slot" (type/subject/predicate) regardless of the object value. */
+function sameFactStem(left: StructuredFact, right: StructuredFact): boolean {
+  return (
+    left.type === right.type && left.subject === right.subject && left.predicate === right.predicate
+  );
+}
+
 function latestUserText(messages: Message[]): string {
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
   if (!lastUserMsg) return '';
@@ -1135,6 +1206,27 @@ function latestUserText(messages: Message[]): string {
         .filter((b) => b.type === 'text')
         .map((b) => ('text' in b ? b.text : ''))
         .join(' ');
+}
+
+/**
+ * Join the most recent user turns (newest last) into a single retrieval query,
+ * so follow-up messages that only make sense in context still match memories.
+ */
+function recentUserText(messages: Message[], count = 3, maxLength = 600): string {
+  const texts: string[] = [];
+  for (let i = messages.length - 1; i >= 0 && texts.length < count; i--) {
+    const message = messages[i]!;
+    if (message.role !== 'user') continue;
+    const text =
+      typeof message.content === 'string'
+        ? message.content
+        : message.content
+            .filter((b) => b.type === 'text')
+            .map((b) => ('text' in b ? b.text : ''))
+            .join(' ');
+    if (text.trim()) texts.unshift(text.trim().slice(0, 200));
+  }
+  return texts.join(' ').slice(0, maxLength);
 }
 
 function inferLatestUiLanguage(messages: Message[]): UiLanguage {

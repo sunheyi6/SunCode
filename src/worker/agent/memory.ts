@@ -19,8 +19,18 @@ const MEMSCENES_DIR = 'scenes';
 const MAX_FILES = 30;
 const MAX_SUMMARY_LENGTH = 500;
 const MAX_RETRIEVED_MEMORIES = 5;
-const MEMSCENE_SIMILARITY_THRESHOLD = 0.6;
-const MEMSCENE_MIN_ENTRIES = 2;
+/**
+ * Sparse-cosine threshold for scene clustering. Calibrated for key-aligned
+ * sparse cosine over CJK n-gram/ASCII-token features, where genuinely related
+ * short texts score far lower than with the old positional cosine.
+ */
+const MEMSCENE_SIMILARITY_THRESHOLD = 0.2;
+/**
+ * Resident slots for pinned/global/preference memories. Their value does not
+ * depend on keyword overlap with the query, so they bypass relevance scoring —
+ * bounded so they cannot crowd out query-relevant memories.
+ */
+const MAX_RESIDENT_MEMORIES = 2;
 /** Minimum relevance score threshold — memories scoring below this are excluded. */
 const MIN_RELEVANCE_SCORE = 1.0;
 
@@ -50,7 +60,6 @@ export interface MemoryEntry {
   summary: string;
   scope?: MemoryScope;
   kind?: MemoryKind;
-  embedding?: number[];
   importance?: number;
   tags?: string[];
   accessCount?: number;
@@ -82,7 +91,10 @@ export interface SessionSnapshot {
 
 export interface MemoryScene {
   id: string;
-  centroid: number[];
+  /** Sparse feature -> weight centroid, aligned with `textFeatureMap` keys. */
+  features: Record<string, number>;
+  /** Number of entries folded into `features` (for weighted centroid updates). */
+  entryCount: number;
   entries: string[];
   summary: string;
   tags: string[];
@@ -90,8 +102,9 @@ export interface MemoryScene {
   createdAt: string;
 }
 
-const embeddingCache: Map<string, number[]> = new Map();
 const sceneCache: Map<string, MemoryScene[]> = new Map();
+/** Access-count increments not yet persisted to disk (flushed on the next write). */
+const pendingAccessCounts: Map<string, number> = new Map();
 
 export interface LoadMemoriesResult {
   content: string;
@@ -154,14 +167,53 @@ export async function loadMemoriesWithEntries(
     return { content: '', entries: [] };
   }
 
-  const selectedEntries = query?.trim()
-    ? await searchMemories(entries, query)
-    : entries.slice(0, Math.min(entries.length, MAX_RETRIEVED_MEMORIES));
+  // Resident channel: pinned / global / preference memories are always injected
+  // (bounded by MAX_RESIDENT_MEMORIES) because their relevance does not depend on
+  // keyword overlap with the query — user preferences especially never match
+  // task-specific queries but should still shape every reply.
+  const residents = entries
+    .filter((entry) => isResidentMemory(entry) && isCurrentlyValid(entry))
+    .sort(
+      (a, b) =>
+        (b.importance ?? 1) - (a.importance ?? 1) ||
+        (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''),
+    )
+    .slice(0, MAX_RESIDENT_MEMORIES);
+  const residentKeys = new Set(residents.map((entry) => `${entry.date}-${entry.slug}`));
+  const rest = entries.filter((entry) => !residentKeys.has(`${entry.date}-${entry.slug}`));
+
+  const retrieved = query?.trim()
+    ? await searchMemories(rest, query)
+    : rest.slice(0, Math.min(rest.length, MAX_RETRIEVED_MEMORIES));
+
+  const selectedEntries = [...residents, ...retrieved].slice(0, MAX_RETRIEVED_MEMORIES);
 
   recordMemoryAccess(workingDir, selectedEntries, sessionId);
 
   const content = formatMemoryIndex(selectedEntries);
   return { content: content.slice(0, 4000), entries: selectedEntries };
+}
+
+/** Memories whose injection must not depend on query keyword overlap. */
+function isResidentMemory(entry: MemoryEntry): boolean {
+  return Boolean(entry.pinned) || entry.scope === 'global' || entry.kind === 'preference';
+}
+
+function isCurrentlyValid(entry: MemoryEntry, now = Date.now()): boolean {
+  const validFrom = entry.validFrom ? Date.parse(entry.validFrom) : -Infinity;
+  const expiresAt = entry.expiresAt ? Date.parse(entry.expiresAt) : Infinity;
+  return now >= validFrom && now <= expiresAt;
+}
+
+/**
+ * Heuristic gate for automatic session-memory recording: trivial interactions
+ * (greetings, short chats with no tool use) are not worth persisting. Explicit
+ * durable-memory requests are handled by the caller and always pass.
+ */
+export function isMemoryWorthSaving(userRequest: string, totalToolCalls: number): boolean {
+  if (isSocialQuery(userRequest)) return false;
+  if (totalToolCalls === 0 && userRequest.trim().length < 20) return false;
+  return true;
 }
 
 export async function saveMemory(
@@ -206,19 +258,16 @@ export async function saveMemory(
     }
   }
 
-  try {
-    finalEntry.embedding = await computeEmbedding(finalEntry, provider, modelId);
-  } catch (e) {
-    console.warn('Failed to compute embedding:', e);
-  }
-
   const sessionPath = join(memDir, `${finalEntry.date}-${finalEntry.slug}.md`);
   writeFileSync(sessionPath, formatSessionMemory(finalEntry), 'utf-8');
 
-  await consolidateMemScenes(memDir);
+  // Incremental scene assignment: only the new entry is compared against
+  // existing scenes (falls back to a full rebuild for legacy scene files).
+  consolidateMemScenes(memDir, finalEntry);
 
   pruneOldMemories(memDir);
   rebuildIndexes(memDir);
+  flushMemoryAccessCounts();
   return finalEntry;
 }
 
@@ -261,10 +310,6 @@ export function updateMemory(
   const targetDir = memoryDirForScope(workingDir, targetScope, sessionId);
   entry.scope = targetScope;
   if (targetDir !== source.memDir) entry.sceneId = undefined;
-
-  if (updates.userRequest !== undefined || updates.summary !== undefined) {
-    entry.embedding = simpleTextEmbedding(`${entry.userRequest} ${entry.summary}`);
-  }
 
   if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
   writeFileSync(join(targetDir, fileName), formatSessionMemory(entry), 'utf-8');
@@ -358,7 +403,7 @@ export function getAllMemories(
 
 export function getMemScenes(workingDir: string, sessionId?: string): MemoryScene[] {
   const memDir = sessionId ? sessionMemoryDir(workingDir, sessionId) : projectMemoryDir(workingDir);
-  return loadMemScenes(memDir);
+  return loadMemScenes(memDir).scenes;
 }
 
 export function saveSessionSnapshot(workingDir: string, snapshot: SessionSnapshot): void {
@@ -464,96 +509,191 @@ export function mergeMemories(
   rebuildIndexes(memDir);
 }
 
-async function consolidateMemScenes(memDir: string): Promise<void> {
+function entryFeatures(entry: MemoryEntry): Map<string, number> {
+  return textFeatureMap(`${entry.userRequest} ${entry.summary} ${formatFacts(entry.facts)}`);
+}
+
+function newSceneFromEntry(entry: MemoryEntry, features: Map<string, number>): MemoryScene {
+  const now = new Date().toISOString();
+  return {
+    id: `scene-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    features: Object.fromEntries(features),
+    entryCount: 1,
+    entries: [entry.slug],
+    summary: entry.summary || '',
+    tags: entry.tags || [],
+    updatedAt: now,
+    createdAt: now,
+  };
+}
+
+/** Weighted fold of a new entry's features into the scene centroid. */
+function foldEntryIntoScene(
+  scene: MemoryScene,
+  entry: MemoryEntry,
+  features: Map<string, number>,
+): void {
+  scene.entries.push(entry.slug);
+  const merged: Record<string, number> = {};
+  for (const [key, value] of Object.entries(scene.features)) {
+    merged[key] = value * scene.entryCount;
+  }
+  for (const [key, value] of features) {
+    merged[key] = (merged[key] ?? 0) + value;
+  }
+  const divisor = scene.entryCount + 1;
+  for (const key of Object.keys(merged)) {
+    merged[key] = (merged[key] ?? 0) / divisor;
+  }
+  scene.features = merged;
+  scene.entryCount += 1;
+  scene.tags = [...new Set([...scene.tags, ...(entry.tags || [])])];
+  scene.summary = mergeSummaries(scene.summary, entry.summary);
+  scene.updatedAt = new Date().toISOString();
+}
+
+function findBestScene(scenes: MemoryScene[], features: Map<string, number>): MemoryScene | null {
+  let matched: MemoryScene | null = null;
+  let bestSimilarity = 0;
+  for (const scene of scenes) {
+    const similarity = sparseCosine(new Map(Object.entries(scene.features)), features);
+    if (similarity > bestSimilarity && similarity >= MEMSCENE_SIMILARITY_THRESHOLD) {
+      bestSimilarity = similarity;
+      matched = scene;
+    }
+  }
+  return matched;
+}
+
+function writeSceneFile(memDir: string, scene: MemoryScene): void {
   const scenesDir = join(memDir, MEMSCENES_DIR);
   if (!existsSync(scenesDir)) {
     mkdirSync(scenesDir, { recursive: true });
   }
+  writeFileSync(join(scenesDir, `${scene.id}.json`), JSON.stringify(scene, null, 2), 'utf-8');
+}
 
-  const entries = loadScopedMemoryEntries(memDir, 'session');
-  const existingScenes = loadMemScenes(memDir);
-  const updatedScenes = [...existingScenes];
+function writeEntrySceneId(memDir: string, entry: MemoryEntry, sceneId?: string): void {
+  const entryPath = join(memDir, `${entry.date}-${entry.slug}.md`);
+  if (!existsSync(entryPath)) return;
+  try {
+    const parsed = parseSessionMemory(readFileSync(entryPath, 'utf-8'));
+    parsed.sceneId = sceneId;
+    writeFileSync(entryPath, formatSessionMemory(parsed), 'utf-8');
+  } catch {
+    // Scene backfill is best-effort and must never block a save.
+  }
+}
 
-  for (const entry of entries) {
-    if (!entry.embedding || !entry.slug) continue;
+/**
+ * Assign memories to scene clusters using key-aligned sparse cosine similarity
+ * (the same feature space as search, so a scene's centroid is semantically
+ * meaningful). With `newEntry`, only that entry is folded into the existing
+ * scene set — the incremental path taken on every save. Otherwise all entries
+ * are re-clustered from scratch, which also migrates legacy scene files.
+ */
+function consolidateMemScenes(memDir: string, newEntry?: MemoryEntry): void {
+  const { scenes, legacy } = loadMemScenes(memDir);
 
-    let matchedScene = null;
-    let bestSimilarity = 0;
-
-    for (const scene of updatedScenes) {
-      if (!scene.centroid) continue;
-      const similarity = cosineSimilarity(entry.embedding!, scene.centroid);
-      if (similarity > bestSimilarity && similarity >= MEMSCENE_SIMILARITY_THRESHOLD) {
-        bestSimilarity = similarity;
-        matchedScene = scene;
-      }
-    }
-
-    if (matchedScene) {
-      if (!matchedScene.entries.includes(entry.slug)) {
-        matchedScene.entries.push(entry.slug);
-        matchedScene.centroid = updateCentroid(matchedScene.centroid, entry.embedding!);
-        matchedScene.tags = [...new Set([...matchedScene.tags, ...(entry.tags || [])])];
-        matchedScene.summary = mergeSummaries(matchedScene.summary, entry.summary);
-        matchedScene.updatedAt = new Date().toISOString();
-      }
+  if (newEntry && !legacy) {
+    const features = entryFeatures(newEntry);
+    const matched = findBestScene(scenes, features);
+    const scene = matched ?? newSceneFromEntry(newEntry, features);
+    if (matched) {
+      foldEntryIntoScene(matched, newEntry, features);
     } else {
-      const newScene: MemoryScene = {
-        id: `scene-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        centroid: [...entry.embedding!],
-        entries: [entry.slug],
-        summary: entry.summary || '',
-        tags: entry.tags || [],
-        updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      };
-      updatedScenes.push(newScene);
+      scenes.push(scene);
+    }
+    writeSceneFile(memDir, scene);
+    writeEntrySceneId(memDir, newEntry, scene.id);
+    sceneCache.set(memDir, scenes);
+    return;
+  }
+
+  // Full rebuild: re-cluster everything, oldest first.
+  const entries = loadScopedMemoryEntries(memDir, 'session').reverse();
+  const rebuilt: MemoryScene[] = [];
+  for (const entry of entries) {
+    if (!entry.slug) continue;
+    const features = entryFeatures(entry);
+    const matched = findBestScene(rebuilt, features);
+    if (matched) {
+      foldEntryIntoScene(matched, entry, features);
+    } else {
+      rebuilt.push(newSceneFromEntry(entry, features));
     }
   }
 
-  for (const scene of updatedScenes) {
-    writeFileSync(join(scenesDir, `${scene.id}.json`), JSON.stringify(scene, null, 2), 'utf-8');
+  const scenesDir = join(memDir, MEMSCENES_DIR);
+  if (!existsSync(scenesDir)) {
+    mkdirSync(scenesDir, { recursive: true });
+  }
+  for (const file of readdirSync(scenesDir).filter((f) => f.endsWith('.json'))) {
+    try {
+      unlinkSync(join(scenesDir, file));
+    } catch {
+      // Best-effort cleanup of stale scene files.
+    }
+  }
+  for (const scene of rebuilt) {
+    writeSceneFile(memDir, scene);
   }
 
   const entriesToScenes: Record<string, string> = {};
-  for (const scene of updatedScenes) {
+  for (const scene of rebuilt) {
     for (const entrySlug of scene.entries) {
       entriesToScenes[entrySlug] = scene.id;
     }
   }
-
   for (const entry of entries) {
-    const entryPath = join(memDir, `${entry.date}-${entry.slug}.md`);
-    if (existsSync(entryPath)) {
-      const parsed = parseSessionMemory(readFileSync(entryPath, 'utf-8'));
-      parsed.sceneId = entriesToScenes[entry.slug];
-      writeFileSync(entryPath, formatSessionMemory(parsed), 'utf-8');
-    }
+    writeEntrySceneId(memDir, entry, entriesToScenes[entry.slug]);
   }
 
-  sceneCache.set(memDir, updatedScenes);
+  sceneCache.set(memDir, rebuilt);
 }
 
-function loadMemScenes(memDir: string): MemoryScene[] {
+function loadMemScenes(memDir: string): { scenes: MemoryScene[]; legacy: boolean } {
   const cached = sceneCache.get(memDir);
-  if (cached) return cached;
+  if (cached) return { scenes: cached, legacy: false };
 
   const scenesDir = join(memDir, MEMSCENES_DIR);
-  if (!existsSync(scenesDir)) return [];
+  if (!existsSync(scenesDir)) return { scenes: [], legacy: false };
 
   const scenes: MemoryScene[] = [];
+  let legacy = false;
   try {
     for (const file of readdirSync(scenesDir).filter((f) => f.endsWith('.json'))) {
-      const content = readFileSync(join(scenesDir, file), 'utf-8');
-      const scene = JSON.parse(content) as MemoryScene;
-      scenes.push(scene);
+      const raw = JSON.parse(
+        readFileSync(join(scenesDir, file), 'utf-8'),
+      ) as Partial<MemoryScene> & {
+        centroid?: unknown;
+      };
+      // Scenes written before the sparse-feature format carry a positional
+      // number[] centroid; they cannot be compared key-aligned, so the next
+      // consolidation re-clusters from scratch.
+      if (Array.isArray(raw.centroid) || !raw.features || typeof raw.features !== 'object') {
+        legacy = true;
+        continue;
+      }
+      scenes.push({
+        id: raw.id ?? `scene-${Date.now()}`,
+        features: raw.features,
+        entryCount: raw.entryCount ?? raw.entries?.length ?? 1,
+        entries: raw.entries ?? [],
+        summary: raw.summary ?? '',
+        tags: raw.tags ?? [],
+        updatedAt: raw.updatedAt ?? '',
+        createdAt: raw.createdAt ?? '',
+      });
     }
   } catch {
     // Skip unreadable scene files
   }
 
-  sceneCache.set(memDir, scenes);
-  return scenes;
+  if (!legacy) {
+    sceneCache.set(memDir, scenes);
+  }
+  return { scenes, legacy };
 }
 
 function sessionMemoryDir(workingDir: string, sessionId?: string): string {
@@ -610,13 +750,21 @@ function formatSessionMemory(entry: MemoryEntry): string {
           '**结构化事实**:',
           ...entry.facts.map(
             (f) =>
-              `- ${f.type}: ${f.subject} ${f.predicate} ${f.object}${f.validity.end ? ` (有效期: ${f.validity.start} ~ ${f.validity.end})` : ''}`,
+              `- ${f.type}: ${f.subject} ${f.predicate} ${f.object}${f.validity?.end ? ` (有效期: ${f.validity.start} ~ ${f.validity.end})` : ''}`,
           ),
         ].join('\n')
       : '';
 
+  const supersedesSection =
+    entry.supersedes && entry.supersedes.length > 0
+      ? ['', '**取代的记忆**:', ...entry.supersedes.map((slug) => `- ${slug}`)].join('\n')
+      : '';
+
   return [
     '---',
+    // Machine-readable single source of truth; the human-readable fields below
+    // and the Markdown body are informational only. Parsers must prefer `meta`.
+    `meta: ${JSON.stringify(entry)}`,
     `date: ${entry.date}`,
     `scope: ${entry.scope ?? 'session'}`,
     `kind: ${entry.kind ?? 'task_summary'}`,
@@ -628,8 +776,6 @@ function formatSessionMemory(entry: MemoryEntry): string {
     ...(entry.pinned ? ['pinned: true'] : []),
     ...(entry.tags && entry.tags.length > 0 ? [`tags: ${entry.tags.join(', ')}`] : []),
     ...(entry.sceneId ? [`sceneId: ${entry.sceneId}`] : []),
-    ...(entry.embedding ? [`embedding: ${JSON.stringify(entry.embedding)}`] : []),
-    ...(entry.facts && entry.facts.length > 0 ? [`facts: ${JSON.stringify(entry.facts)}`] : []),
     '---',
     '',
     `## ${entry.userRequest.slice(0, 80)}`,
@@ -641,6 +787,7 @@ function formatSessionMemory(entry: MemoryEntry): string {
     '**摘要**:',
     entry.summary || '(none)',
     factsSection,
+    supersedesSection,
     '',
   ].join('\n');
 }
@@ -660,6 +807,16 @@ function parseSessionMemory(content: string): MemoryEntry {
           frontmatter[match[1]] = match[2]?.trim() ?? '';
         }
       }
+    }
+  }
+
+  // Fast path: files written with a `meta` JSON line round-trip losslessly and
+  // never touch the brittle body parsing below (kept for legacy files only).
+  if (frontmatter.meta) {
+    try {
+      return JSON.parse(frontmatter.meta) as MemoryEntry;
+    } catch {
+      // Fall through to legacy parsing.
     }
   }
 
@@ -699,7 +856,6 @@ function parseSessionMemory(content: string): MemoryEntry {
     pinned: frontmatter.pinned === 'true',
     tags: frontmatter.tags ? frontmatter.tags.split(',').map((t) => t.trim()) : [],
     sceneId: frontmatter.sceneId || undefined,
-    embedding: frontmatter.embedding ? JSON.parse(frontmatter.embedding) : undefined,
     facts: frontmatter.facts ? JSON.parse(frontmatter.facts) : undefined,
   };
 }
@@ -837,25 +993,40 @@ function loadAllMemoryEntries(memDir: string): MemoryEntry[] {
   return loadScopedMemoryEntries(memDir, 'session');
 }
 
-/** Persist the fact that a memory was injected into an agent context. */
+/**
+ * Record that memories were injected into an agent context. Updates the
+ * in-memory entries immediately (so scoring within this process reflects the
+ * access) but defers disk writes — the read path must stay read-only. Pending
+ * increments are persisted by `flushMemoryAccessCounts` on the next memory
+ * write; losing them on a crash is acceptable for a heuristic counter.
+ */
 function recordMemoryAccess(workingDir: string, entries: MemoryEntry[], sessionId?: string): void {
-  const changedDirs = new Set<string>();
-
   for (const entry of entries) {
     const memDir = memoryDirForScope(workingDir, entry.scope ?? 'session', sessionId);
     const filePath = join(memDir, `${entry.date}-${entry.slug}.md`);
     if (!existsSync(filePath)) continue;
 
     entry.accessCount = (entry.accessCount ?? 0) + 1;
+    pendingAccessCounts.set(filePath, (pendingAccessCounts.get(filePath) ?? 0) + 1);
+  }
+}
+
+/** Persist deferred access-count increments; called after memory writes. */
+export function flushMemoryAccessCounts(): void {
+  if (pendingAccessCounts.size === 0) return;
+
+  const changedDirs = new Set<string>();
+  for (const [filePath, delta] of pendingAccessCounts) {
     try {
-      const persisted = parseSessionMemory(readFileSync(filePath, 'utf-8'));
-      persisted.accessCount = entry.accessCount;
-      writeFileSync(filePath, formatSessionMemory(persisted), 'utf-8');
-      changedDirs.add(memDir);
+      const entry = parseSessionMemory(readFileSync(filePath, 'utf-8'));
+      entry.accessCount = (entry.accessCount ?? 0) + delta;
+      writeFileSync(filePath, formatSessionMemory(entry), 'utf-8');
+      changedDirs.add(join(filePath, '..'));
     } catch {
       // Access tracking is best-effort and must never block a run.
     }
   }
+  pendingAccessCounts.clear();
 
   for (const memDir of changedDirs) rebuildIndexes(memDir);
 }
@@ -912,10 +1083,7 @@ function hybridScore(
     if (entry.pinned) score += 1;
   }
 
-  const now = Date.now();
-  const validFrom = entry.validFrom ? Date.parse(entry.validFrom) : -Infinity;
-  const expiresAt = entry.expiresAt ? Date.parse(entry.expiresAt) : Infinity;
-  if (now < validFrom || now > expiresAt) {
+  if (!isCurrentlyValid(entry)) {
     score *= 0.3;
   }
 
@@ -954,30 +1122,6 @@ function memoryRetentionScore(entry: MemoryEntry): number {
   const updated = Date.parse(entry.updatedAt || entry.date || '');
   if (Number.isFinite(updated)) score += updated / 86_400_000_000;
   return score;
-}
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length === 0 || b.length === 0) return 0;
-  const minLen = Math.min(a.length, b.length);
-  let dotProduct = 0;
-  let magA = 0;
-  let magB = 0;
-  for (let i = 0; i < minLen; i++) {
-    dotProduct += a[i] * b[i];
-    magA += a[i] * a[i];
-    magB += b[i] * b[i];
-  }
-  if (magA === 0 || magB === 0) return 0;
-  return dotProduct / (Math.sqrt(magA) * Math.sqrt(magB));
-}
-
-function updateCentroid(current: number[], newVec: number[]): number[] {
-  const result: number[] = [];
-  const maxLen = Math.max(current.length, newVec.length);
-  for (let i = 0; i < maxLen; i++) {
-    result.push(((current[i] || 0) + (newVec[i] || 0)) / 2);
-  }
-  return result;
 }
 
 function mergeSummaries(existing: string, newSummary: string): string {
@@ -1190,29 +1334,10 @@ async function extractStructuredFacts(
   }
 }
 
-async function computeEmbedding(
-  entry: MemoryEntry,
-  provider?: string,
-  modelId?: string,
-): Promise<number[]> {
-  const text = `${entry.userRequest} ${entry.summary}`;
-  const cacheKey = text.slice(0, 200);
-
-  if (embeddingCache.has(cacheKey)) {
-    const cached = embeddingCache.get(cacheKey);
-    if (cached) return cached;
-  }
-
-  const embedding = simpleTextEmbedding(text);
-  embeddingCache.set(cacheKey, embedding);
-  return embedding;
-}
-
 /**
  * Build a sparse feature -> count map for a text. Used for key-aligned sparse
- * cosine similarity in search. Feature extraction mirrors `simpleTextEmbedding`
- * but preserves feature identity (the key) instead of collapsing to a positional
- * array, so similarity is only nonzero when features actually overlap.
+ * cosine similarity in search and scene clustering: features keep their
+ * identity (the key), so similarity is only nonzero when features overlap.
  */
 function textFeatureMap(text: string): Map<string, number> {
   const normalized = text.toLowerCase();
@@ -1268,60 +1393,4 @@ function sparseCosine(a: Map<string, number>, b: Map<string, number>): number {
 
 function todayString(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function simpleTextEmbedding(text: string): number[] {
-  const normalized = text.toLowerCase();
-  const features: string[] = [];
-  const hasCJK = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(normalized);
-
-  if (hasCJK) {
-    // For CJK text: extract character unigrams, bigrams, and trigrams
-    // to create meaningful multi-dimensional features without a word segmenter
-    const chars = [...normalized];
-    for (let i = 0; i < chars.length; i++) {
-      // Character unigram
-      features.push(chars[i]!);
-      // Bigram
-      if (i + 1 < chars.length) {
-        features.push(chars[i]! + chars[i + 1]!);
-      }
-      // Trigram
-      if (i + 2 < chars.length) {
-        features.push(chars[i]! + chars[i + 1]! + chars[i + 2]!);
-      }
-    }
-    // ASCII tokens within mixed text (e.g. "GitHub CLI" in Chinese context)
-    const asciiTokens = normalized.match(/[a-z][a-z0-9_\-.]*/g) || [];
-    for (const token of asciiTokens) {
-      if (token.length >= 2) {
-        features.push(token);
-      }
-    }
-  } else {
-    // Non-CJK text: use whitespace-separated words as before
-    const words = normalized.split(/\s+/).filter(Boolean);
-    for (const word of words) {
-      features.push(word);
-    }
-  }
-
-  // Count feature frequencies
-  const counts: Record<string, number> = {};
-  for (const f of features) {
-    counts[f] = (counts[f] || 0) + 1;
-  }
-
-  // Sort by key for deterministic feature order
-  const topFeatures = Object.entries(counts)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(0, 200);
-
-  const embedding = topFeatures.map(([, c]) => c);
-  const norm = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0));
-  if (norm > 0) {
-    return embedding.map((v) => v / norm);
-  }
-
-  return embedding.length > 0 ? embedding : [0];
 }
