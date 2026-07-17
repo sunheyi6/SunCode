@@ -11,10 +11,11 @@
 |------|---------|---------|
 | 应用名 | `SunCode Dev` | `SunCode` |
 | 判断条件 | `app.isPackaged === false` | `app.isPackaged === true` |
-| appId | `com.suncode.app` | `com.suncode.app` |
+| appId / AppUserModelId | `com.suncode.app.dev` | `com.suncode.app` |
 | 产品名 | `SunCode` | `SunCode` |
 
 > 开发模式下调用 `app.setName('SunCode Dev')` 使 userData 目录独立，避免与生产版本的数据冲突。
+> Windows 上开发/生产使用不同 `AppUserModelId`，并在启动时维护带对应 AUMID 的开始菜单快捷方式（`windows-toast-shortcut.ts`），避免 Toast 点击误启 `Electron.lnk` / 裸 `electron.exe`。
 > 判断逻辑见 `src/main/app-identity.ts`，通过 `IS_DEV` 导出、通过 `SUNCODE_IS_DEV` 环境变量传递给 Worker。
 
 ---

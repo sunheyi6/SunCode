@@ -11,6 +11,7 @@ import { migrateLegacyDataDir } from './paths';
 import { recoverInterruptedSessions } from './recovery';
 import { applyWindowChrome, resolveWindowChromeColors } from './window-chrome';
 import { WindowManager } from './window-manager';
+import { ensureWindowsToastShortcut } from './windows-toast-shortcut';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -170,13 +171,12 @@ function schedulePostStartupRecovery(win: BrowserWindow): void {
 }
 
 async function initApp(): Promise<void> {
-  // Set AppUserModelId for Windows toast notifications.
-  // Without this, Electron's Notification.show() silently fails on Windows
-  // because the underlying WinRT ToastNotificationManager requires a valid
-  // AppUserModelID.
-  if (process.platform === 'win32') {
-    app.setAppUserModelId('com.suncode.app');
-  }
+  // Windows AppUserModelId is set in app-identity.ts (import-time) so dev
+  // (`com.suncode.app.dev`) and packaged (`com.suncode.app`) never share
+  // toast / taskbar activation identity.
+  // Also ensure a Start Menu .lnk carries that AUMID — otherwise toast clicks
+  // resolve to a stale Electron.lnk (bare electron.exe welcome page).
+  ensureWindowsToastShortcut();
 
   // Migrate legacy data from install directory to standard user data dir
   migrateLegacyDataDir();

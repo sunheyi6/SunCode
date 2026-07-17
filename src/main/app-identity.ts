@@ -19,8 +19,21 @@ import { app } from 'electron';
 
 export const IS_DEV = !app.isPackaged;
 
+/**
+ * Windows toast / taskbar identity. Dev and packaged builds MUST differ:
+ * the same AUMID makes Windows activate the wrong process when both are
+ * installed (e.g. toast click launches bare node_modules/electron.exe).
+ * Packaged appId stays `com.suncode.app` (electron-builder.yml).
+ */
+export const APP_USER_MODEL_ID = IS_DEV ? 'com.suncode.app.dev' : 'com.suncode.app';
+
 if (IS_DEV) {
   app.setName('SunCode Dev');
+}
+
+// Set as early as possible (module import), before app.ready / first toast.
+if (process.platform === 'win32') {
+  app.setAppUserModelId(APP_USER_MODEL_ID);
 }
 
 /** Stable for this launch only, so PID reuse and side-by-side dev/prod runs stay distinguishable. */

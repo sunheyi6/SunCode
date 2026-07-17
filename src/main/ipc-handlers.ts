@@ -918,19 +918,23 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // ── Pending notification tracking ───────────────────────────────────
   // On Windows, Electron Notification.on('click') does not reliably fire
-  // because WinRT toast activation needs a proper Start Menu shortcut.
-  // As a fallback we register window.once('focus') per notification —
-  // Windows always brings the app window to the foreground when a toast
-  // is clicked, which triggers our fallback handler.
+  // without a Start Menu shortcut whose System.AppUserModel.ID matches
+  // app.setAppUserModelId (see ensureWindowsToastShortcut). As a fallback
+  // we register window.once('focus') per notification — when activation
+  // works, Windows focuses our existing window and the fallback runs.
 
   let pendingSessionId: string | null = null;
   let pendingClearTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Dedupe rapid agent:done → notify storms (same session within window). */
+  const recentNotifyBySession = new Map<string, number>();
+  const NOTIFY_DEDUPE_MS = 8_000;
 
   /** Navigate to the completed session (window focus + renderer message). */
   function navigateToSession(sessionId: string): void {
     try {
       const win = windowManager.getMainWindow();
       if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore();
         win.show();
         win.focus();
         win.webContents.send('notify:task-click', { sessionId });
@@ -951,6 +955,31 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.on('notify:task-complete', (_event, title: string, body: string, sessionId?: string) => {
     try {
+      if (!Notification.isSupported()) {
+        console.warn('[Main] Notifications not supported on this system');
+        return;
+      }
+
+      // Collapse duplicate toasts for the same session (e.g. double done,
+      // or both focus/unfocus races). Different sessions still notify.
+      const dedupeKey = sessionId ?? `${title}\0${body}`;
+      const now = Date.now();
+      const last = recentNotifyBySession.get(dedupeKey);
+      if (last !== undefined && now - last < NOTIFY_DEDUPE_MS) {
+        console.log(
+          '[Main] Skipping duplicate task-complete notification for session:',
+          sessionId?.slice(-8) ?? 'none',
+        );
+        return;
+      }
+      recentNotifyBySession.set(dedupeKey, now);
+      // Bound map growth
+      if (recentNotifyBySession.size > 50) {
+        for (const [key, ts] of recentNotifyBySession) {
+          if (now - ts > NOTIFY_DEDUPE_MS) recentNotifyBySession.delete(key);
+        }
+      }
+
       const win = windowManager.getMainWindow();
 
       // Store pending session so the focus fallback can pick it up
@@ -976,10 +1005,23 @@ export function registerIpcHandlers(wm: WindowManager): void {
         });
       }
 
-      const notification = new Notification({ title, body });
+      const notification = new Notification({
+        title,
+        body,
+        // Silent avoids stacked sound when several sessions finish close together
+        silent: false,
+      });
       notification.on('click', () => {
         clearPendingNotification();
         if (sessionId) navigateToSession(sessionId);
+        else {
+          const w = windowManager.getMainWindow();
+          if (w && !w.isDestroyed()) {
+            if (w.isMinimized()) w.restore();
+            w.show();
+            w.focus();
+          }
+        }
       });
       notification.show();
 
