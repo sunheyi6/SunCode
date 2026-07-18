@@ -86,8 +86,10 @@
 
 ## 架构约定
 
-- Electron Main → Worker Thread → Agent → AgentLoop 单向依赖
-- IPC 通信：Renderer ↔ Main (contextBridge) ↔ Worker (postMessage)
+- 双运行模式，共用同一套 Agent 机制（`runAgentLoop` / worker agent 体系）：
+  - **Electron UI 模式**：Renderer ↔ Main (contextBridge) ↔ Worker (postMessage) → Agent → AgentLoop；工具操作本机工作区，流式输出与权限确认回 UI
+  - **无头模式（headless）**：不启动 Electron / 无窗口；host cell（如 `scripts/run-suncode-harbor-loop.ts`、benchmark 的 `SunCodeAgent`）直接跑 AgentLoop；工具可走本机或经桥接进容器。`bun run test:deep-swe` / `bun run test:terminal-bench` 属于无头模式
+- Electron UI 路径单向依赖：Main → Worker Thread → Agent → AgentLoop
 - 工具实现 `Tool` 接口，标记 `isReadonly` 控制权限
-- 权限模式：`plan`（只读工具）| `confirm_changes`（弹窗确认）| `auto_edit` | `full_access`
+- 权限模式：`plan`（只读工具）| `confirm_changes`（弹窗确认）| `auto_edit` | `full_access`（无头/benchmark 常用）
 - 会话按 `workingDirectory` 分组，切换会话时同步 Worker 工作目录

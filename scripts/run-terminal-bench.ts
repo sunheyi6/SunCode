@@ -1,5 +1,7 @@
 /**
- * Harbor Terminal-Bench runner for SunCode.
+ * Harbor Terminal-Bench runner for SunCode（无头模式 / headless）。
+ *
+ * 不启动 Electron UI；经 Harbor + suncode_agent 跑 host cell AgentLoop。
  *
  * Usage:
  *   bun run test:terminal-bench -- --task-limit 1

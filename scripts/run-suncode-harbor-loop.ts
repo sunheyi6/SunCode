@@ -1,3 +1,11 @@
+/**
+ * SunCode 无头模式（headless）入口 — Harbor / Terminal-Bench host cell。
+ *
+ * 不启动 Electron UI；直接复用 worker 侧 `runAgentLoop` 与同一套 Agent 机制。
+ * 工具经 HTTP 桥接在 benchmark 容器内执行，结果写入 cell-output / 运行日志。
+ *
+ * 由 harbor/suncode_agent.py 以 bun 拉起；也可用环境变量手工调试。
+ */
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';

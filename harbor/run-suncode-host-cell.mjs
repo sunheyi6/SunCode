@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * SunCode Harbor host cell runner.
+ * SunCode 无头模式（headless）Harbor host cell runner（legacy/simple path）。
  *
- * Runs in the host environment (Windows/macOS), uses pi-ai to call the LLM,
- * and forwards tool executions (bash, read, grep, etc.) to the Docker
- * container via the _ToolExecutorServer HTTP bridge.
+ * Does not start Electron UI. Runs on the host, calls the LLM, and forwards
+ * tool executions to the Docker container via the _ToolExecutorServer HTTP bridge.
+ * Preferred production path is scripts/run-suncode-harbor-loop.ts (shared AgentLoop).
  *
  * Environment variables (set by suncode_agent.py):
  *   SUNCODE_INSTRUCTION_FILE   - path to the instruction file

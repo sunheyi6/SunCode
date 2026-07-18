@@ -1,5 +1,7 @@
 /**
- * DeepSwe/Pier benchmark runner for SunCode.
+ * DeepSwe/Pier benchmark runner for SunCode（无头模式 / headless）。
+ *
+ * 不启动 Electron UI；经 Pier + SunCodeAgent 跑无头 Agent 路径。
  *
  * Usage:
  *   bun run test:deep-swe -- <task-id-or-path> [more tasks]

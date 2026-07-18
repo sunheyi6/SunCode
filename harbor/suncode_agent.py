@@ -1,4 +1,9 @@
-"""Harbor adapter for running SunCode against terminal-bench tasks."""
+"""Harbor adapter for SunCode headless mode (无头模式) against terminal-bench.
+
+Does not start Electron UI. Runs the host cell (`scripts/run-suncode-harbor-loop.ts`)
+which reuses the same `runAgentLoop` / worker agent stack as the desktop app.
+Tools execute inside the Harbor container via an HTTP bridge.
+"""
 
 from __future__ import annotations
 
@@ -55,7 +60,7 @@ def _host_node_process_env(cell_env: dict[str, str]) -> dict[str, str]:
 
 
 class SunCodeAgent(BaseInstalledAgent):
-    """Run SunCode on the host while executing tools inside Harbor's container."""
+    """Headless SunCode agent: host AgentLoop + tools inside Harbor's container."""
 
     SUPPORTS_ATIF = True
 

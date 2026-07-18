@@ -1,3 +1,6 @@
+/**
+ * Headless smoke: full Agent class without Electron UI（无头模式）。
+ */
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Agent } from '../src/worker/agent/agent';
