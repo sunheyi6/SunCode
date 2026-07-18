@@ -81,7 +81,7 @@ describe('pruneStaleToolResults', () => {
     const msgs: Message[] = [
       system('System prompt'),
       user('Read a large file'),
-      assistant('Let me read it'),
+      assistant('Let me read it', [{ type: 'tool_call', id: 'tc0', name: 'read', arguments: '{}' }]),
       ...Array.from({ length: 5 }, (_, i) => user(`Question ${i}`)), // push old turns back
       ...Array.from({ length: 5 }, (_, i) => toolResult(`tc${i}`, bigOutput)),
     ];
@@ -104,6 +104,56 @@ describe('pruneStaleToolResults', () => {
     expect(placeholder.originalTokens).toBeGreaterThan(0);
     expect(placeholder.originalChars).toBe(bigOutput.length);
     expect(placeholder.reason).toBe('pruned_exceeds_budget');
+    expect(typeof placeholder.recoveryHint).toBe('string');
+  });
+
+  it('resolves toolName from assistant toolCalls and can spill archive to disk', async () => {
+    const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const archiveDir = mkdtempSync(join(tmpdir(), 'suncode-archive-'));
+    try {
+      const bigOutput = JSON.stringify(
+        {
+          type: 'tool_result',
+          tool: 'bash',
+          success: true,
+          kind: 'command',
+          output: 'x'.repeat(10_000),
+        },
+        null,
+        2,
+      );
+      const msgs: Message[] = [
+        system('System prompt'),
+        user('Run build'),
+        assistant('Running', [{ type: 'tool_call', id: 'tc_bash', name: 'bash', arguments: '{}' }]),
+        toolResult('tc_bash', bigOutput),
+        user('next'),
+        assistant('ok'),
+      ];
+
+      const { messages, prunedCount } = pruneStaleToolResults(
+        msgs,
+        defaultPolicy({
+          staleToolResultPrune: { enabled: true, maxResultTokens: 100, minRecentTurnsFull: 0 },
+        }),
+        4,
+        { archiveDir },
+      );
+      expect(prunedCount).toBe(1);
+      const placeholder = JSON.parse(
+        messages.find((m) => m.toolCallId === 'tc_bash')!.content as string,
+      );
+      expect(placeholder.toolName).toBe('bash');
+      expect(placeholder.artifactPath).toBeTruthy();
+      expect(readFileSync(placeholder.artifactPath as string, 'utf8')).toBe(bigOutput);
+      expect(placeholder.recoveryHint).toEqual(
+        expect.stringContaining(placeholder.artifactPath as string),
+      );
+    } finally {
+      rmSync(archiveDir, { recursive: true, force: true });
+    }
   });
 
   it('protects recent turn tool results from pruning', () => {

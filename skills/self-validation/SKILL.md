@@ -15,8 +15,10 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 | 场景 | 模式 |
 |------|------|
 | 用户主动要求检查 | **MANUAL** — 收到"检查规范/自检/验证代码"等关键词时 |
-| 回合结束前自动触发 | **AUTO** — stop-hooks 在每次 turn 结束后自动执行（仅 `full_access` / `auto_edit` 模式） |
+| 改代码后结束前 | **COMPLETION_GATE** — Runtime 自动：`edit`/`write` 后须有真实验证命令 exit 0，否则有界返工 1 次（见 `completion-gate.ts`） |
 | 提交前验证 | **PRE_COMMIT** — 在执行 git commit 前快速验证关键项 |
+
+> 注意：规范清单（Biome/TS 风格）仍靠本 skill 手动执行；Runtime 的 Completion Gate 只强制「改完后跑过 typecheck/lint/test 类命令」，不替代完整规范自检报告。
 
 ## 阶段
 
@@ -152,44 +154,25 @@ npx biome check --changed --since=HEAD
 
 | 模式 | 输出 |
 |------|------|
-| **AUTO**（stop-hooks） | 仅在发现 **阻止提交的问题**（error 级别）时在 thinking 中报告；全部通过则静默 |
+| **COMPLETION_GATE**（Runtime） | 改代码后无验证证据时注入一次 continuation（有界）；不输出本 skill 的完整报告 |
 | **MANUAL** | 完整报告，包括通过项和违规项 |
 | **PRE_COMMIT** | 只输出违规项，发现 error 时建议用户修复后再提交 |
 
 ## 触发方式
 
-### 在 stop-hooks 中注入
+### Runtime Completion Gate（自动）
 
-```typescript
-// stop-hooks.ts — 每次 turn 结束后自动触发 self-validation
-import { readSkillAndExecute } from '../skills/loader';
+`src/worker/agent/completion-gate.ts` 在 agent loop 结束路径生效（`completionGateEnabled` 默认 true，`plan` 模式关闭）：
 
-export async function afterTurnHook(context: TurnContext): Promise<void> {
-  if (context.permissionMode === 'full_access' || context.permissionMode === 'auto_edit') {
-    // 检查本次 turn 是否有代码变更
-    const hasChanges = await gitHasChanges();
-    if (hasChanges) {
-      await readSkillAndExecute('self-validation', { mode: 'AUTO', files: context.changedFiles });
-    }
-  }
-}
-```
+1. 本 run 有成功的 `edit` / `write`
+2. 之后没有 typecheck / lint / test 等命令以 **exit 0** 结束
+3. → 注入一次返工提示；用满 1 次后允许结束（不无限循环）
 
-### 在提交前手动触发
+权威证据是 **bash 工具真实 exit code**，不是模型自述。
 
-在 system prompt 中注入：
+### 手动规范自检
 
-```
-<available_skills>
-  <skill>
-    <name>self-validation</name>
-    <description>项目规范自检：TypeScript 规则、Biome 检查、项目约束验证</description>
-    <location>.suncode/skills/self-validation/SKILL.md</location>
-  </skill>
-</available_skills>
-```
-
-模型在收到"检查规范/自检"指令或准备提交代码时，先用 `read` 读取此文件，然后按阶段执行自检。
+模型在收到"检查规范/自检"指令或准备提交代码时，先用 `read` 读取本 skill，再按阶段执行。
 
 ## 常见违规速查
 

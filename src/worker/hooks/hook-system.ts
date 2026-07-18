@@ -105,6 +105,7 @@ export function adaptStopHookAsHook(stopHook: StopHook): HookInterface {
         turnCount: ctx.turnCount || 0,
         maxTurns: ctx.maxTurns || 0,
         tokenUsage: ctx.tokenUsage || { input: 0, output: 0, total: 0 },
+        // completionGateHandledByLoop is agent-loop only; unified hook path leaves it unset
       };
       const result = await stopHook.check(stopCtx);
       return {
@@ -127,6 +128,8 @@ export function hookRegistryAsStopRegistry(hookRegistry: DefaultHookRegistry): S
       hookRegistry.register(adaptStopHookAsHook(hook));
     },
     async runAll(ctx: StopHookContext): Promise<StopHookResult> {
+      // Prefer legacy StopHook instances via a thin pass-through when possible.
+      // Unified hooks only see HookContext; completion gate is owned by agent-loop.
       const hookCtx: HookContext = {
         eventType: 'stop',
         assistantText: ctx.assistantText,

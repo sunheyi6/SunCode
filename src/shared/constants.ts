@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS = {
   maxLessons: 200,
   taskCompleteNotification: 'never' as const,
   createGitWorktree: false,
+  /** After code edits, require a real verification command before finalizing (1 repair max). */
+  completionGateEnabled: true,
 };
 
 /** Curated list of recommended models for coding tasks. */

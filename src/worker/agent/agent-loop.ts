@@ -24,6 +24,13 @@ import { DiagLogger } from '../utils/diag-logger';
 
 // ===== Helpers =====
 import { getAgentDataSubdir } from './agent-data-dir';
+import {
+  createCompletionGateState,
+  evaluateCompletionGate,
+  isCompletionGateEnabled,
+  markCompletionGateRepairUsed,
+  updateCompletionGateFromTools,
+} from './completion-gate';
 import { quickMatchLesson } from './lessons';
 import { buildStructuredTaskPrompt, buildStructuredTextMessage } from './model-structured-content';
 import { createProgressGuardState, updateSimpleTaskProgressGuard } from './progress-guard';
@@ -206,6 +213,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const latestUserPrompt = headAnchor ? getMessageTextContent(headAnchor) : '';
   const guardSimpleTask = isSimpleTask(latestUserPrompt);
   let progressGuardState = createProgressGuardState();
+  let completionGateState = createCompletionGateState();
+  const completionGateActive = isCompletionGateEnabled(settings);
   const configuredLoopTurnLimit = settings.maxTurns || MAX_TURNS;
   let loopTurnLimit = configuredLoopTurnLimit;
   let shadowCoveredThrough: Message | undefined;
@@ -488,6 +497,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             turnCount,
             maxTurns: loopTurnLimit,
             tokenUsage,
+            completionGateHandledByLoop: completionGateActive,
           });
 
           if (hookResult.shouldStop) {
@@ -538,6 +548,56 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               role: 'user',
               content: hookResult.continuationPrompt,
             });
+            onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
+            onRunEvent({
+              type: 'turn_completed',
+              runId,
+              turnNumber: turnCount,
+              hasToolCalls: false,
+              timestamp: '',
+            });
+            continue;
+          }
+        }
+
+        // Completion gate: after material edits, require real verification evidence
+        // (bash exit 0 on typecheck/lint/test). At most one bounded repair turn.
+        if (completionGateActive) {
+          const gateDecision = evaluateCompletionGate(completionGateState);
+          if (gateDecision.action === 'repair') {
+            completionGateState = markCompletionGateRepairUsed(completionGateState);
+            console.log(
+              `[AgentLoop] Completion gate repair ${gateDecision.attempt}/${gateDecision.maxAttempts}: ${gateDecision.reason}`,
+            );
+            diag.milestone('COMPLETION_GATE', 'repair', {
+              attempt: gateDecision.attempt,
+              maxAttempts: gateDecision.maxAttempts,
+              reason: gateDecision.reason,
+            });
+            contextMessages.push({
+              role: 'user',
+              content: gateDecision.prompt,
+            });
+            onStream({ type: 'guidance_injected', text: gateDecision.prompt });
+            onRunEvent({
+              type: 'completion_gate_blocked',
+              runId,
+              reason: gateDecision.reason,
+              attempt: gateDecision.attempt,
+              maxAttempts: gateDecision.maxAttempts,
+              timestamp: '',
+            });
+            onRunEvent({
+              type: 'guidance_injected',
+              runId,
+              text: gateDecision.prompt,
+              timestamp: '',
+            });
+            // Leave room for one verification + answer turn.
+            loopTurnLimit = Math.max(
+              loopTurnLimit,
+              Math.min(configuredLoopTurnLimit, turnCount + 2),
+            );
             onStream({ type: 'turn_end', turnCount, hasToolCalls: false });
             onRunEvent({
               type: 'turn_completed',
@@ -676,6 +736,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           content,
           toolCallId: tr.toolCallId,
         });
+      }
+
+      if (completionGateActive) {
+        completionGateState = updateCompletionGateFromTools(
+          completionGateState,
+          toolResults,
+          turnCount,
+        );
       }
 
       if (guardSimpleTask) {
@@ -1262,8 +1330,9 @@ function parsePlanBlockToTaskPlan(
   taskType: TaskPlan['taskType'],
 ): TaskPlan | null {
   const steps: TaskStep[] = [];
-  const strictRegex = /^\s*[-*+]\s+\[([ xX])\]\s+Step\s+(\d+):\s*(.+)\$/gm;
-  const looseRegex = /^\s*[-*+]\s+\[([ xX])\]\s*(.+)\$/gm;
+  // End-of-line anchor must be `$`, not a literal `\$`.
+  const strictRegex = /^\s*[-*+]\s+\[([ xX])\]\s+Step\s+(\d+):\s*(.+)$/gm;
+  const looseRegex = /^\s*[-*+]\s+\[([ xX])\]\s*(.+)$/gm;
 
   let match: RegExpExecArray | null = strictRegex.exec(planBlock);
   while (match !== null) {

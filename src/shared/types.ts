@@ -300,6 +300,12 @@ export interface AppSettings {
   createGitWorktree?: boolean;
   /** Whether to show the model's thinking/reasoning process in the UI. Default true. */
   showThinking?: boolean;
+  /**
+   * Completion gate: after write/edit, require a real verification command (typecheck/lint/test)
+   * with exit 0 before allowing the run to finalize. At most one repair turn.
+   * Default true. Disabled automatically in plan mode.
+   */
+  completionGateEnabled?: boolean;
 }
 
 /** A skill discovered from SunCode or a compatible coding agent installation. */
@@ -469,6 +475,11 @@ export interface StopHookContext {
   tokenUsage: TokenUsage;
   /** If goal is active, the goal definition. */
   goal?: GoalDefinition;
+  /**
+   * When true, completion-gate logic is handled by the agent loop state machine
+   * (run-level write/verification evidence). Stop hooks should not double-block.
+   */
+  completionGateHandledByLoop?: boolean;
 }
 
 /** Result of a stop hook check. */
@@ -855,6 +866,14 @@ export type RunEvent =
   | { type: 'run_failed'; runId: RunId; error: string; timestamp: string }
   | { type: 'run_aborted'; runId: RunId; timestamp: string }
   | { type: 'guidance_injected'; runId: RunId; text: string; timestamp: string }
+  | {
+      type: 'completion_gate_blocked';
+      runId: RunId;
+      reason: string;
+      attempt: number;
+      maxAttempts: number;
+      timestamp: string;
+    }
   | { type: 'run_recovered'; runId: RunId; reason: string; timestamp: string }
   | {
       type: 'model_request_started';
@@ -1128,6 +1147,16 @@ export interface ArchivedToolResultPlaceholder {
   originalTokens: number;
   originalChars: number;
   reason: 'pruned_exceeds_budget';
+  /** Absolute path to archived full body when prune spilled content to disk. */
+  artifactPath?: string;
+  /** How the model can recover the omitted content. */
+  recoveryHint?: string;
+}
+
+/** Optional hooks for context budget (archive spill, etc.). */
+export interface ContextBudgetOptions {
+  /** Directory for pruned tool-result archives. When set, oversized bodies are written here. */
+  archiveDir?: string;
 }
 
 /** Policy for pruning stale tool results from conversation context. */

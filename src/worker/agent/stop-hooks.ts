@@ -57,21 +57,21 @@ export class SafetyStopHook implements StopHook {
   }
 }
 /**
- * Self-validation stop hook: reminds the agent to consider
- * self-validation after code-changing turns.
+ * Self-validation stop hook (legacy name kept for registry stability).
+ *
+ * Run-level completion discipline lives in `completion-gate.ts` and is applied
+ * by the agent loop with real bash exit-code evidence. This hook is a no-op
+ * when the loop already owns that path (`completionGateHandledByLoop`).
  */
 export class SelfValidationStopHook implements StopHook {
   name = 'self-validation';
   priority = 80;
 
   async check(ctx: StopHookContext): Promise<StopHookResult> {
-    // Check if there were tool calls that modified files
-    const hasWriteTools = ctx.toolResults.some((tr) => tr.name === 'edit' || tr.name === 'write');
-
-    if (!hasWriteTools) {
+    if (ctx.completionGateHandledByLoop) {
       return { shouldBlock: false, shouldStop: false };
     }
-
+    // Without loop-owned evidence, do not block on empty toolResults snapshots.
     return { shouldBlock: false, shouldStop: false };
   }
 }

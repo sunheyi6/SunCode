@@ -287,8 +287,12 @@ export const useChatStore = defineStore('chat', () => {
           msg.turnCount = event.turnCount ?? 0;
           msg.maxTurns = event.maxTurns ?? 0;
         }
+        // Each turn's data.text is single-turn only. Reset all length
+        // trackers so plan re-parse and text append work for progress
+        // updates (📋 进度更新) in later turns.
         lastThinkingLength = 0;
         lastTextLength = 0;
+        lastParsedPlanLength = 0;
         lastToolCallCount = 0;
         currentTurnBlockStartIndex = msg?.blocks?.length ?? 0;
         console.debug(
@@ -509,8 +513,12 @@ export const useChatStore = defineStore('chat', () => {
         // Each turn's data.text is single-turn only, so when a later tool-use turn
         // has no 📋 marker we must NOT overwrite the accumulated plan — only
         // update it when a fresh plan block is actually present in this turn's text.
+        // Re-parse every 30 chars, or immediately when 📋 first appears since the
+        // last parse (so progress updates reach GitPanel without waiting).
         if (event.type === 'message_update' && data.text) {
-          if (data.text.length - lastParsedPlanLength >= 30 || data.text.includes('[PLAN]')) {
+          const planMarkerJustAppeared =
+            data.text.includes('📋') && !data.text.slice(0, lastParsedPlanLength).includes('📋');
+          if (data.text.length - lastParsedPlanLength >= 30 || planMarkerJustAppeared) {
             const plan = parseTaskPlan(data.text, true);
             if (plan) target.taskPlan = plan;
             lastParsedPlanLength = data.text.length;

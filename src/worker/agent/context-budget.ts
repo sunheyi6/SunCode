@@ -12,10 +12,13 @@
  */
 
 import { createHash } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { CHARS_PER_TOKEN } from '@shared/constants';
 import type {
   ArchivedToolResultPlaceholder,
   ContextBudgetDiagnostic,
+  ContextBudgetOptions,
   ContextBudgetPolicy,
   Message,
 } from '@shared/types';
@@ -45,6 +48,7 @@ export interface TurnGroup {
 export function applyContextBudget(
   messages: Message[],
   policy: ContextBudgetPolicy,
+  options?: ContextBudgetOptions,
 ): { messages: Message[]; diagnostic: ContextBudgetDiagnostic } {
   const charsPerToken = policy.charsPerToken ?? CHARS_PER_TOKEN;
   const beforeTokens = estimateMessagesTokens(messages, charsPerToken);
@@ -74,7 +78,7 @@ export function applyContextBudget(
 
   // ---- Layer 1: Stale tool result prune ----
   if (policy.staleToolResultPrune?.enabled) {
-    const pruneResult = pruneStaleToolResults(working, policy, charsPerToken);
+    const pruneResult = pruneStaleToolResults(working, policy, charsPerToken, options);
     working = pruneResult.messages;
     prunedToolResults = pruneResult.prunedCount;
     prunedTokensSaved = pruneResult.tokensSaved;
@@ -165,11 +169,14 @@ export function applyContextBudget(
 /**
  * Replace oversized tool results with lightweight archive placeholders.
  * Protects the most recent N turns' tool results from pruning.
+ * When `options.archiveDir` is set, full bodies are spilled to disk so the model
+ * can recover them via the read tool.
  */
 export function pruneStaleToolResults(
   messages: Message[],
   policy: ContextBudgetPolicy,
   _charsPerToken = CHARS_PER_TOKEN,
+  options?: ContextBudgetOptions,
 ): { messages: Message[]; prunedCount: number; tokensSaved: number } {
   const prunePolicy = policy.staleToolResultPrune;
   if (!prunePolicy?.enabled) {
@@ -186,6 +193,7 @@ export function pruneStaleToolResults(
   const messageTurnMap = buildMessageTurnMap(messages);
   // Identify protected turns (most recent N non-system turn IDs)
   const protectedTurnIds = recentTurnIdsFromGroups(messageTurnMap, minRecentTurnsFull);
+  const toolNameByCallId = buildToolNameIndex(messages);
 
   let prunedCount = 0;
   let tokensSaved = 0;
@@ -205,8 +213,8 @@ export function pruneStaleToolResults(
     const { tokens } = countStringTokens(msg.content);
     if (tokens <= maxResultTokens) return msg;
 
-    // Create placeholder
-    const placeholder = buildPlaceholder(msg, msg.content, tokens);
+    // Create placeholder (optionally spill full body to archiveDir)
+    const placeholder = buildPlaceholder(msg, msg.content, tokens, toolNameByCallId, options);
     prunedCount += 1;
     tokensSaved += tokens - PLACEHOLDER_TOKENS;
 
@@ -319,27 +327,92 @@ export function selectTurnsByBudget(
 // ============================================================================
 
 /** Approximate token count of a placeholder — used for savings estimation. */
-const PLACEHOLDER_TOKENS = 45;
+const PLACEHOLDER_TOKENS = 80;
 
-function buildPlaceholder(msg: Message, content: string, originalTokens: number): string {
+function buildPlaceholder(
+  msg: Message,
+  content: string,
+  originalTokens: number,
+  toolNameByCallId: Map<string, string>,
+  options?: ContextBudgetOptions,
+): string {
+  const toolCallId = msg.toolCallId ?? 'unknown';
   const bodyHash = createHash('sha256').update(content).digest('hex').slice(0, 16);
+  const toolName =
+    (msg.toolCallId ? toolNameByCallId.get(msg.toolCallId) : undefined) ??
+    extractToolNameFromContent(content) ??
+    'unknown';
+
+  const artifactPath = tryWriteArchive(options?.archiveDir, toolCallId, bodyHash, content);
+  const recoveryHint = artifactPath
+    ? `Archived full tool result at ${artifactPath}. Use the read tool on that path if you need the omitted content.`
+    : `Tool result was pruned to save context (${originalTokens} tokens, ${content.length} chars). Re-run the ${toolName} tool only if safe and you still need the full content.`;
 
   const placeholder: ArchivedToolResultPlaceholder = {
     kind: 'suncode.archived_tool_result',
-    toolCallId: msg.toolCallId ?? 'unknown',
-    toolName: extractToolName(msg),
+    toolCallId,
+    toolName,
     bodyHash,
     originalTokens,
     originalChars: content.length,
     reason: 'pruned_exceeds_budget',
+    ...(artifactPath ? { artifactPath } : {}),
+    recoveryHint,
   };
 
   return JSON.stringify(placeholder);
 }
 
-function extractToolName(msg: Message): string {
-  // Tool messages don't carry the tool name directly, use toolCallId prefix
-  return msg.toolCallId ?? 'unknown';
+/**
+ * Resolve tool names from assistant toolCalls and model-facing tool result JSON.
+ */
+function buildToolNameIndex(messages: Message[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.toolCalls) {
+      for (const tc of msg.toolCalls) {
+        if (tc.id && tc.name) map.set(tc.id, tc.name);
+      }
+    }
+    if (msg.role === 'tool' && msg.toolCallId && typeof msg.content === 'string') {
+      const name = extractToolNameFromContent(msg.content);
+      if (name) map.set(msg.toolCallId, name);
+    }
+  }
+  return map;
+}
+
+function extractToolNameFromContent(content: string): string | undefined {
+  try {
+    const parsed = JSON.parse(content) as { tool?: unknown; toolName?: unknown };
+    if (typeof parsed.tool === 'string' && parsed.tool) return parsed.tool;
+    if (typeof parsed.toolName === 'string' && parsed.toolName) return parsed.toolName;
+  } catch {
+    // plain text tool body
+  }
+  return undefined;
+}
+
+function tryWriteArchive(
+  archiveDir: string | undefined,
+  toolCallId: string,
+  bodyHash: string,
+  content: string,
+): string | undefined {
+  if (!archiveDir) return undefined;
+  try {
+    mkdirSync(archiveDir, { recursive: true });
+    const safeId = toolCallId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
+    const filePath = join(archiveDir, `${safeId}_${bodyHash}.txt`);
+    writeFileSync(filePath, content, 'utf8');
+    return filePath;
+  } catch (error) {
+    console.warn(
+      `[ContextBudget] Failed to archive pruned tool result ${toolCallId}:`,
+      (error as Error).message,
+    );
+    return undefined;
+  }
 }
 
 function isPlaceholderString(content: string): boolean {

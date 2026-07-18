@@ -122,7 +122,7 @@ export async function loadMemories(
 
 /**
  * Detect casual social/chatty queries that don't need memory retrieval.
- * Skips memory injection for greetings, mood expressions, and chit-chat.
+ * Skips memory injection for greetings, mood expressions, identity chit-chat.
  */
 function isSocialQuery(query: string): boolean {
   const trimmed = query.trim();
@@ -138,6 +138,15 @@ function isSocialQuery(query: string): boolean {
 
   // Greeting patterns
   if (/^(你好|哈[喽罗]|嗨|喂|大家[好]?|早[上安好]?|晚[上安好]?)/.test(trimmed)) return true;
+
+  // Identity / capability chit-chat — no task context, memory retrieval is noise
+  if (
+    /^(你是谁|你是做什么的|你能做什么|你会做什么|介绍一下你自己|你叫什么|what are you|who are you|what can you do)\??$/i.test(
+      trimmed,
+    )
+  ) {
+    return true;
+  }
 
   // Mood expressions
   if (/心情(不错|很好|不好|差|烦躁|愉悦|开心|美美)/.test(trimmed)) return true;
@@ -1073,11 +1082,12 @@ function hybridScore(
   const similarity = sparseCosine(entryFeatures, queryFeatures);
   relevanceScore += similarity * 10;
 
-  // Bias only acts as a tie-breaker among memories that already have query
-  // relevance. A memory with zero relevance scores 0 and is filtered out by
-  // MIN_RELEVANCE_SCORE, even if pinned or high-importance.
-  let score = 0;
-  if (relevanceScore > 0) {
+  // Bias only ranks memories that already clear the pure-relevance threshold.
+  // Tiny accidental overlap (e.g. shared Chinese particle "的") must NOT unlock
+  // importance/accessCount/pinned bonuses — that was pushing unrelated global
+  // preferences into every conversation that happened to share a stop word.
+  let score = relevanceScore;
+  if (relevanceScore >= MIN_RELEVANCE_SCORE) {
     score = relevanceScore + (entry.importance ?? 1) * 0.25;
     score += Math.min(entry.accessCount ?? 0, 10) * 0.1;
     if (entry.pinned) score += 1;
@@ -1335,6 +1345,15 @@ async function extractStructuredFacts(
 }
 
 /**
+ * High-frequency Chinese function characters. As unigrams they create false
+ * sparse-cosine overlap between unrelated texts (e.g. both query and memory
+ * contain "的"). Bigrams/trigrams still carry content signal.
+ */
+const CJK_STOP_UNIGRAMS = new Set(
+  '的了是在我不有和这中个以上也下过着等与对就还把被让给从到而或且吗呢吧啊嘛呀'.split(''),
+);
+
+/**
  * Build a sparse feature -> count map for a text. Used for key-aligned sparse
  * cosine similarity in search and scene clustering: features keep their
  * identity (the key), so similarity is only nonzero when features overlap.
@@ -1347,12 +1366,14 @@ function textFeatureMap(text: string): Map<string, number> {
   if (hasCJK) {
     const chars = [...normalized];
     for (let i = 0; i < chars.length; i++) {
-      // Unigrams: only CJK characters are meaningful single-character features.
-      // Single ASCII letters/digits/punctuation are noise that creates false
-      // similarity between unrelated texts (e.g. any text with a space or the
-      // letters g/u/b would otherwise match). ASCII contributes via tokens below.
+      // Unigrams: only content CJK characters. Function words like "的/了/是"
+      // are noise that create false similarity between unrelated texts.
+      // Single ASCII letters/digits/punctuation are also noise; ASCII contributes
+      // via multi-char tokens below. Bigrams/trigrams keep phrase-level signal.
       const ch = chars[i]!;
-      if (/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(ch)) features.push(ch);
+      if (/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(ch) && !CJK_STOP_UNIGRAMS.has(ch)) {
+        features.push(ch);
+      }
       if (i + 1 < chars.length) features.push(chars[i]! + chars[i + 1]!);
       if (i + 2 < chars.length) features.push(chars[i]! + chars[i + 1]! + chars[i + 2]!);
     }

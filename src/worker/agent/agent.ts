@@ -636,7 +636,12 @@ export class Agent {
             if (ctx.modelContextWindow && !policy.maxHistoryTokens) {
               policy.maxHistoryTokens = Math.floor(ctx.modelContextWindow * 0.9);
             }
-            const result = applyContextBudget(ctx.contextMessages, policy);
+            const archiveDir = getAgentDataSubdir(
+              this.workingDir,
+              '.suncode/tool-result-archive',
+              this.sessionId,
+            );
+            const result = applyContextBudget(ctx.contextMessages, policy, { archiveDir });
             if (result.diagnostic.changed) {
               console.log(
                 `[ContextBudget] ${result.diagnostic.beforeMessages}→${result.diagnostic.afterMessages} msgs, ` +
@@ -803,7 +808,12 @@ export class Agent {
             if (ctx.modelContextWindow && !policy.maxHistoryTokens) {
               policy.maxHistoryTokens = Math.floor(ctx.modelContextWindow * 0.9);
             }
-            const budgetResult = applyContextBudget(ctx.contextMessages, policy);
+            const archiveDir = getAgentDataSubdir(
+              this.workingDir,
+              '.suncode/tool-result-archive',
+              this.sessionId,
+            );
+            const budgetResult = applyContextBudget(ctx.contextMessages, policy, { archiveDir });
             return { contextMessages: budgetResult.messages };
           }
         : undefined,

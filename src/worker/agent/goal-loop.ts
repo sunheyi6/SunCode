@@ -14,6 +14,9 @@
  *   │  → Run `bun run lint` → exit 0 ✅               │
  *   │  → Goal met, stop                               │
  *   └────────────────────────────────────────────────┘
+ *
+ * When --verify is set, the verification command is authoritative:
+ * model task_complete / natural stop cannot override a failing verify.
  */
 
 import { spawn } from 'node:child_process';
@@ -215,11 +218,11 @@ export async function runGoalLoop(input: GoalLoopInput): Promise<GoalLoopOutput>
     // Push the final message to history
     messages.push(result.finalMessage);
 
-    // Check if the model explicitly declared completion via task_complete.
-    // This is the AUTHORITATIVE signal — the model knows if it's done.
+    // Model may declare done via task_complete / natural stop, but when a
+    // verification command is configured it is the authority — not the model.
     const modelDeclaredDone = result.decision.reason === 'task_complete';
 
-    // Run verification if configured (advisory when model declared done)
+    // Run verification if configured (authoritative completion signal)
     if (goal.verificationCommand) {
       const verification = await runVerification(goal.verificationCommand, loopConfig.workingDir);
 
@@ -237,24 +240,6 @@ export async function runGoalLoop(input: GoalLoopInput): Promise<GoalLoopOutput>
         verificationExitCode: verification.exitCode,
       });
 
-      // Model says done → trust the model, end regardless of verification
-      if (modelDeclaredDone) {
-        if (verification.passed) {
-          goalState.status = 'verification_passed';
-          onGoalEvent({ type: 'goal_verification_passed', tokenUsage: totalTokens });
-        } else {
-          // Model declared done but verification failed — log warning but still end
-          goalState.status = 'verification_passed';
-          goalState.reason = `model declared task_complete; verification command had exitCode=${verification.exitCode} (advisory only)`;
-          console.warn(
-            `[GoalLoop] Model declared done but verification failed: exitCode=${verification.exitCode}`,
-          );
-          onGoalEvent({ type: 'goal_verification_passed', tokenUsage: totalTokens });
-        }
-        break;
-      }
-
-      // Model did NOT declare done — verification is authoritative
       if (verification.exitCode === null && !verification.timedOut) {
         goalState.status = 'blocked';
         goalState.reason = `verification command failed to run: ${verification.output.slice(0, 300)}`;
@@ -263,13 +248,21 @@ export async function runGoalLoop(input: GoalLoopInput): Promise<GoalLoopOutput>
         break;
       }
 
+      // Verification exit 0 is the only success path when --verify is set
       if (verification.passed) {
         goalState.status = 'verification_passed';
         onGoalEvent({ type: 'goal_verification_passed', tokenUsage: totalTokens });
         break;
       }
 
-      // Verification failed — check if same error as last time (systematic)
+      // Verification failed — even if the model declared done, do not end.
+      if (modelDeclaredDone) {
+        console.warn(
+          `[GoalLoop] Model declared done but verification failed: exitCode=${verification.exitCode} — continuing`,
+        );
+      }
+
+      // Same error repeatedly → systematic issue; stop burning turns
       const isSameError =
         prevOutput &&
         verification.output &&
@@ -283,7 +276,7 @@ export async function runGoalLoop(input: GoalLoopInput): Promise<GoalLoopOutput>
         break;
       }
 
-      // Inject feedback and continue
+      // Inject feedback and continue (bounded by maxTurns / wall time)
       const feedbackMsg = buildVerificationFeedback(
         goal,
         verification,
