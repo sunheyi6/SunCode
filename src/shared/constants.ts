@@ -180,6 +180,11 @@ export const DEFAULT_KEEP_RECENT_TURNS = 3;
 
 /** Default context budget policy (used when autoCompact is enabled). */
 export const DEFAULT_CONTEXT_BUDGET_POLICY = {
+  activeToolResultPrune: {
+    enabled: true,
+    maxResultTokens: DEFAULT_MAX_TOOL_RESULT_TOKENS,
+    minTurnNumber: 1,
+  },
   staleToolResultPrune: {
     enabled: true,
     maxResultTokens: DEFAULT_MAX_TOOL_RESULT_TOKENS,
@@ -203,6 +208,12 @@ export const DEFAULT_CONTEXT_BUDGET_POLICY = {
   minRecentTurns: DEFAULT_MIN_RECENT_TURNS,
   charsPerToken: CHARS_PER_TOKEN,
 } as const;
+
+/** Max chars kept in TurnEvidence tool summary previews. */
+export const TURN_EVIDENCE_PREVIEW_CHARS = 400;
+
+/** How many recent TurnEvidence envelopes may be projected into prompt windows. */
+export const TURN_EVIDENCE_PROMPT_WINDOW = 8;
 
 // ===== Plan Mode Defaults =====
 

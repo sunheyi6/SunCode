@@ -5,9 +5,12 @@ import {
   isCompletionGateEnabled,
   isVerificationCommand,
   markCompletionGateRepairUsed,
+  rebuildCompletionGateFromEvidence,
+  updateCompletionGateFromEvidence,
   updateCompletionGateFromTools,
 } from '../../src/worker/agent/completion-gate';
-import type { ToolResult } from '../../src/shared/types';
+import type { ToolResult, TurnEvidenceEnvelope } from '../../src/shared/types';
+import { projectToolResultsToEvidence } from '../../src/worker/agent/turn-evidence';
 
 function writeResult(id = 'w1'): ToolResult {
   return {
@@ -149,5 +152,46 @@ describe('completion gate state machine', () => {
       action: 'allow',
       reason: expect.stringContaining('repair cap'),
     });
+  });
+});
+
+describe('updateCompletionGateFromEvidence', () => {
+  function evidenceFromTools(tools: ToolResult[], turnId: string): TurnEvidenceEnvelope[] {
+    return projectToolResultsToEvidence({
+      sessionId: 's',
+      turnId,
+      toolResults: tools,
+    });
+  }
+
+  it('blocks after write evidence without verification', () => {
+    let state = createCompletionGateState();
+    state = updateCompletionGateFromEvidence(state, evidenceFromTools([writeResult()], 'turn-1'), 1);
+    expect(evaluateCompletionGate(state).action).toBe('repair');
+  });
+
+  it('allows after write + passing verification evidence', () => {
+    let state = createCompletionGateState();
+    state = updateCompletionGateFromEvidence(state, evidenceFromTools([editResult()], 'turn-1'), 1);
+    state = updateCompletionGateFromEvidence(
+      state,
+      evidenceFromTools([bashResult('bun run typecheck', 0)], 'turn-2'),
+      2,
+    );
+    expect(evaluateCompletionGate(state).action).toBe('allow');
+    expect(state.hasPassingVerificationAfterChange).toBe(true);
+  });
+
+  it('rebuildCompletionGateFromEvidence preserves repairAttemptsUsed', () => {
+    const envelopes = [
+      ...evidenceFromTools([writeResult()], 'turn-1'),
+      ...evidenceFromTools([bashResult('bun run typecheck', 0)], 'turn-2'),
+    ];
+    let state = createCompletionGateState();
+    state = markCompletionGateRepairUsed(state);
+    state = rebuildCompletionGateFromEvidence(state, envelopes);
+    expect(state.repairAttemptsUsed).toBe(1);
+    expect(state.hasPassingVerificationAfterChange).toBe(true);
+    expect(evaluateCompletionGate(state).action).toBe('allow');
   });
 });

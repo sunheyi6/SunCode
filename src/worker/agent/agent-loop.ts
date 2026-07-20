@@ -29,7 +29,8 @@ import {
   evaluateCompletionGate,
   isCompletionGateEnabled,
   markCompletionGateRepairUsed,
-  updateCompletionGateFromTools,
+  rebuildCompletionGateFromEvidence,
+  updateCompletionGateFromEvidence,
 } from './completion-gate';
 import { quickMatchLesson } from './lessons';
 import { buildStructuredTaskPrompt, buildStructuredTextMessage } from './model-structured-content';
@@ -47,6 +48,12 @@ import { isSimpleTask } from './task-policy';
 import { executeTools } from './tool-executor';
 import { formatToolResultForModel } from './tool-result-content';
 import { computeNeedsFollowUp } from './turn-decision';
+import {
+  collectArchiveLinksFromMessages,
+  projectToolResultsToEvidence,
+  TurnEvidenceBuffer,
+} from './turn-evidence';
+import { resolveTurnEvidencePath } from './turn-evidence-store';
 
 const TRACE_MESSAGE_CONTENT_LIMIT = 20_000;
 
@@ -220,6 +227,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let shadowCoveredThrough: Message | undefined;
   let turnCount = initialTurnCount;
   const tokenUsage = { input: 0, output: 0, total: 0 };
+  const turnEvidencePath = resolveTurnEvidencePath({ workingDir, sessionId, runId });
+  const turnEvidence = new TurnEvidenceBuffer({
+    storePath: turnEvidencePath,
+    seedFromStore: true,
+  });
 
   // Diagnostic logger: persists to .suncode/diagnostics/<runId>.log
   const diag = new DiagLogger(workingDir, runId);
@@ -278,6 +290,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       const effectivePermissionMode = settings.permissionMode;
       const effectiveTools = tools;
       const toolDefs = effectiveTools.map((t) => t.getDefinition());
+      const turnEvidenceContent = turnEvidence.formatPromptWindow();
       const systemPrompt = buildSystemPrompt({
         workingDir,
         tools: toolDefs,
@@ -286,6 +299,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         agentsMdContent,
         memoryContent,
         relevantLessonsContent,
+        turnEvidenceContent: turnEvidenceContent || undefined,
         responseLanguage,
       });
       if (systemPrompt !== lastSystemPrompt) {
@@ -561,8 +575,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
 
         // Completion gate: after material edits, require real verification evidence
-        // (bash exit 0 on typecheck/lint/test). At most one bounded repair turn.
+        // from TurnEvidence (bash exit 0 on typecheck/lint/test). At most one repair turn.
         if (completionGateActive) {
+          completionGateState = rebuildCompletionGateFromEvidence(
+            completionGateState,
+            turnEvidence.all(),
+          );
           const gateDecision = evaluateCompletionGate(completionGateState);
           if (gateDecision.action === 'repair') {
             completionGateState = markCompletionGateRepairUsed(completionGateState);
@@ -718,6 +736,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       };
       contextMessages.push(assistantMsg2);
 
+      const modelBodiesByCallId = new Map<string, string>();
       for (const tr of toolResults) {
         let content = formatToolResultForModel(tr);
 
@@ -731,6 +750,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           }
         }
 
+        modelBodiesByCallId.set(tr.toolCallId, content);
         contextMessages.push({
           role: 'tool',
           content,
@@ -738,10 +758,38 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         });
       }
 
+      // Turn Evidence: source-bearing bounded observations for this iteration.
+      const turnId = `turn-${turnCount}`;
+      const evidenceBatch = projectToolResultsToEvidence({
+        sessionId,
+        runId,
+        turnId,
+        toolResults,
+        modelBodiesByCallId,
+      });
+      turnEvidence.append(evidenceBatch);
+      if (evidenceBatch.length > 0) {
+        onRunEvent({
+          type: 'turn_evidence_recorded',
+          runId,
+          turnNumber: turnCount,
+          turnId,
+          count: evidenceBatch.length,
+          evidenceIds: evidenceBatch.map((e) => e.evidenceId),
+          timestamp: '',
+        });
+        diag.milestone('TURN_EVIDENCE', `${evidenceBatch.length} envelopes`, {
+          turnId,
+          tools: toolResults.map((t) => t.name).join(','),
+          store: turnEvidencePath,
+        });
+      }
+
       if (completionGateActive) {
-        completionGateState = updateCompletionGateFromTools(
+        // Prefer source-bearing TurnEvidence over raw tool snapshots.
+        completionGateState = updateCompletionGateFromEvidence(
           completionGateState,
-          toolResults,
+          evidenceBatch,
           turnCount,
         );
       }
@@ -988,6 +1036,24 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           contextMessages.length = 0;
           contextMessages.push(...result2.contextMessages);
           console.log(`[AgentLoop] Compaction: ${beforeMsgs}→${contextMessages.length} msgs`);
+
+          // Active/stale prune may archive bodies — link artifact ids into evidence.
+          const archiveLinks = collectArchiveLinksFromMessages(contextMessages);
+          const linked = turnEvidence.linkArtifacts(archiveLinks);
+          if (linked.length > 0) {
+            diag.milestone('TURN_EVIDENCE', `linked ${linked.length} artifacts`, {
+              toolCallIds: linked
+                .map((e) => e.source.toolCallId)
+                .filter(Boolean)
+                .join(','),
+            });
+          }
+        }
+      } else {
+        // Even without prepareNextTurn, link any existing placeholders in context.
+        const archiveLinks = collectArchiveLinksFromMessages(contextMessages);
+        if (archiveLinks.size > 0) {
+          turnEvidence.linkArtifacts(archiveLinks);
         }
       }
 
