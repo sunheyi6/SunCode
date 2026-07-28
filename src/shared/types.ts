@@ -204,6 +204,8 @@ export interface SessionMeta {
   gitWorktreePath?: string;
   /** Original main repo path for worktree cleanup. */
   gitMainRepoPath?: string;
+  /** Cursor of the session.json cache over the canonical Runtime Event Log. */
+  runtimeProjection?: import('./runtime-events').RuntimeProjectionCursor;
 }
 
 // ===== Custom Endpoints =====
@@ -635,6 +637,8 @@ export type WorkerInMessage =
   | {
       type: 'prompt';
       sessionId: string;
+      runId: string;
+      turnId: string;
       text: string;
       uiLanguage?: UiLanguage;
       attachments?: string[];

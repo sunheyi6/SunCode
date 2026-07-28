@@ -46,17 +46,15 @@ export function useAgent() {
     chatStore.setActiveSessionId(sessionId);
     chatStore.startAssistantMessage();
     void bridge
-      .saveMessage(
-        {
-          role: 'user',
-          content: [{ type: 'text', text }],
-          uiLanguage,
-        },
-        sessionId,
-      )
+      .prompt(text, uiLanguage, sessionId)
       .then(() => sessionsStore.invalidateSessionCache(sessionId))
-      .then(() => sessionsStore.refresh());
-    bridge.prompt(text, uiLanguage, sessionId);
+      .then(() => sessionsStore.refresh())
+      .catch((error: unknown) => {
+        chatStore.handleStreamEvent(
+          { type: 'error', error: error instanceof Error ? error.message : String(error) },
+          sessionId,
+        );
+      });
   }
 
   function scheduleNextPrompt(): void {

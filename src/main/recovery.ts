@@ -1,11 +1,31 @@
+import type { RuntimeEvent } from '@shared/runtime-events';
 import type { Message, RunEvent, SessionMeta } from '@shared/types';
 import { appendEvent, findStaleRuns, getEvents, listRuns } from './run-store';
+import {
+  appendRuntimeEvent,
+  clearRuntimePartial,
+  initializeRuntimeLedger,
+  readRuntimeEvents,
+  readRuntimePartial,
+} from './runtime-event-store';
+import {
+  findOpenInvocationIds,
+  invocationHasAssistantMessage,
+  projectionCursorMatches,
+  projectSessionRuntime,
+  wasInvocationStopRequested,
+} from './runtime-projector';
 import { loadAllSessions, loadSession, saveSession } from './session-store';
 
 const STARTUP_RECOVERY_SESSION_LIMIT = 5;
 const BACKGROUND_RECOVERY_BATCH_SIZE = 8;
 const BACKGROUND_RECOVERY_INITIAL_DELAY_MS = 5_000;
 const BACKGROUND_RECOVERY_BATCH_DELAY_MS = 2_000;
+
+const INTERRUPTED_PLACEHOLDER =
+  '[Interrupted — the application was closed before the model could respond.]';
+const INTERRUPTED_PARTIAL_SUFFIX =
+  '\n\n[Interrupted before the response reached a terminal state.]';
 
 interface RecoveryOptions {
   initialLimit?: number;
@@ -82,85 +102,294 @@ async function recoverSessionBatch(sessions: SessionMeta[]): Promise<void> {
 
 async function recoverSession(meta: SessionMeta): Promise<void> {
   try {
-    const staleRunIds = await findStaleRuns(meta.id);
-    const tail = await loadSession(meta.id, 1);
-    if (!tail) return;
+    const operationalStaleRunIds = await findStaleRuns(meta.id);
+    let runtimeEvents = await readRuntimeEvents(meta.id);
+    let openRuntimeRunIds = findOpenInvocationIds(runtimeEvents);
 
-    const mayNeedCompletedRecovery = tail.messages[tail.messages.length - 1]?.role === 'user';
-    if (staleRunIds.length === 0 && !mayNeedCompletedRecovery) return;
+    const mayNeedCompletedRecovery = await sessionTailNeedsCompletedRecovery(
+      meta.id,
+      runtimeEvents,
+    );
+    const cursorStale =
+      runtimeEvents.length > 0 &&
+      !projectionCursorMatches(meta.runtimeProjection, projectSessionRuntime(runtimeEvents).cursor);
 
-    // Stale-run repair needs the complete history; completed-run repair only
-    // needs it when the tail confirms that the latest user message is orphaned.
-    const data =
-      staleRunIds.length > 0 || mayNeedCompletedRecovery ? await loadSession(meta.id) : tail;
-    if (!data) return;
+    // Healthy sessions: no operational stale runs, no open semantic invocations,
+    // no orphaned user tail, and projection cursor already matches the ledger.
+    if (
+      operationalStaleRunIds.length === 0 &&
+      openRuntimeRunIds.length === 0 &&
+      !mayNeedCompletedRecovery &&
+      !cursorStale
+    ) {
+      return;
+    }
 
-    const messages = data.messages;
-    let modified = false;
+    // Empty ledger may still need a one-time import from session.json.
+    if (runtimeEvents.length === 0) {
+      const data = await loadSession(meta.id);
+      if (!data) return;
+      runtimeEvents = await initializeRuntimeLedger(meta.id, data.messages);
+      openRuntimeRunIds = findOpenInvocationIds(runtimeEvents);
+    }
 
-    if (staleRunIds.length > 0) {
+    const completedRuntimeRunIds = await findOperationallyCompletedRuns(meta.id, openRuntimeRunIds);
+    const openToInterrupt = openRuntimeRunIds.filter((runId) => !completedRuntimeRunIds.has(runId));
+    const openToComplete = openRuntimeRunIds.filter((runId) => completedRuntimeRunIds.has(runId));
+    const legacyOperationalStale = operationalStaleRunIds.filter(
+      (runId) => !openRuntimeRunIds.includes(runId),
+    );
+    const interruptRunIds = [...new Set([...openToInterrupt, ...legacyOperationalStale])];
+    const operationalStaleRunIdSet = new Set(operationalStaleRunIds);
+
+    let modified = cursorStale;
+
+    if (interruptRunIds.length > 0 || openToComplete.length > 0) {
       console.log(
-        `[Recovery] Session "${meta.name}" has ${staleRunIds.length} stale run(s): ${staleRunIds.join(', ')}`,
+        `[Recovery] Session "${meta.name}" has ${interruptRunIds.length} interrupted and ${openToComplete.length} completed-open run(s)`,
       );
     }
 
-    for (const runId of staleRunIds) {
-      // Append recovery marker to the JSONL event log
-      await appendEvent(meta.id, runId, {
-        type: 'run_recovered',
-        runId,
-        reason: 'app_restarted',
-        timestamp: new Date().toISOString(),
-      });
+    for (const runId of interruptRunIds) {
+      if (operationalStaleRunIdSet.has(runId)) {
+        await appendEvent(meta.id, runId, {
+          type: 'run_recovered',
+          runId,
+          reason: 'app_restarted',
+          timestamp: new Date().toISOString(),
+        });
+      }
 
-      // Check if the last message is a user message without a matching
-      // assistant response — the run was interrupted before the model replied.
-      if (messages.length > 0) {
-        const lastMsg = messages[messages.length - 1];
-        if (lastMsg.role === 'user') {
-          // Append a synthetic assistant message marking the interruption
-          messages.push({
-            role: 'assistant',
-            content: [
-              {
-                type: 'text',
-                text: '[Interrupted — the application was closed before the model could respond.]',
-              },
-            ],
+      const stopRequested = wasInvocationStopRequested(runtimeEvents, runId);
+      const needsAssistant =
+        !invocationHasAssistantMessage(runtimeEvents, runId) &&
+        (invocationHasUserMessage(runtimeEvents, runId) ||
+          projectSessionRuntime(runtimeEvents).messages.at(-1)?.role === 'user');
+
+      if (needsAssistant) {
+        const interruptedMessage = await buildRecoveryAssistantMessage(meta.id, runId);
+        if (interruptedMessage) {
+          await appendRuntimeEvent(meta.id, {
+            eventId: `${runId}:recovery-assistant`,
+            runId,
+            turnId: `recovery-${runId}`,
+            invocationId: runId,
+            fact: { type: 'assistant_message_committed', message: interruptedMessage },
           });
-          meta.messageCount = messages.length;
-          meta.updated = new Date().toISOString();
-          modified = true;
         }
       }
+
+      await appendRuntimeEvent(meta.id, {
+        eventId: `${runId}:terminal`,
+        runId,
+        turnId: `recovery-${runId}`,
+        invocationId: runId,
+        fact: {
+          type: 'invocation_terminated',
+          status: stopRequested ? 'aborted' : 'interrupted',
+          reason: stopRequested ? 'user_stop_before_restart' : 'app_restarted',
+        },
+      });
+      await clearRuntimePartial(meta.id, runId);
+      runtimeEvents = await readRuntimeEvents(meta.id);
+      modified = true;
     }
 
-    // A renderer crash can happen after the worker has emitted run_completed.
-    // Such a run is not stale, but its final assistant message may still be
-    // absent because the old persistence path lived in the renderer. Rebuild
-    // that message from the last completed model request when possible.
-    if (messages[messages.length - 1]?.role === 'user') {
+    for (const runId of openToComplete) {
+      if (!invocationHasAssistantMessage(runtimeEvents, runId)) {
+        const recovered = await findCompletedAssistantMessageForRun(meta.id, runId);
+        if (recovered) {
+          const finalMessageEventId = `${runId}:recovered-final-assistant`;
+          await appendRuntimeEvent(meta.id, {
+            eventId: finalMessageEventId,
+            runId,
+            turnId: `recovery-${runId}`,
+            invocationId: runId,
+            fact: { type: 'assistant_message_committed', message: recovered },
+          });
+          await appendRuntimeEvent(meta.id, {
+            eventId: `${runId}:terminal`,
+            runId,
+            turnId: `recovery-${runId}`,
+            invocationId: runId,
+            fact: {
+              type: 'invocation_terminated',
+              status: 'completed',
+              finalMessageEventId,
+            },
+          });
+          runtimeEvents = await readRuntimeEvents(meta.id);
+          modified = true;
+          continue;
+        }
+      }
+
+      await appendRuntimeEvent(meta.id, {
+        eventId: `${runId}:terminal`,
+        runId,
+        turnId: `recovery-${runId}`,
+        invocationId: runId,
+        fact: { type: 'invocation_terminated', status: 'completed' },
+      });
+      await clearRuntimePartial(meta.id, runId);
+      runtimeEvents = await readRuntimeEvents(meta.id);
+      modified = true;
+    }
+
+    // Legacy renderer-crash path: operational run completed but never entered the
+    // semantic ledger as an open invocation (pre-migration sessions).
+    runtimeEvents = await readRuntimeEvents(meta.id);
+    let projection = projectSessionRuntime(runtimeEvents);
+    if (projection.messages.at(-1)?.role === 'user') {
       const recovered = await findLatestCompletedAssistantMessage(meta.id);
-      if (recovered) {
-        messages.push(recovered);
-        meta.messageCount = messages.length;
-        meta.updated = new Date().toISOString();
+      if (recovered && !invocationHasAssistantMessage(runtimeEvents, recovered.runId)) {
+        const finalMessageEventId = `${recovered.runId}:recovered-final-assistant`;
+        await appendRuntimeEvent(meta.id, {
+          eventId: finalMessageEventId,
+          runId: recovered.runId,
+          turnId: `recovery-${recovered.runId}`,
+          invocationId: recovered.runId,
+          fact: { type: 'assistant_message_committed', message: recovered.message },
+        });
+        await appendRuntimeEvent(meta.id, {
+          eventId: `${recovered.runId}:terminal`,
+          runId: recovered.runId,
+          turnId: `recovery-${recovered.runId}`,
+          invocationId: recovered.runId,
+          fact: {
+            type: 'invocation_terminated',
+            status: 'completed',
+            finalMessageEventId,
+          },
+        });
         modified = true;
         console.log(`[Recovery] Rebuilt completed assistant message for "${meta.name}"`);
       }
     }
 
-    if (modified) {
-      await saveSession(meta, messages);
-      console.log(`[Recovery] Repaired session "${meta.name}"`);
+    if (modified || cursorStale) {
+      projection = projectSessionRuntime(await readRuntimeEvents(meta.id));
+      if (
+        !projectionCursorMatches(meta.runtimeProjection, projection.cursor) ||
+        meta.messageCount !== projection.messages.length
+      ) {
+        meta.runtimeProjection = projection.cursor;
+        meta.messageCount = projection.messages.length;
+        meta.updated = new Date().toISOString();
+        await saveSession(meta, projection.messages);
+        console.log(`[Recovery] Repaired session "${meta.name}"`);
+      }
     }
   } catch (err) {
     console.warn(`[Recovery] Skipping session "${meta.name}" due to error:`, err);
   }
 }
 
-async function findLatestCompletedAssistantMessage(sessionId: string): Promise<Message | null> {
-  const candidates: Array<{ timestamp: string; message: Message }> = [];
+async function sessionTailNeedsCompletedRecovery(
+  sessionId: string,
+  runtimeEvents: RuntimeEvent[],
+): Promise<boolean> {
+  if (runtimeEvents.length > 0) {
+    return projectSessionRuntime(runtimeEvents).messages.at(-1)?.role === 'user';
+  }
+  const tail = await loadSession(sessionId, 1);
+  return tail?.messages.at(-1)?.role === 'user';
+}
+
+function invocationHasUserMessage(events: RuntimeEvent[], runId: string): boolean {
+  return events.some(
+    (event) => event.invocationId === runId && event.fact.type === 'user_message_committed',
+  );
+}
+
+async function buildRecoveryAssistantMessage(
+  sessionId: string,
+  runId: string,
+): Promise<Message | null> {
+  const runtimePartial = await readRuntimePartial(sessionId, runId);
+  const partialMessage = runtimePartial
+    ? buildInterruptedAssistantMessageFromData(runtimePartial.data)
+    : buildInterruptedAssistantMessage(await getEvents(sessionId, runId));
+  return (
+    partialMessage ?? {
+      role: 'assistant',
+      content: [{ type: 'text', text: INTERRUPTED_PLACEHOLDER }],
+    }
+  );
+}
+
+function buildInterruptedAssistantMessage(events: RunEvent[]): Message | null {
+  let text = '';
+  let thinking = '';
+  for (const event of events) {
+    if (event.type !== 'content.part') continue;
+    if (event.part.kind === 'text') text += event.part.text;
+    else thinking += event.part.thinking;
+  }
+  if (!text && !thinking) return null;
+
+  const content: Message['content'] = [];
+  if (thinking) content.push({ type: 'thinking', text: thinking });
+  if (text) content.push({ type: 'text', text });
+  content.push({ type: 'text', text: INTERRUPTED_PARTIAL_SUFFIX });
+  return { role: 'assistant', content };
+}
+
+function buildInterruptedAssistantMessageFromData(data: {
+  text: string;
+  thinking: string;
+}): Message | null {
+  if (!data.text && !data.thinking) return null;
+  const content: Message['content'] = [];
+  if (data.thinking) content.push({ type: 'thinking', text: data.thinking });
+  if (data.text) content.push({ type: 'text', text: data.text });
+  content.push({ type: 'text', text: INTERRUPTED_PARTIAL_SUFFIX });
+  return { role: 'assistant', content };
+}
+
+async function findOperationallyCompletedRuns(
+  sessionId: string,
+  runIds: string[],
+): Promise<Set<string>> {
+  const completed = new Set<string>();
+  for (const runId of runIds) {
+    const events = await getEvents(sessionId, runId);
+    if (events.some((event) => event.type === 'run_completed')) completed.add(runId);
+  }
+  return completed;
+}
+
+async function findCompletedAssistantMessageForRun(
+  sessionId: string,
+  runId: string,
+): Promise<Message | null> {
+  const events = await getEvents(sessionId, runId);
+  const completed = events.some((event) => event.type === 'run_completed');
+  if (!completed) return null;
+
+  const finalRequest = [...events]
+    .reverse()
+    .find(
+      (event): event is Extract<RunEvent, { type: 'model_request_completed' }> =>
+        event.type === 'model_request_completed' && Boolean(event.responseText?.trim()),
+    );
+  if (!finalRequest?.responseText) return null;
+
+  const text = extractRecoveredText(finalRequest.responseText);
+  if (!text) return null;
+
+  const content: Message['content'] = [];
+  if (finalRequest.responseThinking) {
+    content.push({ type: 'thinking', text: finalRequest.responseThinking });
+  }
+  content.push({ type: 'text', text });
+  return { role: 'assistant', content };
+}
+
+async function findLatestCompletedAssistantMessage(
+  sessionId: string,
+): Promise<{ runId: string; message: Message } | null> {
+  const candidates: Array<{ timestamp: string; runId: string; message: Message }> = [];
 
   for (const runId of await listRuns(sessionId)) {
     const events = await getEvents(sessionId, runId);
@@ -188,11 +417,16 @@ async function findLatestCompletedAssistantMessage(sessionId: string): Promise<M
       content.push({ type: 'thinking', text: finalRequest.responseThinking });
     }
     content.push({ type: 'text', text });
-    candidates.push({ timestamp: completed.timestamp, message: { role: 'assistant', content } });
+    candidates.push({
+      timestamp: completed.timestamp,
+      runId,
+      message: { role: 'assistant', content },
+    });
   }
 
   candidates.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  return candidates[candidates.length - 1]?.message ?? null;
+  const latest = candidates[candidates.length - 1];
+  return latest ? { runId: latest.runId, message: latest.message } : null;
 }
 
 function extractRecoveredText(raw: string): string {

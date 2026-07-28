@@ -29,8 +29,8 @@ const suncodeAPI = {
   // ===== Agent Control =====
 
   /** Send a prompt to the agent for the session that initiated it. */
-  prompt(text: string, uiLanguage?: UiLanguage, sessionId?: string): void {
-    ipcRenderer.send('agent:prompt', text, uiLanguage, sessionId);
+  async prompt(text: string, uiLanguage?: UiLanguage, sessionId?: string): Promise<void> {
+    return ipcRenderer.invoke('agent:prompt', text, uiLanguage, sessionId);
   },
 
   /** Abort the current agent run (hard stop). */

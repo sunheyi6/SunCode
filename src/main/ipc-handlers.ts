@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, watch as fsWatch, readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
@@ -11,6 +12,7 @@ import {
   RECOMMENDED_MODELS,
   TITLE_GENERATION_PROMPT,
 } from '@shared/constants';
+import type { RuntimeEventDraft, RuntimeTerminationStatus } from '@shared/runtime-events';
 import { runtimeIdentityEnvironment } from '@shared/runtime-identity';
 import { getVendorSkillDirectories } from '@shared/skill-directories';
 import type {
@@ -21,6 +23,7 @@ import type {
   FileNode,
   Message,
   ModelStats,
+  RunEvent,
   SessionMeta,
   TokenUsageSummary,
   UiLanguage,
@@ -47,6 +50,20 @@ import {
 import { getLogPath, logger } from './logger';
 import { getAppDataDir } from './paths';
 import { appendEvent, getEvents, getTokenUsageAggregate, listRuns, startRun } from './run-store';
+import {
+  appendRuntimeEvent,
+  clearRuntimePartial,
+  initializeRuntimeLedger,
+  invalidateRuntimeEventCache,
+  isRuntimeInvocationClosedError,
+  readRuntimeEvents,
+  scheduleRuntimePartial,
+} from './runtime-event-store';
+import {
+  projectionCursorMatches,
+  projectModelHistory,
+  projectSessionRuntime,
+} from './runtime-projector';
 import {
   deleteSession,
   deleteSessions,
@@ -119,61 +136,376 @@ let currentSessionId: string | null = null;
  *  explicit target. */
 let promptSessionId: string | null = null;
 
-interface PersistMessageResult {
-  added: boolean;
-  updated: boolean;
+interface InvocationContext {
+  runId: string;
+  turnId: string;
 }
 
-/**
- * Persist a message from the main process. Assistant messages are merged into
- * an existing trailing assistant row so the renderer's later save cannot
- * duplicate the answer that was durably written from the worker completion.
- */
-async function persistSessionMessage(
-  targetSession: string,
-  message: Message,
-): Promise<PersistMessageResult> {
-  let messages = sessionMessages.get(targetSession);
-  let meta = sessions.get(targetSession);
+const activeInvocationBySession = new Map<string, InvocationContext>();
+const invocationContexts = new Map<string, InvocationContext>();
+const workerMessageQueues = new Map<string, Promise<void>>();
 
-  if (!messages || !meta) {
-    const disk = await loadSession(targetSession);
-    if (disk) {
-      messages = disk.messages;
-      meta = disk.meta;
-      sessions.set(targetSession, meta);
-      sessionMessages.set(targetSession, messages);
+function invocationKey(sessionId: string, runId: string): string {
+  return `${sessionId}::${runId}`;
+}
+
+function rememberInvocation(
+  sessionId: string,
+  runId: string,
+  turnId = randomUUID(),
+): InvocationContext {
+  const key = invocationKey(sessionId, runId);
+  const existing = invocationContexts.get(key);
+  if (existing) {
+    activeInvocationBySession.set(sessionId, existing);
+    return existing;
+  }
+  const context = { runId, turnId };
+  invocationContexts.set(key, context);
+  activeInvocationBySession.set(sessionId, context);
+  return context;
+}
+
+function activeInvocation(sessionId: string): InvocationContext | undefined {
+  return activeInvocationBySession.get(sessionId);
+}
+
+function forgetSessionInvocations(sessionId: string): void {
+  activeInvocationBySession.delete(sessionId);
+  for (const key of invocationContexts.keys()) {
+    if (key.startsWith(`${sessionId}::`)) invocationContexts.delete(key);
+  }
+}
+
+async function legacyMessagesForSession(sessionId: string): Promise<Message[]> {
+  const cached = sessionMessages.get(sessionId);
+  if (cached) return cached;
+  return (await loadSession(sessionId))?.messages ?? [];
+}
+
+async function commitRuntimeFact(sessionId: string, draft: RuntimeEventDraft): Promise<void> {
+  await appendRuntimeEvent(sessionId, draft, await legacyMessagesForSession(sessionId));
+}
+
+async function commitWorkerRuntimeFact(
+  sessionId: string,
+  draft: RuntimeEventDraft,
+): Promise<boolean> {
+  try {
+    await commitRuntimeFact(sessionId, draft);
+    return true;
+  } catch (error) {
+    if (!isRuntimeInvocationClosedError(error)) throw error;
+    logger.warn('[RuntimeEvent] Ignored late fact for a closed invocation', {
+      sessionId,
+      runId: draft.runId,
+      factType: draft.fact.type,
+      existingStatus: error.existingStatus,
+    });
+    return false;
+  }
+}
+
+/** Stable non-crypto hash for deterministic guidance event IDs within a run. */
+function stableTextToken(text: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+async function persistRuntimeProjection(sessionId: string): Promise<Message[]> {
+  let meta = sessions.get(sessionId);
+  if (!meta) {
+    const disk = await loadSession(sessionId);
+    meta = disk?.meta;
+  }
+  if (!meta) throw new Error(`Session not found: ${sessionId}`);
+
+  const projection = projectSessionRuntime(await readRuntimeEvents(sessionId));
+  const cursorUnchanged = projectionCursorMatches(meta.runtimeProjection, projection.cursor);
+  const countUnchanged = meta.messageCount === projection.messages.length;
+
+  meta.runtimeProjection = projection.cursor;
+  meta.messageCount = projection.messages.length;
+  sessions.set(sessionId, meta);
+  sessionMessages.set(sessionId, projection.messages);
+
+  // Append-only ledger means an unchanged cursor implies unchanged projection.
+  if (!cursorUnchanged || !countUnchanged) {
+    meta.updated = new Date().toISOString();
+    await saveSession(meta, projection.messages);
+  }
+  return projection.messages;
+}
+
+async function terminateInvocation(
+  sessionId: string,
+  context: InvocationContext,
+  status: RuntimeTerminationStatus,
+  reason?: string,
+  finalMessageEventId?: string,
+): Promise<boolean> {
+  return commitWorkerRuntimeFact(sessionId, {
+    eventId: `${context.runId}:terminal`,
+    runId: context.runId,
+    turnId: context.turnId,
+    invocationId: context.runId,
+    fact: { type: 'invocation_terminated', status, finalMessageEventId, reason },
+  });
+}
+
+function semanticDraftFromRunEvent(
+  event: RunEvent,
+  context: InvocationContext,
+): RuntimeEventDraft | null {
+  const base = {
+    runId: context.runId,
+    turnId: context.turnId,
+    invocationId: context.runId,
+  };
+  switch (event.type) {
+    case 'model_request_completed':
+      if (event.requestKind === 'semantic_compact') return null;
+      return {
+        ...base,
+        eventId: `${context.runId}:model-step:${event.turnNumber}:${event.attempt}`,
+        fact: {
+          type: 'model_step_committed',
+          stepIndex: event.turnNumber,
+          attempt: event.attempt,
+          provider: event.provider,
+          model: event.model,
+          requestMessages: event.requestMessages ?? [],
+          systemTokens: event.systemTokens ?? 0,
+          responseText: event.responseText ?? '',
+          responseThinking: event.responseThinking ?? '',
+          responseToolCalls: event.responseToolCalls ?? [],
+          stopReason: event.stopReason,
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
+          totalTokens: event.totalTokens,
+        },
+      };
+    default:
+      return null;
+  }
+}
+
+async function handleWorkerMessage(worker: Worker, msg: WorkerOutMessage): Promise<void> {
+  console.log('[Main] Worker message:', msg.type);
+  const sid = msg.sessionId;
+
+  if (msg.type === 'runEvent') {
+    const runtime: AppRuntimeIdentity = getAppRuntimeIdentity(worker.threadId);
+    const evt = msg.event.type === 'run_started' ? { ...msg.event, runtime } : msg.event;
+    if (evt.type === 'metadata') return;
+    const context =
+      evt.type === 'run_started'
+        ? rememberInvocation(sid, evt.runId)
+        : (invocationContexts.get(invocationKey(sid, evt.runId)) ??
+          rememberInvocation(sid, evt.runId));
+
+    if (evt.type === 'run_started') await startRun(sid, evt.runId, runtime);
+
+    const semanticDraft = semanticDraftFromRunEvent(evt, context);
+    if (semanticDraft) await commitWorkerRuntimeFact(sid, semanticDraft);
+
+    if (evt.type === 'run_failed') {
+      if (await terminateInvocation(sid, context, 'failed', evt.error)) {
+        await persistRuntimeProjection(sid);
+        await clearRuntimePartial(sid, context.runId);
+      }
+    } else if (evt.type === 'run_aborted') {
+      if (await terminateInvocation(sid, context, 'aborted', 'user_stop')) {
+        await persistRuntimeProjection(sid);
+        await clearRuntimePartial(sid, context.runId);
+      }
+    } else if (evt.type === 'run_recovered') {
+      if (await terminateInvocation(sid, context, 'interrupted', evt.reason)) {
+        await persistRuntimeProjection(sid);
+        await clearRuntimePartial(sid, context.runId);
+      }
+    }
+
+    if (evt.type !== 'content.part') await appendEvent(sid, evt.runId, evt);
+
+    const mainWindow = windowManager?.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:run-event', { sessionId: sid, event: evt });
+    }
+    return;
+  }
+
+  const context = activeInvocation(sid);
+  if (msg.type === 'stream' && msg.event.data && context) {
+    scheduleRuntimePartial({
+      sessionId: sid,
+      runId: context.runId,
+      turnId: context.turnId,
+      updatedAt: new Date().toISOString(),
+      data: msg.event.data,
+    });
+  }
+  if (
+    msg.type === 'stream' &&
+    msg.event.type === 'system_prompt' &&
+    msg.event.systemPrompt &&
+    context
+  ) {
+    if (
+      !(await commitWorkerRuntimeFact(sid, {
+        eventId: `${context.runId}:system-prompt`,
+        runId: context.runId,
+        turnId: context.turnId,
+        invocationId: context.runId,
+        fact: { type: 'system_prompt_committed', systemPrompt: msg.event.systemPrompt },
+      }))
+    )
+      return;
+  } else if (msg.type === 'toolStart' && context) {
+    if (
+      !(await commitWorkerRuntimeFact(sid, {
+        eventId: `${context.runId}:tool:${msg.toolCall.id}:call`,
+        runId: context.runId,
+        turnId: context.turnId,
+        invocationId: context.runId,
+        fact: { type: 'tool_call_committed', toolCall: msg.toolCall },
+      }))
+    )
+      return;
+  } else if (msg.type === 'toolEnd' && context) {
+    if (
+      !(await commitWorkerRuntimeFact(sid, {
+        eventId: `${context.runId}:tool:${msg.toolResult.toolCallId}:result`,
+        runId: context.runId,
+        turnId: context.turnId,
+        invocationId: context.runId,
+        fact: { type: 'tool_result_committed', toolResult: msg.toolResult },
+      }))
+    )
+      return;
+  } else if (msg.type === 'confirmRequest' && context) {
+    if (
+      !(await commitWorkerRuntimeFact(sid, {
+        eventId: `${context.runId}:permission:${msg.toolCall.id}:requested`,
+        runId: context.runId,
+        turnId: context.turnId,
+        invocationId: context.runId,
+        fact: { type: 'permission_requested', toolCall: msg.toolCall },
+      }))
+    )
+      return;
+  } else if (msg.type === 'done') {
+    if (!context) {
+      // Never invent a runId — orphan ledger facts are harder to repair than a
+      // missing persistence of this single completion.
+      logger.error('[RuntimeEvent] Ignoring done without active invocation', {
+        sessionId: sid,
+      });
+    } else {
+      const finalMessageEventId = `${context.runId}:final-assistant`;
+      if (
+        !(await commitWorkerRuntimeFact(sid, {
+          eventId: finalMessageEventId,
+          runId: context.runId,
+          turnId: context.turnId,
+          invocationId: context.runId,
+          fact: { type: 'assistant_message_committed', message: msg.message },
+        }))
+      )
+        return;
+      if (!(await terminateInvocation(sid, context, 'completed', undefined, finalMessageEventId)))
+        return;
+      await persistRuntimeProjection(sid);
+      await clearRuntimePartial(sid, context.runId);
     }
   }
 
-  if (!messages || !meta) {
-    console.warn(`[Main] saveMessage: session not found ${targetSession.slice(-8)}`);
-    return { added: false, updated: false };
-  }
+  const mainWindow = windowManager?.getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
 
-  const last = messages[messages.length - 1];
-  let added = false;
-  let updated = false;
-
-  if (message.role === 'assistant' && last?.role === 'assistant') {
-    messages[messages.length - 1] = { ...last, ...message };
-    updated = true;
-  } else {
-    messages.push(message);
-    added = true;
-  }
-
-  meta.updated = new Date().toISOString();
-  meta.messageCount = messages.length;
-  await saveSession(meta, messages);
-  return { added, updated };
-}
-
-async function persistAssistantMessage(sessionId: string, message: Message): Promise<void> {
-  try {
-    await persistSessionMessage(sessionId, message);
-  } catch (err) {
-    console.error('[Main] Failed to persist completed assistant message:', (err as Error).message);
+  switch (msg.type) {
+    case 'stream':
+      mainWindow.webContents.send('agent:stream', { sessionId: sid, event: msg.event });
+      break;
+    case 'status':
+      mainWindow.webContents.send('agent:status', { sessionId: sid, status: msg.status });
+      break;
+    case 'error':
+      console.error('[Main] Worker error:', msg.message, 'session=', sid.slice(-8));
+      mainWindow.webContents.send('agent:error', { sessionId: sid, message: msg.message });
+      break;
+    case 'done':
+      mainWindow.webContents.send('agent:done', { sessionId: sid, message: msg.message });
+      break;
+    case 'toolStart':
+      mainWindow.webContents.send('agent:tool-start', { sessionId: sid, toolCall: msg.toolCall });
+      break;
+    case 'toolEnd':
+      mainWindow.webContents.send('agent:tool-end', { sessionId: sid, toolResult: msg.toolResult });
+      break;
+    case 'toolProgress':
+      mainWindow.webContents.send('agent:tool-progress', {
+        sessionId: sid,
+        toolCallId: msg.toolCallId,
+        output: msg.output,
+      });
+      break;
+    case 'bgProcessStarted':
+      mainWindow.webContents.send('agent:bg-process-started', {
+        sessionId: sid,
+        process: msg.process,
+      });
+      break;
+    case 'bgProcessCompleted':
+      mainWindow.webContents.send('agent:bg-process-completed', {
+        sessionId: sid,
+        pid: msg.pid,
+        exitCode: msg.exitCode,
+      });
+      break;
+    case 'bgProcessPortsVerified':
+      mainWindow.webContents.send('agent:bg-process-ports-verified', {
+        sessionId: sid,
+        pid: msg.pid,
+        ports: msg.ports,
+      });
+      break;
+    case 'subagentStart':
+      mainWindow.webContents.send('agent:subagent-start', {
+        sessionId: sid,
+        execution: msg.execution,
+      });
+      break;
+    case 'subagentEnd':
+      mainWindow.webContents.send('agent:subagent-end', {
+        sessionId: sid,
+        id: msg.id,
+        result: msg.result,
+      });
+      break;
+    case 'subagentProgress':
+      mainWindow.webContents.send('agent:subagent-progress', {
+        sessionId: sid,
+        executionId: msg.executionId,
+        agent: msg.agent,
+        delta: msg.delta,
+      });
+      break;
+    case 'goalEvent':
+      mainWindow.webContents.send('agent:goal-event', { sessionId: sid, event: msg.event });
+      break;
+    case 'confirmRequest':
+      mainWindow.webContents.send('agent:confirm-request', {
+        sessionId: sid,
+        toolCallId: msg.toolCall.id,
+        toolName: msg.toolCall.name,
+        description: msg.toolCall.arguments || '',
+      });
+      break;
   }
 }
 
@@ -200,139 +532,20 @@ function getAgentWorker(): Worker {
     agentWorker = worker;
     logger.info('[Worker] Created agent worker', getAppRuntimeIdentity(worker.threadId));
 
-    worker.on('message', async (msg: WorkerOutMessage) => {
-      console.log('[Main] Worker message:', msg.type);
-
-      // Runtime events and completed messages must be durable even when the
-      // renderer has crashed or the window is already closing. The renderer
-      // still receives these events when available, but it is no longer the
-      // only owner of assistant-message persistence.
-      if (msg.type === 'runEvent') {
-        const runtime: AppRuntimeIdentity = getAppRuntimeIdentity(worker.threadId);
-        const evt = msg.event.type === 'run_started' ? { ...msg.event, runtime } : msg.event;
-        const sid = msg.sessionId;
-        if (evt.type !== 'metadata') {
-          if (evt.type === 'run_started') {
-            await startRun(sid, evt.runId, runtime);
-          }
-          await appendEvent(sid, evt.runId, evt);
-        }
-        const mainWindow = windowManager?.getMainWindow();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('agent:run-event', { sessionId: sid, event: evt });
-        }
-        return;
-      }
-
-      if (msg.type === 'done') {
-        await persistAssistantMessage(msg.sessionId, msg.message);
-      }
-
-      const mainWindow = windowManager?.getMainWindow();
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-
-      switch (msg.type) {
-        case 'stream':
-          mainWindow.webContents.send('agent:stream', {
+    worker.on('message', (msg: WorkerOutMessage) => {
+      const previous = workerMessageQueues.get(msg.sessionId) ?? Promise.resolve();
+      const next = previous
+        .catch(() => undefined)
+        .then(() => handleWorkerMessage(worker, msg))
+        .catch((error: unknown) => {
+          logger.error('[RuntimeEvent] Failed to commit worker message', error);
+          const mainWindow = windowManager?.getMainWindow();
+          mainWindow?.webContents.send('agent:error', {
             sessionId: msg.sessionId,
-            event: msg.event,
+            message: error instanceof Error ? error.message : String(error),
           });
-          break;
-        case 'status':
-          mainWindow.webContents.send('agent:status', {
-            sessionId: msg.sessionId,
-            status: msg.status,
-          });
-          break;
-        case 'error':
-          console.error('[Main] Worker error:', msg.message, 'session=', msg.sessionId.slice(-8));
-          mainWindow.webContents.send('agent:error', {
-            sessionId: msg.sessionId,
-            message: msg.message,
-          });
-          break;
-        case 'done':
-          mainWindow.webContents.send('agent:done', {
-            sessionId: msg.sessionId,
-            message: msg.message,
-          });
-          break;
-        case 'toolStart':
-          mainWindow.webContents.send('agent:tool-start', {
-            sessionId: msg.sessionId,
-            toolCall: msg.toolCall,
-          });
-          break;
-        case 'toolEnd':
-          mainWindow.webContents.send('agent:tool-end', {
-            sessionId: msg.sessionId,
-            toolResult: msg.toolResult,
-          });
-          break;
-        case 'toolProgress':
-          mainWindow.webContents.send('agent:tool-progress', {
-            sessionId: msg.sessionId,
-            toolCallId: msg.toolCallId,
-            output: msg.output,
-          });
-          break;
-        case 'bgProcessStarted':
-          mainWindow.webContents.send('agent:bg-process-started', {
-            sessionId: msg.sessionId,
-            process: msg.process,
-          });
-          break;
-        case 'bgProcessCompleted':
-          mainWindow.webContents.send('agent:bg-process-completed', {
-            sessionId: msg.sessionId,
-            pid: msg.pid,
-            exitCode: msg.exitCode,
-          });
-          break;
-        case 'bgProcessPortsVerified':
-          mainWindow.webContents.send('agent:bg-process-ports-verified', {
-            sessionId: msg.sessionId,
-            pid: msg.pid,
-            ports: msg.ports,
-          });
-          break;
-        case 'subagentStart':
-          mainWindow.webContents.send('agent:subagent-start', {
-            sessionId: msg.sessionId,
-            execution: msg.execution,
-          });
-          break;
-        case 'subagentEnd':
-          mainWindow.webContents.send('agent:subagent-end', {
-            sessionId: msg.sessionId,
-            id: msg.id,
-            result: msg.result,
-          });
-          break;
-        case 'subagentProgress':
-          mainWindow.webContents.send('agent:subagent-progress', {
-            sessionId: msg.sessionId,
-            executionId: msg.executionId,
-            agent: msg.agent,
-            delta: msg.delta,
-          });
-          break;
-        case 'goalEvent':
-          mainWindow.webContents.send('agent:goal-event', {
-            sessionId: msg.sessionId,
-            event: msg.event,
-          });
-          break;
-        case 'confirmRequest':
-          // Forward to renderer for in-app Vue confirmation dialog
-          mainWindow.webContents.send('agent:confirm-request', {
-            sessionId: msg.sessionId,
-            toolCallId: msg.toolCall.id,
-            toolName: msg.toolCall.name,
-            description: msg.toolCall.arguments || '',
-          });
-          break;
-      }
+        });
+      workerMessageQueues.set(msg.sessionId, next);
     });
 
     agentWorker.on('error', (error: Error) => {
@@ -438,24 +651,71 @@ export function registerIpcHandlers(wm: WindowManager): void {
   initSessionStore();
 
   // Agent
-  ipcMain.on(
+  ipcMain.handle(
     'agent:prompt',
-    (_event, text: string, uiLanguage?: UiLanguage, requestedSessionId?: string) => {
+    async (_event, text: string, uiLanguage?: UiLanguage, requestedSessionId?: string) => {
       try {
         const sessionId = requestedSessionId || currentSessionId;
         if (!sessionId) return;
         console.log('[Main] agent:prompt received:', text.slice(0, 80));
         promptSessionId = sessionId; // Snap the owning session
-        sendToWorker({ type: 'prompt', sessionId, text, uiLanguage });
+        const runId = randomUUID();
+        const turnId = randomUUID();
+        rememberInvocation(sessionId, runId, turnId);
+        const previousMessages = await legacyMessagesForSession(sessionId);
+        const isFirstMessage = previousMessages.length === 0;
+        const userMessage: Message = {
+          role: 'user',
+          content: [{ type: 'text', text }],
+          uiLanguage,
+        };
+        await commitRuntimeFact(sessionId, {
+          eventId: `${runId}:user`,
+          runId,
+          turnId,
+          invocationId: runId,
+          fact: { type: 'user_message_committed', source: 'dispatch', message: userMessage },
+        });
+        await persistRuntimeProjection(sessionId);
+
+        const meta = sessions.get(sessionId);
+        if (meta && isFirstMessage) {
+          const title = extractTitle(userMessage);
+          if (title) {
+            meta.name = title;
+            await saveSession(meta, sessionMessages.get(sessionId) ?? []);
+          }
+          void generateTitleWithAI(sessionId, userMessage);
+        }
+
+        sendToWorker({ type: 'prompt', sessionId, runId, turnId, text, uiLanguage });
       } catch (err) {
         console.error('[Main] agent:prompt failed:', (err as Error).message);
+        throw err;
       }
     },
   );
 
   ipcMain.on('agent:abort', () => {
     try {
-      if (currentSessionId) sendToWorker({ type: 'abort', sessionId: currentSessionId });
+      const sessionId = promptSessionId || currentSessionId;
+      if (!sessionId) return;
+      const context = activeInvocation(sessionId);
+      if (!context) {
+        sendToWorker({ type: 'abort', sessionId });
+        return;
+      }
+      void commitRuntimeFact(sessionId, {
+        eventId: `${context.runId}:stop-requested:hard`,
+        runId: context.runId,
+        turnId: context.turnId,
+        invocationId: context.runId,
+        fact: { type: 'invocation_stop_requested', source: 'hard_stop' },
+      })
+        .then(() => sendToWorker({ type: 'abort', sessionId }))
+        .catch((error: unknown) =>
+          logger.error('[RuntimeEvent] Failed to commit hard stop', error),
+        );
     } catch (err) {
       console.error('[Main] agent:abort failed:', (err as Error).message);
     }
@@ -465,7 +725,27 @@ export function registerIpcHandlers(wm: WindowManager): void {
     try {
       const sessionId = currentSessionId;
       if (!sessionId) return;
-      sendToWorker({ type: 'injectGuidance', sessionId, text, uiLanguage });
+      const context = activeInvocation(sessionId);
+      if (!context) {
+        sendToWorker({ type: 'injectGuidance', sessionId, text, uiLanguage });
+        return;
+      }
+      void commitRuntimeFact(sessionId, {
+        eventId: `${context.runId}:guidance:${stableTextToken(text)}`,
+        runId: context.runId,
+        turnId: context.turnId,
+        invocationId: context.runId,
+        fact: {
+          type: 'user_message_committed',
+          source: 'guidance',
+          message: { role: 'user', content: [{ type: 'text', text }], uiLanguage },
+        },
+      })
+        .then(() => persistRuntimeProjection(sessionId))
+        .then(() => sendToWorker({ type: 'injectGuidance', sessionId, text, uiLanguage }))
+        .catch((error: unknown) => {
+          logger.error('[RuntimeEvent] Failed to commit guidance', error);
+        });
     } catch (err) {
       console.error('[Main] agent:injectGuidance failed:', (err as Error).message);
     }
@@ -473,7 +753,24 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.on('agent:stop', () => {
     try {
-      if (currentSessionId) sendToWorker({ type: 'stop', sessionId: currentSessionId });
+      const sessionId = promptSessionId || currentSessionId;
+      if (!sessionId) return;
+      const context = activeInvocation(sessionId);
+      if (!context) {
+        sendToWorker({ type: 'stop', sessionId });
+        return;
+      }
+      void commitRuntimeFact(sessionId, {
+        eventId: `${context.runId}:stop-requested:soft`,
+        runId: context.runId,
+        turnId: context.turnId,
+        invocationId: context.runId,
+        fact: { type: 'invocation_stop_requested', source: 'soft_stop' },
+      })
+        .then(() => sendToWorker({ type: 'stop', sessionId }))
+        .catch((error: unknown) =>
+          logger.error('[RuntimeEvent] Failed to commit soft stop', error),
+        );
     } catch (err) {
       console.error('[Main] agent:stop failed:', (err as Error).message);
     }
@@ -497,7 +794,24 @@ export function registerIpcHandlers(wm: WindowManager): void {
           console.error('[Main] confirm-response: no sessionId');
           return;
         }
-        sendToWorker({ type: 'confirmResponse', sessionId: sid, toolCallId, confirmed });
+        const context = activeInvocation(sid);
+        if (context) {
+          void commitRuntimeFact(sid, {
+            eventId: `${context.runId}:permission:${toolCallId}:decided`,
+            runId: context.runId,
+            turnId: context.turnId,
+            invocationId: context.runId,
+            fact: { type: 'permission_decided', toolCallId, allowed: confirmed },
+          })
+            .then(() =>
+              sendToWorker({ type: 'confirmResponse', sessionId: sid, toolCallId, confirmed }),
+            )
+            .catch((error: unknown) => {
+              logger.error('[RuntimeEvent] Failed to commit permission decision', error);
+            });
+        } else {
+          sendToWorker({ type: 'confirmResponse', sessionId: sid, toolCallId, confirmed });
+        }
       } catch (err) {
         console.error('[Main] agent:confirm-response failed:', (err as Error).message);
       }
@@ -679,12 +993,31 @@ export function registerIpcHandlers(wm: WindowManager): void {
       }
 
       messages = messages || [];
+      const runtimeEvents = await initializeRuntimeLedger(id, messages);
+      let modelHistory = messages;
+      if (runtimeEvents.length > 0 && meta) {
+        const projection = projectSessionRuntime(runtimeEvents);
+        messages = projection.messages;
+        modelHistory = projectModelHistory(runtimeEvents);
+        const cursorUnchanged = projectionCursorMatches(meta.runtimeProjection, projection.cursor);
+        const countUnchanged = meta.messageCount === messages.length;
+        meta.runtimeProjection = projection.cursor;
+        meta.messageCount = messages.length;
+        sessions.set(id, meta);
+        sessionMessages.set(id, messages);
+        // Avoid rewriting session.json on every session switch when the
+        // projection cache is already current.
+        if (!cursorUnchanged || !countUnchanged) {
+          meta.updated = new Date().toISOString();
+          await saveSession(meta, messages);
+        }
+      }
       const rendererMessages = limitMessages(messages, maxMessages);
       const resultCount = rendererMessages.length;
       console.log(
         `[Main] session:load id=${id.slice(-8)} mem=${memCount} disk=${diskCount} result=${resultCount} diskExists=${!!disk}`,
       );
-      sendToWorker({ type: 'setMessages', sessionId: id, messages });
+      sendToWorker({ type: 'setMessages', sessionId: id, messages: modelHistory });
       if (meta) {
         sendToWorker({ type: 'setWorkingDir', sessionId: id, path: meta.workingDirectory });
       }
@@ -714,10 +1047,26 @@ export function registerIpcHandlers(wm: WindowManager): void {
           `[Main] saveMessage role=${message.role} target=${targetSession.slice(-8)} cur=${currentSessionId?.slice(-8) ?? 'null'} prompt=${promptSessionId?.slice(-8) ?? 'null'} before=${msgs.length}`,
         );
         const isFirstMessage = msgs.length === 0;
-        const result = await persistSessionMessage(targetSession, message);
+        const context = activeInvocation(targetSession);
+        const eventId = context
+          ? message.role === 'assistant'
+            ? `${context.runId}:final-assistant`
+            : `${context.runId}:user`
+          : `${targetSession}:legacy-message:${randomUUID()}`;
+        await commitRuntimeFact(targetSession, {
+          eventId,
+          runId: context?.runId,
+          turnId: context?.turnId,
+          invocationId: context?.runId,
+          fact:
+            message.role === 'assistant'
+              ? { type: 'assistant_message_committed', message }
+              : { type: 'user_message_committed', source: 'dispatch', message },
+        });
+        await persistRuntimeProjection(targetSession);
 
         const meta = sessions.get(targetSession);
-        if (meta && isFirstMessage && result.added && message.role === 'user') {
+        if (meta && isFirstMessage && message.role === 'user') {
           // Quick fallback title from the first message text
           const title = extractTitle(message);
           if (title) {
@@ -746,6 +1095,8 @@ export function registerIpcHandlers(wm: WindowManager): void {
       }
       sessions.delete(id);
       sessionMessages.delete(id);
+      forgetSessionInvocations(id);
+      invalidateRuntimeEventCache(id);
       await deleteSession(id);
       const remaining = Array.from(sessions.values());
       const wasActive = currentSessionId === id;
@@ -771,6 +1122,8 @@ export function registerIpcHandlers(wm: WindowManager): void {
         }
         sessions.delete(id);
         sessionMessages.delete(id);
+        forgetSessionInvocations(id);
+        invalidateRuntimeEventCache(id);
       }
       await deleteSessions(ids);
       const remaining = Array.from(sessions.values());
@@ -786,19 +1139,17 @@ export function registerIpcHandlers(wm: WindowManager): void {
   ipcMain.on('session:clearMessages', () => {
     const sid = currentSessionId;
     if (!sid) return;
-    // Clear in-memory messages
-    const msgs = sessionMessages.get(sid) || [];
-    console.log(`[Main] session:clearMessages id=${sid.slice(-8)} before=${msgs.length}`);
-    sessionMessages.set(sid, []);
-    // Persist empty messages
-    const meta = sessions.get(sid);
-    if (meta) {
-      meta.updated = new Date().toISOString();
-      meta.messageCount = 0;
-      void saveSession(meta, []);
-    }
-    // Clear worker messages
-    sendToWorker({ type: 'setMessages', sessionId: sid, messages: [] });
+    const before = sessionMessages.get(sid)?.length ?? 0;
+    console.log(`[Main] session:clearMessages id=${sid.slice(-8)} before=${before}`);
+    void commitRuntimeFact(sid, {
+      eventId: `${sid}:clear:${randomUUID()}`,
+      fact: { type: 'conversation_cleared' },
+    })
+      .then(() => persistRuntimeProjection(sid))
+      .then((messages) => sendToWorker({ type: 'setMessages', sessionId: sid, messages }))
+      .catch((error: unknown) => {
+        logger.error('[RuntimeEvent] Failed to clear session projection', error);
+      });
   });
 
   ipcMain.handle('session:export', async (_event, id: string) => {

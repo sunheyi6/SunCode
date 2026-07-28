@@ -14,11 +14,9 @@ import type {
 } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { bridge } from '../api/bridge';
 import { parseTaskPlan, stripPlanFromContent } from '../utils/task-plan-parser';
 import { detectUiLanguage, type UiLanguage } from '../utils/ui-language';
 import { useAgentStore } from './agent';
-import { buildPersistedAssistantMessage } from './chat-message-persistence';
 import { mergeStreamedToolCalls } from './tool-call-state';
 
 export interface ChatMessageBlock {
@@ -323,17 +321,6 @@ export const useChatStore = defineStore('chat', () => {
             text: guidanceText,
           });
         }
-        if (guidanceText) {
-          const uiLanguage = detectUiLanguage(guidanceText);
-          void bridge.saveMessage(
-            {
-              role: 'user',
-              content: [{ type: 'text', text: guidanceText }],
-              uiLanguage,
-            },
-            sessionId,
-          );
-        }
         break;
       }
 
@@ -389,20 +376,6 @@ export const useChatStore = defineStore('chat', () => {
             if (sessionId === activeSessionId) {
               isStreaming.value = false;
             }
-
-            void bridge.saveMessage(
-              buildPersistedAssistantMessage({
-                visibleContent: target.content,
-                thinking: target.thinking,
-                toolCalls: target.toolCalls,
-                systemPrompt: target.systemPrompt,
-                turnDetails: target.turnDetails,
-                uiLanguage: target.uiLanguage,
-                finalMessage: event.message,
-                taskPlan: target.taskPlan,
-              }),
-              sessionId,
-            );
 
             if (sessionId === activeSessionId) {
               currentAssistantMsg = null;
@@ -551,21 +524,6 @@ export const useChatStore = defineStore('chat', () => {
           }
 
           if (event.message) {
-            // Persist completed message to the session that originated the run.
-            void bridge.saveMessage(
-              buildPersistedAssistantMessage({
-                visibleContent: target.content,
-                thinking: target.thinking,
-                toolCalls: target.toolCalls,
-                systemPrompt: target.systemPrompt,
-                turnDetails: target.turnDetails,
-                uiLanguage: target.uiLanguage,
-                finalMessage: event.message,
-                taskPlan: target.taskPlan,
-              }),
-              sessionId,
-            );
-
             if (sessionId === activeSessionId) {
               currentAssistantMsg = null;
             }

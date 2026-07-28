@@ -1,9 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { useChatStore } from '../../src/renderer/stores/chat';
 import type { Message, ToolCallContent } from '../../src/shared/types';
-
-const saveMessageMock = vi.fn();
 
 function blockSummary(
   blocks: NonNullable<ReturnType<typeof useChatStore>['messages'][number]['blocks']> | undefined,
@@ -21,13 +19,6 @@ function blockSummary(
 describe('chat store stream blocks', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-    saveMessageMock.mockReset();
-    saveMessageMock.mockResolvedValue(undefined);
-    (globalThis as typeof globalThis & { window: Window }).window = {
-      suncode: {
-        saveMessage: saveMessageMock,
-      } as unknown as NonNullable<Window['suncode']>,
-    } as unknown as Window;
   });
 
   test('merges consecutive thinking deltas into a single block', () => {
@@ -202,7 +193,7 @@ describe('chat store stream blocks', () => {
     ]);
   });
 
-  test('waits for final message before persisting assistant content', () => {
+  test('waits for the main-process final message before replacing streamed assistant content', () => {
     const store = useChatStore();
     store.setActiveSessionId('session-1');
     store.handleStreamEvent({ type: 'message_start' }, 'session-1');
@@ -226,7 +217,6 @@ describe('chat store stream blocks', () => {
     );
 
     expect(store.messages[0]?.content).toBe('我先看看。最终回答。');
-    expect(saveMessageMock).not.toHaveBeenCalled();
 
     const finalMessage: Message = {
       role: 'assistant',
@@ -235,14 +225,9 @@ describe('chat store stream blocks', () => {
     store.handleStreamEvent({ type: 'message_end', message: finalMessage }, 'session-1');
 
     expect(store.messages[0]?.content).toBe('最终回答。');
-    expect(saveMessageMock).toHaveBeenCalledOnce();
-    expect(saveMessageMock.mock.calls[0]?.[0]).toMatchObject({
-      role: 'assistant',
-      content: finalMessage.content,
-    });
   });
 
-  test('unwraps structured final content before displaying and persisting it', () => {
+  test('unwraps structured final content received from the main process', () => {
     const store = useChatStore();
     store.setActiveSessionId('session-1');
 
@@ -260,11 +245,6 @@ describe('chat store stream blocks', () => {
     store.handleStreamEvent({ type: 'message_end', message: finalMessage }, 'session-1');
 
     expect(store.messages[0]?.content).toBe('## Done\n\n- formatted item');
-    expect(saveMessageMock).toHaveBeenCalledOnce();
-    expect(saveMessageMock.mock.calls[0]?.[0]).toMatchObject({
-      role: 'assistant',
-      content: [{ type: 'text', text: '## Done\n\n- formatted item' }],
-    });
   });
 
   test('creates a tool block even if tool execution starts before the stream snapshot arrives', () => {

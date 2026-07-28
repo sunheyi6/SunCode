@@ -260,7 +260,7 @@ export class Agent {
     this.totalTokens = { input: 0, output: 0, total: 0 };
   }
 
-  async prompt(text: string, uiLanguage?: UiLanguage): Promise<void> {
+  async prompt(text: string, uiLanguage?: UiLanguage, requestedRunId?: string): Promise<void> {
     if (this.isRunning) {
       this.onError('Agent is already processing a request');
       return;
@@ -284,7 +284,7 @@ export class Agent {
     this.activeRunTokens = { input: 0, output: 0, total: 0 };
     this.emitStatus('thinking');
 
-    const runId = crypto.randomUUID();
+    const runId = requestedRunId ?? crypto.randomUUID();
     const modelName = `${this.settings.activeProvider}/${this.settings.activeModel}`;
     this.onRunEvent({ type: 'run_started', runId, timestamp: new Date().toISOString(), modelName });
     // Record the user's original prompt in the run log
@@ -326,6 +326,7 @@ export class Agent {
       if ((error as Error).name === 'AbortError') {
         if (this.stopRequested) {
           this.stopRequested = false;
+          this.onRunEvent({ type: 'run_aborted', runId, timestamp: new Date().toISOString() });
           summarizeAfterStop = true;
         } else {
           this.onRunEvent({ type: 'run_aborted', runId, timestamp: new Date().toISOString() });
