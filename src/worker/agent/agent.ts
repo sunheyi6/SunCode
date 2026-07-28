@@ -641,13 +641,24 @@ export class Agent {
               '.suncode/tool-result-archive',
               this.sessionId,
             );
-            const result = applyContextBudget(ctx.contextMessages, policy, { archiveDir });
+            const result = applyContextBudget(
+              ctx.contextMessages,
+              policy,
+              { archiveDir, sessionId: this.sessionId, runId },
+              { turnCount: ctx.turnCount },
+            );
             if (result.diagnostic.changed) {
               console.log(
                 `[ContextBudget] ${result.diagnostic.beforeMessages}→${result.diagnostic.afterMessages} msgs, ` +
                   `${result.diagnostic.beforeTokens}→${result.diagnostic.afterTokens} tokens` +
+                  (result.diagnostic.activePrunedToolResults
+                    ? `, ${result.diagnostic.activePrunedToolResults} active pruned`
+                    : '') +
+                  (result.diagnostic.activeArchiveFailures
+                    ? `, ${result.diagnostic.activeArchiveFailures} active archive fails`
+                    : '') +
                   (result.diagnostic.prunedToolResults
-                    ? `, ${result.diagnostic.prunedToolResults} tool results pruned`
+                    ? `, ${result.diagnostic.prunedToolResults} stale pruned`
                     : '') +
                   (result.diagnostic.droppedTurns
                     ? `, ${result.diagnostic.droppedTurns} turns dropped`
@@ -656,6 +667,20 @@ export class Agent {
                     ? `, ${result.diagnostic.compactedTurns} turns compacted`
                     : ''),
               );
+              this.onRunEvent({
+                type: 'context_budget_applied',
+                runId,
+                turnNumber: ctx.turnCount,
+                activePrunedToolResults: result.diagnostic.activePrunedToolResults,
+                activeEstimatedTokensSaved: result.diagnostic.activeEstimatedTokensSaved,
+                activeArchiveFailures: result.diagnostic.activeArchiveFailures,
+                prunedToolResults: result.diagnostic.prunedToolResults,
+                prunedTokensSaved: result.diagnostic.prunedTokensSaved,
+                staleArchiveFailures: result.diagnostic.staleArchiveFailures,
+                beforeTokens: result.diagnostic.beforeTokens,
+                afterTokens: result.diagnostic.afterTokens,
+                timestamp: new Date().toISOString(),
+              });
             }
             return { contextMessages: result.messages };
           }
@@ -813,7 +838,12 @@ export class Agent {
               '.suncode/tool-result-archive',
               this.sessionId,
             );
-            const budgetResult = applyContextBudget(ctx.contextMessages, policy, { archiveDir });
+            const budgetResult = applyContextBudget(
+              ctx.contextMessages,
+              policy,
+              { archiveDir, sessionId: this.sessionId, runId },
+              { turnCount: ctx.turnCount },
+            );
             return { contextMessages: budgetResult.messages };
           }
         : undefined,
@@ -1255,6 +1285,9 @@ function buildContextBudgetPolicy(
     maxHistoryTokens: Math.floor(contextWindow * (settings.compactThreshold || 0.8)),
     minRecentTurns: DEFAULT_CONTEXT_BUDGET_POLICY.minRecentTurns,
     charsPerToken: DEFAULT_CONTEXT_BUDGET_POLICY.charsPerToken,
+    activeToolResultPrune: {
+      ...DEFAULT_CONTEXT_BUDGET_POLICY.activeToolResultPrune,
+    },
     staleToolResultPrune: {
       ...DEFAULT_CONTEXT_BUDGET_POLICY.staleToolResultPrune,
     },

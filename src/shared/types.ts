@@ -956,6 +956,29 @@ export type RunEvent =
       reason: string;
       timestamp: string;
     }
+  | {
+      type: 'turn_evidence_recorded';
+      runId: RunId;
+      turnNumber: number;
+      turnId: string;
+      count: number;
+      evidenceIds: string[];
+      timestamp: string;
+    }
+  | {
+      type: 'context_budget_applied';
+      runId: RunId;
+      turnNumber: number;
+      activePrunedToolResults?: number;
+      activeEstimatedTokensSaved?: number;
+      activeArchiveFailures?: number;
+      prunedToolResults?: number;
+      prunedTokensSaved?: number;
+      staleArchiveFailures?: number;
+      beforeTokens: number;
+      afterTokens: number;
+      timestamp: string;
+    }
   | { type: 'goal_started'; runId: RunId; goal: GoalDefinition; timestamp: string }
   | {
       type: 'goal_turn_completed';
@@ -1136,27 +1159,148 @@ export interface SubagentProgressDelta {
   toolResult?: ToolResult;
 }
 
+// ===== Turn Evidence Types =====
+// Source-bearing bounded projection of tool/check observations for a turn.
+// Not a second ledger: Runtime/session facts remain canonical; this is rebuildable.
+
+export type TurnEvidenceKind = 'tool' | 'artifact' | 'check' | 'observation';
+export type TurnEvidenceVisibility = 'model_visible' | 'internal' | 'restricted';
+export type TurnEvidenceAuthority = 'observation' | 'advisory' | 'authoritative';
+
+export interface TurnEvidenceSource {
+  runtimeEventIds?: string[];
+  toolCallId?: string;
+  stepId?: string;
+  artifactIds?: string[];
+}
+
+export interface TurnEvidenceIntegrity {
+  bodySha256?: string;
+  originalBytes?: number;
+  visibleBytes?: number;
+  omittedBytes?: number;
+  truncated?: boolean;
+}
+
+/** Known tool names with specialized evidence summaries. */
+export type TurnEvidenceNamedTool = 'bash' | 'read' | 'grep' | 'glob' | 'write' | 'edit';
+
+/** Bounded tool observation (phase B: kind=tool only). */
+export type TurnEvidenceToolSummary =
+  | {
+      tool: 'bash';
+      success: boolean;
+      command?: string;
+      cwd?: string;
+      exitCode?: number | null;
+      stdoutPreview?: string;
+      stderrPreview?: string;
+      errorPreview?: string;
+    }
+  | {
+      tool: 'read' | 'grep' | 'glob';
+      success: boolean;
+      path?: string;
+      query?: string;
+      observationPreview?: string;
+      errorPreview?: string;
+    }
+  | {
+      tool: 'write' | 'edit';
+      success: boolean;
+      path?: string;
+      editStatus?: string;
+      addedLines?: number;
+      removedLines?: number;
+      errorPreview?: string;
+    }
+  | {
+      /** Other tools — exclude named tools so the union stays discriminable. */
+      tool: Exclude<string, TurnEvidenceNamedTool>;
+      success: boolean;
+      outputPreview?: string;
+      errorPreview?: string;
+    };
+
+export interface TurnEvidenceEnvelope {
+  schemaVersion: 1;
+  evidenceId: string;
+  sessionId: string;
+  runId?: string;
+  turnId: string;
+  ts: number;
+  kind: TurnEvidenceKind;
+  source: TurnEvidenceSource;
+  visibility: TurnEvidenceVisibility;
+  authority: TurnEvidenceAuthority;
+  summary: TurnEvidenceToolSummary | Record<string, unknown>;
+  integrity?: TurnEvidenceIntegrity;
+}
+
 // ===== Context Budget Types =====
 
-/** Placeholder replacing an oversized tool result in conversation context. */
+export type ToolResultPruneReason =
+  | 'active_current_turn_tool_result_pruned_before_next_step'
+  | 'stale_tool_result_pruned'
+  /** @deprecated Prefer stale_tool_result_pruned; kept for older placeholders. */
+  | 'pruned_exceeds_budget';
+
+/**
+ * Placeholder replacing an oversized tool result in provider-visible context.
+ * Only emitted after a successful archive (archive-before-omit).
+ */
 export interface ArchivedToolResultPlaceholder {
   kind: 'suncode.archived_tool_result';
+  schemaVersion: 1;
   toolCallId: string;
   toolName: string;
+  /** Stable archive id (content-addressed when possible). */
+  artifactId: string;
+  /** Full SHA-256 of the archived body. */
+  bodySha256: string;
+  /**
+   * @deprecated Prefer bodySha256. Short prefix kept for older readers.
+   */
   bodyHash: string;
   originalTokens: number;
+  originalBytes: number;
+  /** @deprecated Prefer originalBytes. */
   originalChars: number;
-  reason: 'pruned_exceeds_budget';
-  /** Absolute path to archived full body when prune spilled content to disk. */
+  reason: ToolResultPruneReason;
+  rewriteVersion: 1;
+  turnId?: string;
+  /** Absolute path to archived full body. */
   artifactPath?: string;
   /** How the model can recover the omitted content. */
   recoveryHint?: string;
+}
+
+/** Result of persisting a full tool-result body for prune recovery. */
+export interface ToolResultArchiveRecord {
+  artifactId: string;
+  bodySha256: string;
+  originalBytes: number;
+  absolutePath: string;
 }
 
 /** Optional hooks for context budget (archive spill, etc.). */
 export interface ContextBudgetOptions {
   /** Directory for pruned tool-result archives. When set, oversized bodies are written here. */
   archiveDir?: string;
+  /** Optional session/run ids for archive source keys and diagnostics. */
+  sessionId?: string;
+  runId?: string;
+}
+
+/** Policy for pruning large tool results in the current (most recent) turn before the next step. */
+export interface ActiveToolResultPrunePolicy {
+  enabled: boolean;
+  /** Tool results above this estimated token count are eligible. Default 2048. */
+  maxResultTokens?: number;
+  /**
+   * Only apply when agent turnCount >= this (1-based). Default 1 = from first tool step.
+   */
+  minTurnNumber?: number;
 }
 
 /** Policy for pruning stale tool results from conversation context. */
@@ -1164,7 +1308,7 @@ export interface StaleToolResultPrunePolicy {
   enabled: boolean;
   /** Tool results above this estimated token count are replaced with placeholders. Default 2048. */
   maxResultTokens?: number;
-  /** Keep this many newest turns' tool results intact. Default 1. */
+  /** Keep this many newest turns' tool results intact (stale path only). Default 1. */
   minRecentTurnsFull?: number;
 }
 
@@ -1205,6 +1349,8 @@ export interface ContextBudgetPolicy {
   minRecentTurns?: number;
   /** Token estimation ratio. Default 4 chars/token. */
   charsPerToken?: number;
+  /** Same-turn (most recent iteration) large tool-result prune before next model step. */
+  activeToolResultPrune?: ActiveToolResultPrunePolicy;
   /** Stale tool result pruning configuration. */
   staleToolResultPrune?: StaleToolResultPrunePolicy;
   /** History compaction configuration. */
@@ -1222,8 +1368,14 @@ export interface ContextBudgetDiagnostic {
   afterTokens: number;
   beforeMessages: number;
   afterMessages: number;
+  /** Active (current-turn) prune successes. */
+  activePrunedToolResults?: number;
+  activeEstimatedTokensSaved?: number;
+  activeArchiveFailures?: number;
+  /** Stale prune successes (legacy field name kept for logs/tests). */
   prunedToolResults?: number;
   prunedTokensSaved?: number;
+  staleArchiveFailures?: number;
   snippedResults?: number;
   snippedTokensSaved?: number;
   collapsedGroups?: number;

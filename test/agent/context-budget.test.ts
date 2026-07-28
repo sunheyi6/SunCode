@@ -1,20 +1,40 @@
 /**
  * Context Budget — comprehensive test suite.
  *
- * Tests the three-layer context budget pipeline:
- *   1. Stale tool result pruning
+ * Tests the multi-layer context budget pipeline:
+ *   0.5 Active tool result pruning (archive-before-omit)
+ *   1. Stale tool result pruning (archive-before-omit)
  *   2. Token budget turn cap
  *   3. History compaction (high-water trigger)
  */
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { Message, ContextBudgetPolicy } from '@shared/types';
 import { CHARS_PER_TOKEN } from '@shared/constants';
 import {
   applyContextBudget,
+  pruneActiveToolResults,
   pruneStaleToolResults,
   groupMessagesByTurn,
   selectTurnsByBudget,
 } from '../../src/worker/agent/context-budget';
+
+const tempDirs: string[] = [];
+
+function makeArchiveDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'suncode-archive-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // ── Message factories ──
 
@@ -40,6 +60,11 @@ function defaultPolicy(overrides?: Partial<ContextBudgetPolicy>): ContextBudgetP
   return {
     minRecentTurns: 2,
     charsPerToken: CHARS_PER_TOKEN,
+    activeToolResultPrune: {
+      enabled: false,
+      maxResultTokens: 2048,
+      minTurnNumber: 1,
+    },
     staleToolResultPrune: {
       enabled: true,
       maxResultTokens: 2048,
@@ -75,7 +100,8 @@ describe('pruneStaleToolResults', () => {
     expect(toolMsg.content).toBe('Short output');
   });
 
-  it('prunes oversized tool results', () => {
+  it('prunes oversized tool results when archive succeeds', () => {
+    const archiveDir = makeArchiveDir();
     // Create a tool result that exceeds 2048 tokens (~8K chars with /4 ratio)
     const bigOutput = 'x'.repeat(10_000); // ~2500 estimated tokens
     const msgs: Message[] = [
@@ -86,12 +112,15 @@ describe('pruneStaleToolResults', () => {
       ...Array.from({ length: 5 }, (_, i) => toolResult(`tc${i}`, bigOutput)),
     ];
 
-    const { messages, prunedCount, tokensSaved } = pruneStaleToolResults(
+    const { messages, prunedCount, tokensSaved, archiveFailures } = pruneStaleToolResults(
       msgs,
       defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 0 } }),
+      4,
+      { archiveDir },
     );
     expect(prunedCount).toBeGreaterThan(0);
     expect(tokensSaved).toBeGreaterThan(0);
+    expect(archiveFailures).toBe(0);
 
     // Verify placeholder format
     const prunedTool = messages.find(
@@ -100,63 +129,81 @@ describe('pruneStaleToolResults', () => {
     expect(prunedTool).toBeDefined();
     const placeholder = JSON.parse(prunedTool!.content as string);
     expect(placeholder.kind).toBe('suncode.archived_tool_result');
+    expect(placeholder.schemaVersion).toBe(1);
     expect(placeholder.toolCallId).toBeTruthy();
+    expect(placeholder.artifactId).toBeTruthy();
+    expect(placeholder.bodySha256).toHaveLength(64);
     expect(placeholder.originalTokens).toBeGreaterThan(0);
     expect(placeholder.originalChars).toBe(bigOutput.length);
-    expect(placeholder.reason).toBe('pruned_exceeds_budget');
+    expect(placeholder.reason).toBe('stale_tool_result_pruned');
     expect(typeof placeholder.recoveryHint).toBe('string');
   });
 
-  it('resolves toolName from assistant toolCalls and can spill archive to disk', async () => {
-    const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const archiveDir = mkdtempSync(join(tmpdir(), 'suncode-archive-'));
-    try {
-      const bigOutput = JSON.stringify(
-        {
-          type: 'tool_result',
-          tool: 'bash',
-          success: true,
-          kind: 'command',
-          output: 'x'.repeat(10_000),
-        },
-        null,
-        2,
-      );
-      const msgs: Message[] = [
-        system('System prompt'),
-        user('Run build'),
-        assistant('Running', [{ type: 'tool_call', id: 'tc_bash', name: 'bash', arguments: '{}' }]),
-        toolResult('tc_bash', bigOutput),
-        user('next'),
-        assistant('ok'),
-      ];
+  it('keeps original body when archive is unavailable (fail-open)', () => {
+    const bigOutput = 'x'.repeat(10_000);
+    const msgs: Message[] = [
+      system('System prompt'),
+      user('Q'),
+      assistant('A'),
+      toolResult('tc1', bigOutput),
+    ];
 
-      const { messages, prunedCount } = pruneStaleToolResults(
-        msgs,
-        defaultPolicy({
-          staleToolResultPrune: { enabled: true, maxResultTokens: 100, minRecentTurnsFull: 0 },
-        }),
-        4,
-        { archiveDir },
-      );
-      expect(prunedCount).toBe(1);
-      const placeholder = JSON.parse(
-        messages.find((m) => m.toolCallId === 'tc_bash')!.content as string,
-      );
-      expect(placeholder.toolName).toBe('bash');
-      expect(placeholder.artifactPath).toBeTruthy();
-      expect(readFileSync(placeholder.artifactPath as string, 'utf8')).toBe(bigOutput);
-      expect(placeholder.recoveryHint).toEqual(
-        expect.stringContaining(placeholder.artifactPath as string),
-      );
-    } finally {
-      rmSync(archiveDir, { recursive: true, force: true });
-    }
+    const { messages, prunedCount, archiveFailures } = pruneStaleToolResults(
+      msgs,
+      defaultPolicy({
+        staleToolResultPrune: { enabled: true, maxResultTokens: 100, minRecentTurnsFull: 0 },
+      }),
+      // no archiveDir
+    );
+    expect(prunedCount).toBe(0);
+    expect(archiveFailures).toBe(1);
+    expect(messages.find((m) => m.toolCallId === 'tc1')!.content).toBe(bigOutput);
   });
 
-  it('protects recent turn tool results from pruning', () => {
+  it('resolves toolName from assistant toolCalls and can spill archive to disk', () => {
+    const archiveDir = makeArchiveDir();
+    const bigOutput = JSON.stringify(
+      {
+        type: 'tool_result',
+        tool: 'bash',
+        success: true,
+        kind: 'command',
+        output: 'x'.repeat(10_000),
+      },
+      null,
+      2,
+    );
+    const msgs: Message[] = [
+      system('System prompt'),
+      user('Run build'),
+      assistant('Running', [{ type: 'tool_call', id: 'tc_bash', name: 'bash', arguments: '{}' }]),
+      toolResult('tc_bash', bigOutput),
+      user('next'),
+      assistant('ok'),
+    ];
+
+    const { messages, prunedCount } = pruneStaleToolResults(
+      msgs,
+      defaultPolicy({
+        staleToolResultPrune: { enabled: true, maxResultTokens: 100, minRecentTurnsFull: 0 },
+      }),
+      4,
+      { archiveDir },
+    );
+    expect(prunedCount).toBe(1);
+    const placeholder = JSON.parse(
+      messages.find((m) => m.toolCallId === 'tc_bash')!.content as string,
+    );
+    expect(placeholder.toolName).toBe('bash');
+    expect(placeholder.artifactPath).toBeTruthy();
+    expect(readFileSync(placeholder.artifactPath as string, 'utf8')).toBe(bigOutput);
+    expect(placeholder.recoveryHint).toEqual(
+      expect.stringContaining(placeholder.artifactPath as string),
+    );
+  });
+
+  it('protects recent turn tool results from stale pruning', () => {
+    const archiveDir = makeArchiveDir();
     const bigOutput = 'x'.repeat(10_000);
     const msgs: Message[] = [
       system('System prompt'),
@@ -170,10 +217,9 @@ describe('pruneStaleToolResults', () => {
       toolResult('tc_recent', bigOutput),
     ];
 
-    const { messages, prunedCount } = pruneStaleToolResults(
-      msgs,
-      defaultPolicy(),
-    );
+    const { messages, prunedCount } = pruneStaleToolResults(msgs, defaultPolicy(), 4, {
+      archiveDir,
+    });
     expect(prunedCount).toBeGreaterThan(0);
 
     // Recent tool result should still be intact
@@ -184,6 +230,35 @@ describe('pruneStaleToolResults', () => {
     // Old tool result should be replaced
     const oldTool = messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_old')!;
     expect((oldTool.content as string).includes('suncode.archived_tool_result')).toBe(true);
+  });
+
+  it('actively prunes oversized results in the most recent turn', () => {
+    const archiveDir = makeArchiveDir();
+    const bigOutput = 'x'.repeat(10_000);
+    const msgs: Message[] = [
+      system('System prompt'),
+      user('Run tests'),
+      assistant('Running', [{ type: 'tool_call', id: 'tc_bash', name: 'bash', arguments: '{}' }]),
+      toolResult('tc_bash', bigOutput),
+    ];
+
+    const { messages, prunedCount, archiveFailures } = pruneActiveToolResults(
+      msgs,
+      defaultPolicy({
+        activeToolResultPrune: { enabled: true, maxResultTokens: 100 },
+      }),
+      4,
+      { archiveDir },
+    );
+    expect(archiveFailures).toBe(0);
+    expect(prunedCount).toBe(1);
+    const placeholder = JSON.parse(
+      messages.find((m) => m.toolCallId === 'tc_bash')!.content as string,
+    );
+    expect(placeholder.reason).toBe('active_current_turn_tool_result_pruned_before_next_step');
+    expect(placeholder.artifactId).toBeTruthy();
+    expect(placeholder.turnId).toBeTruthy();
+    expect(readFileSync(placeholder.artifactPath as string, 'utf8')).toBe(bigOutput);
   });
 
   it('skips already-pruned placeholders', () => {
@@ -550,6 +625,7 @@ describe('applyContextBudget', () => {
   });
 
   it('diagnostics reports accurate stats', () => {
+    const archiveDir = makeArchiveDir();
     const bigOutput = 'x'.repeat(10_000);
     const msgs: Message[] = [
       system('System'),
@@ -567,6 +643,7 @@ describe('applyContextBudget', () => {
       defaultPolicy({
         staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 1 },
       }),
+      { archiveDir },
     );
 
     expect(diagnostic.beforeMessages).toBe(8);
@@ -574,5 +651,31 @@ describe('applyContextBudget', () => {
     expect(diagnostic.afterTokens).toBeGreaterThan(0);
     expect(diagnostic.prunedToolResults).toBeGreaterThan(0);
     expect(diagnostic.prunedTokensSaved).toBeGreaterThan(0);
+  });
+
+  it('active prune runs on the current turn before the next step', () => {
+    const archiveDir = makeArchiveDir();
+    const bigOutput = 'x'.repeat(10_000);
+    const msgs: Message[] = [
+      system('System'),
+      user('Run'),
+      assistant('go', [{ type: 'tool_call', id: 'tc_big', name: 'bash', arguments: '{}' }]),
+      toolResult('tc_big', bigOutput),
+    ];
+
+    const { messages, diagnostic } = applyContextBudget(
+      msgs,
+      defaultPolicy({
+        activeToolResultPrune: { enabled: true, maxResultTokens: 100 },
+        staleToolResultPrune: { enabled: false },
+      }),
+      { archiveDir },
+      { turnCount: 1 },
+    );
+
+    expect(diagnostic.activePrunedToolResults).toBe(1);
+    expect(diagnostic.activeArchiveFailures ?? 0).toBe(0);
+    const body = messages.find((m) => m.toolCallId === 'tc_big')!.content as string;
+    expect(body).toContain('active_current_turn_tool_result_pruned_before_next_step');
   });
 });

@@ -9,7 +9,13 @@
  * This is a smoke-check discipline gate, not official task correctness scoring.
  */
 
-import type { AppSettings, ToolCallContent, ToolResult } from '@shared/types';
+import type {
+  AppSettings,
+  ToolCallContent,
+  ToolResult,
+  TurnEvidenceEnvelope,
+  TurnEvidenceToolSummary,
+} from '@shared/types';
 
 /** Default max repair attempts when code changed without verification. */
 export const COMPLETION_GATE_MAX_REPAIR_ATTEMPTS = 1;
@@ -140,6 +146,90 @@ export function updateCompletionGateFromTools(
   }
 
   return next;
+}
+
+/**
+ * Fold TurnEvidence observations into gate state (phase C).
+ * Preferred consumer path: source-bearing summaries, not free-text claims.
+ * Same semantics as tool results: successful write/edit invalidate prior checks.
+ */
+export function updateCompletionGateFromEvidence(
+  state: CompletionGateState,
+  envelopes: readonly TurnEvidenceEnvelope[],
+  turnNumber: number,
+): CompletionGateState {
+  let next = state;
+
+  for (const env of envelopes) {
+    if (env.kind !== 'tool') continue;
+    // Only trust model-visible observations for smoke-check discipline.
+    if (env.visibility === 'restricted') continue;
+
+    const summary = env.summary as TurnEvidenceToolSummary;
+    if (!('tool' in summary)) continue;
+
+    if ((summary.tool === 'write' || summary.tool === 'edit') && summary.success) {
+      next = {
+        ...next,
+        materialChangeMade: true,
+        lastMaterialChangeTurn: turnNumber,
+        hasPassingVerificationAfterChange: false,
+      };
+      continue;
+    }
+
+    if (summary.tool !== 'bash') continue;
+    const bash = summary as Extract<TurnEvidenceToolSummary, { tool: 'bash' }>;
+    const command = bash.command;
+    if (!command || !isVerificationCommand(command)) continue;
+
+    const exitCode = bash.exitCode ?? null;
+    next = {
+      ...next,
+      lastVerificationCommand: command,
+      lastVerificationExitCode: exitCode,
+    };
+
+    if (exitCode === 0 && bash.success && next.materialChangeMade) {
+      next = {
+        ...next,
+        hasPassingVerificationAfterChange: true,
+      };
+    }
+  }
+
+  return next;
+}
+
+/**
+ * Rebuild gate state by replaying all TurnEvidence in order.
+ * Preserves repairAttemptsUsed / maxRepairAttempts from prior state.
+ * turnNumber on each envelope is parsed from turnId (`turn-N`); fallback 0.
+ */
+export function rebuildCompletionGateFromEvidence(
+  prior: CompletionGateState,
+  envelopes: readonly TurnEvidenceEnvelope[],
+): CompletionGateState {
+  let next = createCompletionGateState(prior.maxRepairAttempts);
+  next = {
+    ...next,
+    repairAttemptsUsed: prior.repairAttemptsUsed,
+  };
+
+  // Process in chronological order (append order).
+  for (const env of envelopes) {
+    const turnNumber = parseTurnNumber(env.turnId) ?? 0;
+    next = updateCompletionGateFromEvidence(next, [env], turnNumber);
+  }
+
+  return next;
+}
+
+function parseTurnNumber(turnId: string): number | undefined {
+  const m = /^turn-(\d+)$/.exec(turnId);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 export function evaluateCompletionGate(state: CompletionGateState): CompletionGateDecision {

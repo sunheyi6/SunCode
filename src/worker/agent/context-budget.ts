@@ -1,19 +1,18 @@
 /**
  * Context Budget Manager — multi-layer context compaction for the agent loop.
  *
- * Five layers, applied in order (escalating cost):
+ * Layers, applied in order (escalating cost):
  *   0. Snip                        — zero-cost: remove unreferenced old tool results
- *   1. Stale Tool Result Prune     — replace oversized tool results with placeholders
+ *   0.5 Active Tool Result Prune   — same-turn archive-backed rewrite before next step
+ *   1. Stale Tool Result Prune     — older turns: archive-backed placeholders
  *   2. Context Collapse            — read-time projection of tool-heavy turns
  *   3. Token Budget Turn Cap       — keep only recent turns that fit within a token budget
  *   4. History Compact             — fold old turns into a summary when above high-water mark
  *
+ * Invariant: prune projection, never ledger. Archive before omission.
  * Integrated via the prepareNextTurn hook in agent-loop.ts.
  */
 
-import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { CHARS_PER_TOKEN } from '@shared/constants';
 import type {
   ArchivedToolResultPlaceholder,
@@ -21,10 +20,12 @@ import type {
   ContextBudgetOptions,
   ContextBudgetPolicy,
   Message,
+  ToolResultPruneReason,
 } from '@shared/types';
 import { countStringTokens } from '../utils/token-counter';
 import { compactMessages } from './compaction';
 import { collapseContext, snipUnreferencedResults } from './snip-compact';
+import { archiveToolResultBody } from './tool-result-archive';
 
 // ============================================================================
 // Types
@@ -49,6 +50,7 @@ export function applyContextBudget(
   messages: Message[],
   policy: ContextBudgetPolicy,
   options?: ContextBudgetOptions,
+  meta?: { turnCount?: number },
 ): { messages: Message[]; diagnostic: ContextBudgetDiagnostic } {
   const charsPerToken = policy.charsPerToken ?? CHARS_PER_TOKEN;
   const beforeTokens = estimateMessagesTokens(messages, charsPerToken);
@@ -57,8 +59,12 @@ export function applyContextBudget(
   let working = messages;
   let snippedResults = 0;
   let snippedTokensSaved = 0;
+  let activePrunedToolResults = 0;
+  let activeEstimatedTokensSaved = 0;
+  let activeArchiveFailures = 0;
   let prunedToolResults = 0;
   let prunedTokensSaved = 0;
+  let staleArchiveFailures = 0;
   let collapsedGroups = 0;
   let collapsedTokensSaved = 0;
   let droppedTurns = 0;
@@ -76,12 +82,26 @@ export function applyContextBudget(
     snippedTokensSaved = snipResult.snippedTokensSaved;
   }
 
+  // ---- Layer 0.5: Active (current-turn) tool result prune ----
+  if (policy.activeToolResultPrune?.enabled) {
+    const minTurn = policy.activeToolResultPrune.minTurnNumber ?? 1;
+    const turnCount = meta?.turnCount ?? Number.POSITIVE_INFINITY;
+    if (turnCount >= minTurn) {
+      const active = pruneActiveToolResults(working, policy, charsPerToken, options);
+      working = active.messages;
+      activePrunedToolResults = active.prunedCount;
+      activeEstimatedTokensSaved = active.tokensSaved;
+      activeArchiveFailures = active.archiveFailures;
+    }
+  }
+
   // ---- Layer 1: Stale tool result prune ----
   if (policy.staleToolResultPrune?.enabled) {
     const pruneResult = pruneStaleToolResults(working, policy, charsPerToken, options);
     working = pruneResult.messages;
     prunedToolResults = pruneResult.prunedCount;
     prunedTokensSaved = pruneResult.tokensSaved;
+    staleArchiveFailures = pruneResult.archiveFailures;
   }
 
   // ---- Layer 2: Context collapse (read-time projection) ----
@@ -107,11 +127,8 @@ export function applyContextBudget(
     const keptTurnIds = selectTurnsByBudget(turnGroups, { maxTokens, maxTurns, minRecent });
     if (keptTurnIds.size < turnGroups.length) {
       droppedTurns = turnGroups.length - keptTurnIds.size;
-      // Build message→turn map for accurate filtering
       const msgTurnMap = buildMessageTurnMap(working);
       working = working.filter((msg) => {
-        // System instructions and user objectives are anchors. Only old
-        // assistant/tool iterations are eligible for dropping.
         if (msg.role === 'system' || msg.role === 'user') return true;
         const turnId = msgTurnMap.get(msg);
         return turnId ? keptTurnIds.has(turnId) : true;
@@ -146,14 +163,20 @@ export function applyContextBudget(
     changed:
       beforeCount !== afterCount ||
       prunedToolResults > 0 ||
+      activePrunedToolResults > 0 ||
       snippedResults > 0 ||
-      collapsedGroups > 0,
+      collapsedGroups > 0 ||
+      activeArchiveFailures > 0 ||
+      staleArchiveFailures > 0,
     beforeTokens,
     afterTokens,
     beforeMessages: beforeCount,
     afterMessages: afterCount,
-    ...(snippedResults > 0 ? { snippedResults, snippedTokensSaved } : {}),
+    ...(activePrunedToolResults > 0 ? { activePrunedToolResults, activeEstimatedTokensSaved } : {}),
+    ...(activeArchiveFailures > 0 ? { activeArchiveFailures } : {}),
     ...(prunedToolResults > 0 ? { prunedToolResults, prunedTokensSaved } : {}),
+    ...(staleArchiveFailures > 0 ? { staleArchiveFailures } : {}),
+    ...(snippedResults > 0 ? { snippedResults, snippedTokensSaved } : {}),
     ...(collapsedGroups > 0 ? { collapsedGroups, collapsedTokensSaved } : {}),
     ...(droppedTurns > 0 ? { droppedTurns } : {}),
     ...(compactedTurns > 0 ? { compactedTurns } : {}),
@@ -163,24 +186,61 @@ export function applyContextBudget(
 }
 
 // ============================================================================
+// Active tool result prune (current / most recent turn)
+// ============================================================================
+
+/**
+ * Rewrite oversized tool results from the most recent model-tool iteration
+ * before the next provider step. Archive-before-omit: keep original on failure.
+ */
+export function pruneActiveToolResults(
+  messages: Message[],
+  policy: ContextBudgetPolicy,
+  _charsPerToken = CHARS_PER_TOKEN,
+  options?: ContextBudgetOptions,
+): { messages: Message[]; prunedCount: number; tokensSaved: number; archiveFailures: number } {
+  const activePolicy = policy.activeToolResultPrune;
+  if (!activePolicy?.enabled) {
+    return { messages, prunedCount: 0, tokensSaved: 0, archiveFailures: 0 };
+  }
+
+  const maxResultTokens =
+    activePolicy.maxResultTokens ?? policy.staleToolResultPrune?.maxResultTokens ?? 2048;
+  const messageTurnMap = buildMessageTurnMap(messages);
+  const activeTurnIds = recentTurnIdsFromGroups(messageTurnMap, 1);
+  const toolNameByCallId = buildToolNameIndex(messages);
+
+  return rewriteEligibleToolResults(messages, {
+    maxResultTokens,
+    isEligible: (msg) => {
+      const turnId = messageTurnMap.get(msg);
+      return Boolean(turnId && activeTurnIds.has(turnId));
+    },
+    turnIdFor: (msg) => messageTurnMap.get(msg),
+    toolNameByCallId,
+    reason: 'active_current_turn_tool_result_pruned_before_next_step',
+    options,
+  });
+}
+
+// ============================================================================
 // Layer 1: Stale tool result prune
 // ============================================================================
 
 /**
- * Replace oversized tool results with lightweight archive placeholders.
- * Protects the most recent N turns' tool results from pruning.
- * When `options.archiveDir` is set, full bodies are spilled to disk so the model
- * can recover them via the read tool.
+ * Replace oversized tool results in older turns with archive placeholders.
+ * Protects the most recent N turns from stale pruning (active path handles those).
+ * Archive-before-omit: keep original when archive fails.
  */
 export function pruneStaleToolResults(
   messages: Message[],
   policy: ContextBudgetPolicy,
   _charsPerToken = CHARS_PER_TOKEN,
   options?: ContextBudgetOptions,
-): { messages: Message[]; prunedCount: number; tokensSaved: number } {
+): { messages: Message[]; prunedCount: number; tokensSaved: number; archiveFailures: number } {
   const prunePolicy = policy.staleToolResultPrune;
   if (!prunePolicy?.enabled) {
-    return { messages, prunedCount: 0, tokensSaved: 0 };
+    return { messages, prunedCount: 0, tokensSaved: 0, archiveFailures: 0 };
   }
 
   const maxResultTokens = prunePolicy.maxResultTokens ?? 2048;
@@ -189,39 +249,76 @@ export function pruneStaleToolResults(
     prunePolicy.minRecentTurnsFull ?? policy.minRecentTurns ?? 1,
   );
 
-  // Build a message → turnId map so tool messages know which turn they belong to
   const messageTurnMap = buildMessageTurnMap(messages);
-  // Identify protected turns (most recent N non-system turn IDs)
   const protectedTurnIds = recentTurnIdsFromGroups(messageTurnMap, minRecentTurnsFull);
   const toolNameByCallId = buildToolNameIndex(messages);
 
+  return rewriteEligibleToolResults(messages, {
+    maxResultTokens,
+    isEligible: (msg) => {
+      const turnId = messageTurnMap.get(msg);
+      if (turnId && protectedTurnIds.has(turnId)) return false;
+      return true;
+    },
+    turnIdFor: (msg) => messageTurnMap.get(msg),
+    toolNameByCallId,
+    reason: 'stale_tool_result_pruned',
+    options,
+  });
+}
+
+interface RewriteArgs {
+  maxResultTokens: number;
+  isEligible: (msg: Message) => boolean;
+  turnIdFor: (msg: Message) => string | undefined;
+  toolNameByCallId: Map<string, string>;
+  reason: ToolResultPruneReason;
+  options?: ContextBudgetOptions;
+}
+
+function rewriteEligibleToolResults(
+  messages: Message[],
+  args: RewriteArgs,
+): { messages: Message[]; prunedCount: number; tokensSaved: number; archiveFailures: number } {
   let prunedCount = 0;
   let tokensSaved = 0;
+  let archiveFailures = 0;
 
   const prunedMessages = messages.map((msg) => {
-    // Only prune tool messages with string content
     if (msg.role !== 'tool' || typeof msg.content !== 'string') return msg;
-
-    const turnId = messageTurnMap.get(msg);
-    // Protect recent turns
-    if (turnId && protectedTurnIds.has(turnId)) return msg;
-
-    // Already a placeholder — skip
+    if (!args.isEligible(msg)) return msg;
     if (isPlaceholderString(msg.content)) return msg;
 
-    // Estimate tokens
     const { tokens } = countStringTokens(msg.content);
-    if (tokens <= maxResultTokens) return msg;
+    if (tokens <= args.maxResultTokens) return msg;
 
-    // Create placeholder (optionally spill full body to archiveDir)
-    const placeholder = buildPlaceholder(msg, msg.content, tokens, toolNameByCallId, options);
+    const archived = archiveToolResultBody(
+      args.options?.archiveDir,
+      msg.toolCallId ?? 'unknown',
+      msg.content,
+    );
+    if (!archived?.artifactId?.trim()) {
+      archiveFailures += 1;
+      // Fail open: keep original provider-visible body.
+      return msg;
+    }
+
+    const placeholder = buildPlaceholder({
+      msg,
+      content: msg.content,
+      tokens,
+      toolNameByCallId: args.toolNameByCallId,
+      archive: archived,
+      reason: args.reason,
+      turnId: args.turnIdFor(msg),
+    });
     prunedCount += 1;
-    tokensSaved += tokens - PLACEHOLDER_TOKENS;
+    tokensSaved += Math.max(0, tokens - PLACEHOLDER_TOKENS);
 
     return { ...msg, content: placeholder };
   });
 
-  return { messages: prunedMessages, prunedCount, tokensSaved };
+  return { messages: prunedMessages, prunedCount, tokensSaved, archiveFailures };
 }
 
 // ============================================================================
@@ -250,11 +347,8 @@ export function groupMessagesByTurn(
   };
 
   for (const msg of messages) {
-    // System messages belong to turn 0 (always kept)
     if (msg.role === 'system') {
-      // Flush current group if any
       flushCurrentGroup();
-      // System messages form their own "turn"
       groups.push(buildTurnGroup('system', [msg], charsPerToken));
       continue;
     }
@@ -268,7 +362,6 @@ export function groupMessagesByTurn(
     currentGroup.push(msg);
   }
 
-  // Flush any remaining messages as the last turn
   flushCurrentGroup();
 
   return groups;
@@ -287,14 +380,12 @@ export function selectTurnsByBudget(
   let keptTokens = 0;
   let keptNonSystemTurns = 0;
 
-  // Always keep system turns
   for (const g of groups) {
     if (g.turnId === 'system') {
       kept.add(g.turnId);
     }
   }
 
-  // Walk from newest to oldest (skip system which is already kept)
   const nonSystemGroups = groups.filter((g) => g.turnId !== 'system');
 
   for (let i = nonSystemGroups.length - 1; i >= 0; i--) {
@@ -303,9 +394,7 @@ export function selectTurnsByBudget(
     const mustKeep = nextCount <= options.minRecent;
 
     if (!mustKeep) {
-      // Check turn cap
       if (options.maxTurns !== undefined && nextCount > options.maxTurns) break;
-      // Check token budget
       if (
         options.maxTokens !== undefined &&
         keptTokens > 0 &&
@@ -329,35 +418,37 @@ export function selectTurnsByBudget(
 /** Approximate token count of a placeholder — used for savings estimation. */
 const PLACEHOLDER_TOKENS = 80;
 
-function buildPlaceholder(
-  msg: Message,
-  content: string,
-  originalTokens: number,
-  toolNameByCallId: Map<string, string>,
-  options?: ContextBudgetOptions,
-): string {
-  const toolCallId = msg.toolCallId ?? 'unknown';
-  const bodyHash = createHash('sha256').update(content).digest('hex').slice(0, 16);
+function buildPlaceholder(args: {
+  msg: Message;
+  content: string;
+  tokens: number;
+  toolNameByCallId: Map<string, string>;
+  archive: { artifactId: string; bodySha256: string; originalBytes: number; absolutePath: string };
+  reason: ToolResultPruneReason;
+  turnId?: string;
+}): string {
+  const toolCallId = args.msg.toolCallId ?? 'unknown';
   const toolName =
-    (msg.toolCallId ? toolNameByCallId.get(msg.toolCallId) : undefined) ??
-    extractToolNameFromContent(content) ??
+    (args.msg.toolCallId ? args.toolNameByCallId.get(args.msg.toolCallId) : undefined) ??
+    extractToolNameFromContent(args.content) ??
     'unknown';
-
-  const artifactPath = tryWriteArchive(options?.archiveDir, toolCallId, bodyHash, content);
-  const recoveryHint = artifactPath
-    ? `Archived full tool result at ${artifactPath}. Use the read tool on that path if you need the omitted content.`
-    : `Tool result was pruned to save context (${originalTokens} tokens, ${content.length} chars). Re-run the ${toolName} tool only if safe and you still need the full content.`;
 
   const placeholder: ArchivedToolResultPlaceholder = {
     kind: 'suncode.archived_tool_result',
+    schemaVersion: 1,
     toolCallId,
     toolName,
-    bodyHash,
-    originalTokens,
-    originalChars: content.length,
-    reason: 'pruned_exceeds_budget',
-    ...(artifactPath ? { artifactPath } : {}),
-    recoveryHint,
+    artifactId: args.archive.artifactId,
+    bodySha256: args.archive.bodySha256,
+    bodyHash: args.archive.bodySha256.slice(0, 16),
+    originalTokens: args.tokens,
+    originalBytes: args.archive.originalBytes,
+    originalChars: args.content.length,
+    reason: args.reason,
+    rewriteVersion: 1,
+    turnId: args.turnId,
+    artifactPath: args.archive.absolutePath,
+    recoveryHint: `Archived full tool result (artifactId=${args.archive.artifactId}) at ${args.archive.absolutePath}. Use the read tool on that path if you need the omitted content. Do not re-run the ${toolName} tool if it may have side effects.`,
   };
 
   return JSON.stringify(placeholder);
@@ -393,31 +484,9 @@ function extractToolNameFromContent(content: string): string | undefined {
   return undefined;
 }
 
-function tryWriteArchive(
-  archiveDir: string | undefined,
-  toolCallId: string,
-  bodyHash: string,
-  content: string,
-): string | undefined {
-  if (!archiveDir) return undefined;
-  try {
-    mkdirSync(archiveDir, { recursive: true });
-    const safeId = toolCallId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
-    const filePath = join(archiveDir, `${safeId}_${bodyHash}.txt`);
-    writeFileSync(filePath, content, 'utf8');
-    return filePath;
-  } catch (error) {
-    console.warn(
-      `[ContextBudget] Failed to archive pruned tool result ${toolCallId}:`,
-      (error as Error).message,
-    );
-    return undefined;
-  }
-}
-
 function isPlaceholderString(content: string): boolean {
   try {
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(content) as { kind?: unknown };
     return parsed?.kind === 'suncode.archived_tool_result';
   } catch {
     return false;
@@ -470,7 +539,6 @@ export function recentTurnIdsFromGroups(
   count: number,
 ): Set<string> {
   if (count <= 0) return new Set();
-  // Collect unique non-system turn IDs in document order
   const order: string[] = [];
   const seen = new Set<string>();
   for (const turnId of messageTurnMap.values()) {

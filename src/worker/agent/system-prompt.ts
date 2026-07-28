@@ -16,6 +16,11 @@ export interface SystemPromptInput {
   memoryContent?: string;
   /** Optional: Retrieved failure lessons relevant to the current request */
   relevantLessonsContent?: string;
+  /**
+   * Optional: recent TurnEvidence window (source-bearing observations).
+   * Injected into structured system prompt context; not official proof.
+   */
+  turnEvidenceContent?: string;
   /** User-facing language derived from the current user prompt. */
   responseLanguage?: UiLanguage;
 }
@@ -34,6 +39,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     agentsMdContent,
     memoryContent,
     relevantLessonsContent,
+    turnEvidenceContent,
     responseLanguage,
   } = input;
 
@@ -53,6 +59,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     agentsMdContent,
     skillsContent,
     relevantLessonsContent,
+    turnEvidenceContent: turnEvidenceContent || undefined,
     responseLanguage: responseLanguage
       ? {
           language: responseLanguage,

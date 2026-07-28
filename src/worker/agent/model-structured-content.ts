@@ -10,6 +10,8 @@ export interface StructuredSystemPromptInput {
   tools: Array<Pick<ToolDefinition, 'name' | 'description' | 'parameters'> & { snippet: string }>;
   memoryContent?: string;
   relevantLessonsContent?: string;
+  /** Bounded source-bearing turn evidence window (not official proof). */
+  turnEvidenceContent?: string;
   agentsMdContent?: string;
   skillsContent?: string;
   responseLanguage?: {
@@ -49,6 +51,7 @@ export function buildStructuredSystemPrompt(input: StructuredSystemPromptInput):
     context: {
       memory: input.memoryContent,
       relevantLessons: input.relevantLessonsContent,
+      turnEvidence: input.turnEvidenceContent,
       projectInstructions: input.agentsMdContent,
       skills: input.skillsContent,
     },
