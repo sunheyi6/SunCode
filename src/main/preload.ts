@@ -407,28 +407,6 @@ const suncodeAPI = {
     return () => ipcRenderer.removeListener('agent:goal-event', handler);
   },
 
-  /** Listen for tool confirmation requests (confirm_changes mode) */
-  onConfirmRequest(
-    callback: (data: {
-      sessionId: string;
-      toolCallId: string;
-      toolName: string;
-      description: string;
-    }) => void,
-  ): () => void {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      data: { sessionId: string; toolCallId: string; toolName: string; description: string },
-    ): void => callback(data);
-    ipcRenderer.on('agent:confirm-request', handler);
-    return () => ipcRenderer.removeListener('agent:confirm-request', handler);
-  },
-
-  /** Respond to a tool confirmation request */
-  respondConfirm(toolCallId: string, confirmed: boolean, sessionId?: string): void {
-    ipcRenderer.send('agent:confirm-response', toolCallId, confirmed, sessionId);
-  },
-
   /** Get the app version */
   async getAppVersion(): Promise<string> {
     return ipcRenderer.invoke('app:getVersion');

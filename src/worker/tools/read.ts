@@ -1,6 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { isAbsolute, normalize, relative, resolve } from 'node:path';
-import { isSensitiveFile } from './sensitive';
 import { BaseTool, obj, p } from './types';
 
 export function createReadTool(workingDir: string) {
@@ -29,18 +28,6 @@ export function createReadTool(workingDir: string) {
 
       const absPath = isAbsolute(filePath) ? filePath : resolve(workingDir, filePath);
       const normalized = normalize(absPath);
-
-      // Security: prevent reading outside working directory
-      if (!normalized.startsWith(resolve(workingDir))) {
-        return this.failure(`Cannot read outside working directory: ${normalized}`);
-      }
-
-      // Security: block sensitive files (credentials, keys, etc.)
-      if (isSensitiveFile(normalized)) {
-        return this.failure(
-          `Cannot read sensitive file: ${normalized}. This file may contain credentials or secrets.`,
-        );
-      }
 
       try {
         const info = await stat(normalized);

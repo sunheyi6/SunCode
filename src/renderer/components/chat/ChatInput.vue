@@ -25,7 +25,6 @@ import {
   syncChatInputDropdownBodyClass,
 } from './chat-input';
 import ModelSelector from './ModelSelector.vue';
-import PermissionSelector from './PermissionSelector.vue';
 import ThinkingSelector from './ThinkingSelector.vue';
 import WorkspaceSelector from './WorkspaceSelector.vue';
 
@@ -176,7 +175,6 @@ const dropdowns = useDropdownGroup();
 const workspaceDropdown = dropdowns.register('workspace');
 const branchDropdown = dropdowns.register('branch');
 const modelDropdown = dropdowns.register('model');
-const permissionDropdown = dropdowns.register('permission');
 const thinkingDropdown = dropdowns.register('thinking');
 
 const gitInfo = ref<GitInfo>({
@@ -528,7 +526,6 @@ watch(
             <span aria-hidden="true"><AppIcon name="plus" :size="15" /></span>
           </button>
 
-          <PermissionSelector :dropdown="permissionDropdown" />
         </div>
 
         <div class="toolbar-group toolbar-right">

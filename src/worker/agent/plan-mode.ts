@@ -2,17 +2,16 @@
  * Plan Mode State Machine
  *
  * Two-phase design:
- *   1. exploring — read-only tools + plan file writing, no destructive operations
- *   2. implementing — full permissions restored after user approval
+ *   1. exploring — gather context and write a plan
+ *   2. implementing — execute the approved plan
  *
- * The agent voluntarily reduces its own permissions to gain user trust.
- * This is the only mechanism where the model actively requests LESS capability.
+ * Planning is a workflow only. It never changes the agent's full-access permissions.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DEFAULT_PLAN_DIR, DEFAULT_PLAN_MAX_TURNS } from '@shared/constants';
-import type { AppSettings, PlanState } from '@shared/types';
+import type { PlanState } from '@shared/types';
 import { getAgentDataSubdir } from './agent-data-dir';
 
 // ===== Plan Mode State =====
@@ -40,12 +39,11 @@ export function isImplementing(): boolean {
 }
 
 /**
- * Enter plan mode — save current permission mode and switch to read-only.
+ * Enter plan mode without changing tool permissions.
  * Only callable when NOT already in plan mode.
  */
 export function enterPlanMode(
   workingDir: string,
-  currentPermissionMode: AppSettings['permissionMode'],
   maxTurns: number = DEFAULT_PLAN_MAX_TURNS,
   sessionId?: string,
 ): PlanState {
@@ -61,7 +59,6 @@ export function enterPlanMode(
 
   planState = {
     phase: 'exploring',
-    savedPermissionMode: currentPermissionMode,
     planFilePath,
     planTurnCount: 0,
     maxTurns,
@@ -71,24 +68,20 @@ export function enterPlanMode(
 }
 
 /**
- * Exit plan mode. Restores the saved permission mode.
- * If a circuit breaker was triggered (auto-mode disabled during plan mode),
- * fall back to safe defaults.
+ * Exit plan mode. Full access remains active throughout the workflow.
  */
-export function exitPlanMode(wasApproved: boolean): PlanState['savedPermissionMode'] {
+export function exitPlanMode(wasApproved: boolean): void {
   if (!planState) {
     throw new Error('Not in plan mode');
   }
 
-  const restoredMode = planState.savedPermissionMode;
   if (!wasApproved) {
     planState.phase = 'exploring';
     planState.approved = false;
-    return 'plan';
+    return;
   }
 
   planState = null;
-  return restoredMode;
 }
 
 /**
@@ -102,41 +95,13 @@ export function approvePlan(): void {
 }
 
 /**
- * Get the effective permission mode while in plan mode.
- * During exploring: plan (read-only + plan file write).
- * During implementing: restored permission mode.
- */
-export function getPlanPermissionMode(): AppSettings['permissionMode'] | null {
-  if (!planState) return null;
-  if (planState.phase === 'exploring') return 'plan';
-  return planState.savedPermissionMode;
-}
-
-/**
- * Check if a tool is allowed during the exploring phase.
- * Exploring allows only read-only tools + write to the plan file.
+ * Planning does not impose tool restrictions.
  */
 export function isToolAllowedInPlanMode(
-  toolName: string,
-  params: Record<string, unknown>,
+  _toolName: string,
+  _params: Record<string, unknown>,
 ): boolean {
-  if (planState?.phase !== 'exploring') return true;
-
-  if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') return true;
-
-  // Read-only tools are always allowed
-  const readOnlyTools = ['read', 'grep', 'glob', 'ls', 'find', 'web_search', 'web_fetch'];
-  if (readOnlyTools.includes(toolName)) return true;
-
-  // Allow writing only to the plan file
-  if (toolName === 'write' || toolName === 'edit') {
-    const filePath = (params.file_path || params.filePath || '') as string;
-    const normalized = path.normalize(filePath);
-    const planFileNormalized = path.normalize(planState.planFilePath);
-    if (normalized === planFileNormalized) return true;
-  }
-
-  return false;
+  return true;
 }
 
 /**
@@ -193,15 +158,13 @@ export function isPlanMaxTurnsExceeded(): boolean {
 
 /**
  * Force-exit plan mode due to turn limit exceeded.
- * Approves the plan automatically and restores permissions.
+ * Approves the plan automatically.
  */
-export function forceExitPlanMode(): PlanState['savedPermissionMode'] {
+export function forceExitPlanMode(): void {
   if (!planState) {
     throw new Error('Not in plan mode');
   }
-  const restoredMode = planState.savedPermissionMode;
   planState = null;
-  return restoredMode;
 }
 
 /**
@@ -212,15 +175,13 @@ export function buildPlanModeInstructions(planState: PlanState, turnCount: numbe
   const reminder = getPlanModeReminder(turnCount);
   const base = `
 ## Plan Mode (Active)
-You are currently in **plan mode**. You voluntarily reduced your permissions to read-only
-(except for writing the plan file) to build user trust before making changes.
+You are currently in **plan mode**. This is a planning workflow; full tool access remains active.
 
 **Phase: ${planState.phase === 'exploring' ? 'Exploration & Planning' : 'Implementation'}**
 
 - Plan file: \`${planState.planFilePath}\`
-- Only READ tools + writing the plan file are allowed in exploration phase.
 - Use EnterPlanMode and ExitPlanMode tools to manage transitions.
-- Do NOT make any file modifications outside the plan file until the user approves your plan.
+- Prefer finishing the plan before implementation, but permission enforcement is not applied.
 `;
 
   if (reminder) {
@@ -349,6 +310,6 @@ and produce a clear, actionable plan before making any changes.
 - Be specific about what changes you'll make and why
 - Include edge cases and risks you've considered
 
-**Important:** Do NOT make any changes to project files until the user approves your plan.`;
+**Important:** Finish the plan and request approval before implementation.`;
 
-const PLAN_MODE_SPARSE_REMINDER = `**Reminder:** You are still in plan mode (read-only). Write your plan to the plan file, then call ExitPlanMode.`;
+const PLAN_MODE_SPARSE_REMINDER = `**Reminder:** You are still in plan mode. Write your plan to the plan file, then call ExitPlanMode.`;

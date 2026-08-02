@@ -85,13 +85,11 @@ export function createCompletionGateState(
   };
 }
 
-/** Whether completion gate should run for this permission mode + settings. */
+/** Whether completion gate should run for the current settings. */
 export function isCompletionGateEnabled(
   settings: Pick<AppSettings, 'permissionMode'> & { completionGateEnabled?: boolean },
 ): boolean {
   if (settings.completionGateEnabled === false) return false;
-  // plan mode is read-only exploration — no deliverable write discipline
-  if (settings.permissionMode === 'plan') return false;
   return true;
 }
 

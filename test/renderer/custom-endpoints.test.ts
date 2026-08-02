@@ -1,5 +1,62 @@
-import { describe, expect, it } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateEndpointId, validateEndpoint } from '../../src/renderer/components/settings/custom-endpoints';
+import { BUILTIN_PROVIDERS, useModelsStore } from '../../src/renderer/stores/models';
+
+const bridgeMocks = vi.hoisted(() => ({
+  getProviders: vi.fn(),
+  getModels: vi.fn(),
+}));
+
+vi.mock('../../src/renderer/api/bridge', () => ({
+  bridge: {
+    getProviders: bridgeMocks.getProviders,
+    getModels: bridgeMocks.getModels,
+  },
+}));
+
+beforeEach(() => {
+  vi.stubGlobal('window', {
+    matchMedia: () => ({ matches: false }),
+  });
+  setActivePinia(createPinia());
+  bridgeMocks.getProviders.mockReset();
+  bridgeMocks.getModels.mockReset();
+});
+
+describe('built-in model providers', () => {
+  it('OpenCode Go 可进入内置模型选择流程', () => {
+    expect(BUILTIN_PROVIDERS).toContain('opencode-go');
+  });
+
+  it('以 pi-ai 动态目录为准加载全部供应商及模型', async () => {
+    bridgeMocks.getProviders.mockResolvedValue(['openai', 'new-pi-provider']);
+    bridgeMocks.getModels.mockImplementation(async (provider: string) => [
+      {
+        id: `${provider}-model`,
+        name: `${provider} model`,
+        provider,
+        contextWindow: 128000,
+      },
+    ]);
+    const store = useModelsStore();
+
+    await store.loadProviders();
+
+    expect(store.builtinProviders).toEqual(['openai', 'new-pi-provider']);
+    expect(store.providers).toEqual(['openai', 'new-pi-provider']);
+    expect(bridgeMocks.getModels).toHaveBeenCalledTimes(2);
+    expect(store.allModels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ provider: 'openai', model: 'openai-model' }),
+        expect.objectContaining({
+          provider: 'new-pi-provider',
+          model: 'new-pi-provider-model',
+        }),
+      ]),
+    );
+  });
+});
 
 describe('generateEndpointId', () => {
   it('中文会被替换为分隔符，slug 为空时兜底 endpoint', () => {

@@ -27,7 +27,6 @@ interface StructuredPromptForTest {
     memory?: string;
     relevantLessons?: string;
     projectInstructions?: string;
-    planModeInstructions?: string;
     skills?: string;
   };
   environment: { currentDate: string; workingDirectory: string };
@@ -105,15 +104,8 @@ describe('buildSystemPrompt', () => {
     expect(prompt.tools).toEqual([]);
   });
 
-  it('stores permission mode in structured mode fields', () => {
-    const planPrompt = parsePrompt({ permissionMode: 'plan' });
-    const editPrompt = parsePrompt({ permissionMode: 'auto_edit' });
-
-    expect(planPrompt.mode).toMatchObject({
-      permissionMode: 'plan',
-      planModeNotice: 'read-only tools only',
-    });
-    expect(editPrompt.mode).toEqual({ permissionMode: 'auto_edit' });
+  it('stores the sole full-access mode in structured fields', () => {
+    expect(parsePrompt().mode).toEqual({ permissionMode: 'full_access' });
   });
 
   it('stores optional context in named fields', () => {
@@ -121,7 +113,6 @@ describe('buildSystemPrompt', () => {
       memoryContent: 'Test memory',
       relevantLessonsContent: 'Use the known fix first',
       agentsMdContent: '# Project Rules',
-      planModeInstructions: 'Plan first',
       skillsContent: 'SKILL: test',
     });
 
@@ -129,7 +120,6 @@ describe('buildSystemPrompt', () => {
       memory: 'Test memory',
       relevantLessons: 'Use the known fix first',
       projectInstructions: '# Project Rules',
-      planModeInstructions: 'Plan first',
       skills: 'SKILL: test',
     });
   });

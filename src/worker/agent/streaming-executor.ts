@@ -9,7 +9,7 @@
  * Key design:
  * - Read-only tools start immediately (parallel)
  * - Write tools are deferred until after streaming completes
- * - Permission checks still apply for confirm_changes mode
+ * - Mutating tools remain deferred until the full model response is available
  * - Results are collected and returned alongside the stream output
  */
 
@@ -34,15 +34,10 @@ export class StreamingToolExecutor {
   private running: Map<string, Promise<ToolResult>> = new Map();
   private results: Map<string, ToolResult> = new Map();
   private callbacks: StreamingExecutorCallbacks;
-  /** Tool calls that require confirmation before execution. */
+  /** Mutating tool calls deferred until streaming completes. */
   private deferredCalls: ToolCallContent[] = [];
 
-  constructor(
-    tools: Tool[],
-    workingDir: string,
-    confirmMode: boolean,
-    callbacks: StreamingExecutorCallbacks = {},
-  ) {
+  constructor(tools: Tool[], callbacks: StreamingExecutorCallbacks = {}) {
     this.tools = new Map(tools.map((t) => [t.name, t]));
     this.callbacks = callbacks;
   }
@@ -65,7 +60,7 @@ export class StreamingToolExecutor {
     }
 
     // Only read-only tools can execute immediately. Mutating tools are
-    // deferred to the main executor so confirmation and Plan Mode guards apply.
+    // deferred to the main executor until the full model response is available.
     if (!tool.isReadonly) {
       this.deferredCalls.push(toolCall);
       return;

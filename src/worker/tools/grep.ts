@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
-import { readFile, stat } from 'node:fs/promises';
-import { basename, isAbsolute, normalize, relative, resolve } from 'node:path';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { ToolResult } from '@shared/types';
+import { resolveToolExecutionEnvironment, type ToolExecutionEnvironment } from './bash';
+import { globToRegex } from './glob';
 import { BaseTool, obj, p } from './types';
 
 /** Maximum output bytes before truncation. */
@@ -53,7 +55,10 @@ function truncateHead(
   };
 }
 
-export function createGrepTool(workingDir: string) {
+export function createGrepTool(
+  workingDir: string,
+  executionEnvironment: ToolExecutionEnvironment = resolveToolExecutionEnvironment(),
+) {
   return new (class GrepTool extends BaseTool {
     readonly name = 'grep';
     isReadonly = true;
@@ -93,11 +98,6 @@ export function createGrepTool(workingDir: string) {
       const absPath = isAbsolute(searchPath) ? searchPath : resolve(workingDir, searchPath);
       const normalized = normalize(absPath);
 
-      // Security: prevent searching outside working directory
-      if (!normalized.startsWith(resolve(workingDir))) {
-        return this.failure(`Cannot search outside working directory: ${normalized}`);
-      }
-
       // Determine if searchPath is a directory (for relative path formatting)
       let isDirectory = true;
       try {
@@ -106,6 +106,8 @@ export function createGrepTool(workingDir: string) {
       } catch {
         return this.failure(`Path not found: ${normalized}`);
       }
+      const processCwd = isDirectory ? normalized : dirname(normalized);
+      const searchTarget = isDirectory ? '.' : basename(normalized);
 
       const formatPath = (filePath: string): string => {
         if (isDirectory) {
@@ -206,104 +208,145 @@ export function createGrepTool(workingDir: string) {
           return output;
         }
 
-        /** Fallback: use system grep when ripgrep is not available. */
-        function runSystemGrepFallback(): void {
-          if (fallbackTried) {
-            resolveResult(
-              self.failure(
-                'Neither ripgrep (rg) nor system grep is available. ' +
-                  'Install rg from https://github.com/BurntSushi/ripgrep/releases ' +
-                  'or use glob + read to explore files.',
-              ),
-            );
-            return;
-          }
+        /** Fallback that does not depend on any executable being installed. */
+        async function runNativeGrepFallback(): Promise<void> {
+          if (fallbackTried) return;
           fallbackTried = true;
-
-          // Reset match state for the fallback attempt
           matchCount = 0;
           matchLimitReached = false;
           linesTruncated = false;
           const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
-
-          // Build system grep arguments (POSIX-compatible)
-          const grepArgs: string[] = ['-rn', '--color=never', '-H'];
-          if (ignoreCase) grepArgs.push('-i');
-          if (literal) grepArgs.push('-F');
-          if (glob) grepArgs.push('--include', glob);
-          grepArgs.push('--', pattern, '.');
-
-          let grepChild: ReturnType<typeof spawn>;
+          const source = literal ? pattern.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&') : pattern;
+          let matcher: RegExp;
           try {
-            grepChild = spawn('grep', grepArgs, {
-              cwd: normalized,
-              env: process.env,
-              stdio: ['ignore', 'pipe', 'pipe'],
-            });
-          } catch {
-            resolveResult(
-              self.failure(
-                'System grep is not available. Install ripgrep (rg) or use glob + read instead.',
-              ),
+            matcher = new RegExp(
+              source,
+              multiline ? `gmsu${ignoreCase ? 'i' : ''}` : `u${ignoreCase ? 'i' : ''}`,
             );
+          } catch (error) {
+            resolveResult(self.failure(`Invalid regular expression: ${(error as Error).message}`));
             return;
           }
 
-          grepChild.on('error', () => {
-            resolveResult(
-              self.failure(
-                'System grep is not available. Install ripgrep (rg) or use glob + read instead.',
-              ),
-            );
-          });
+          const globMatcher = glob ? globToRegex(glob.replace(/\\/g, '/')) : undefined;
+          const typeExtensions: Record<string, string[]> = {
+            js: ['.js', '.jsx', '.mjs', '.cjs'],
+            ts: ['.ts', '.tsx', '.mts', '.cts'],
+            py: ['.py', '.pyi'],
+            rust: ['.rs'],
+            go: ['.go'],
+            java: ['.java'],
+            json: ['.json', '.jsonl'],
+            yaml: ['.yaml', '.yml'],
+          };
+          const extensions = fileType
+            ? (typeExtensions[fileType.toLowerCase()] ?? [`.${fileType.toLowerCase()}`])
+            : undefined;
+          const ignoredDirectories = new Set([
+            'node_modules',
+            '.git',
+            '.svn',
+            '.hg',
+            'dist',
+            'build',
+            'out',
+            '.next',
+            '__pycache__',
+            '.venv',
+            'venv',
+            'target',
+          ]);
 
-          const grepRl = createInterface({ input: grepChild.stdout! });
-          grepRl.on('line', (line) => {
-            if (!line.trim() || matchCount >= effectiveLimit) return;
-            // Parse standard grep output: file:line:text
-            const sepIdx = line.indexOf(':');
-            if (sepIdx === -1) return;
-            const filePath = line.slice(0, sepIdx);
-            const rest = line.slice(sepIdx + 1);
-            const numSepIdx = rest.indexOf(':');
-            if (numSepIdx === -1) return;
-            const lineNumStr = rest.slice(0, numSepIdx);
-            const lineText = rest.slice(numSepIdx + 1);
-            const lineNumber = parseInt(lineNumStr, 10);
-            if (Number.isNaN(lineNumber)) return;
-
-            matchCount++;
-            matches.push({
-              filePath: resolve(normalized, filePath),
-              lineNumber,
-              lineText: lineText.slice(0, GREP_MAX_LINE_LENGTH),
-            });
-
-            if (matchCount >= effectiveLimit) {
-              matchLimitReached = true;
-              if (!grepChild.killed) grepChild.kill();
+          const acceptsFile = (filePath: string): boolean => {
+            if (
+              extensions &&
+              !extensions.some((extension) => filePath.toLowerCase().endsWith(extension))
+            ) {
+              return false;
             }
-          });
+            if (!globMatcher) return true;
+            const relativePath = relative(normalized, filePath).replace(/\\/g, '/');
+            const globTarget = glob?.includes('/') ? relativePath : basename(filePath);
+            return globMatcher.test(globTarget);
+          };
 
-          grepChild.on('close', async (code) => {
-            grepRl.close();
-            // grep exit code 0 = matches found, 1 = no matches, >1 = error
-            if (code !== null && code > 1 && matchCount === 0) {
-              resolveResult(
-                self.failure(`System grep failed (exit ${code}). Use glob + read instead.`),
-              );
+          const scanFile = async (filePath: string): Promise<void> => {
+            if (matchCount >= effectiveLimit || !acceptsFile(filePath)) return;
+            let content: string;
+            try {
+              content = await readFile(filePath, 'utf-8');
+            } catch {
               return;
             }
-            if (matchCount === 0) {
-              resolveResult(self.success('No matches found.'));
+            if (content.includes('\0')) return;
+            const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+            if (multiline) {
+              matcher.lastIndex = 0;
+              let match = matcher.exec(normalizedContent);
+              while (match !== null) {
+                const lineNumber = normalizedContent.slice(0, match.index).split('\n').length;
+                const lineText = normalizedContent.split('\n')[lineNumber - 1] ?? '';
+                matches.push({ filePath, lineNumber, lineText });
+                matchCount++;
+                if (matchCount >= effectiveLimit) {
+                  matchLimitReached = true;
+                  break;
+                }
+                if (match[0].length === 0) matcher.lastIndex++;
+                match = matcher.exec(normalizedContent);
+              }
               return;
             }
-            const output = await formatMatches(matches);
-            const fallbackNote = '(used system grep — rg not installed)';
-            resolveResult(
-              self.success(`Found ${matchCount} matches ${fallbackNote}:\n\n${output}`),
+
+            const lines = normalizedContent.split('\n');
+            for (let index = 0; index < lines.length; index++) {
+              matcher.lastIndex = 0;
+              if (!matcher.test(lines[index])) continue;
+              matches.push({ filePath, lineNumber: index + 1, lineText: lines[index] });
+              matchCount++;
+              if (matchCount >= effectiveLimit) {
+                matchLimitReached = true;
+                break;
+              }
+            }
+          };
+
+          const walk = async (directory: string): Promise<void> => {
+            if (matchCount >= effectiveLimit) return;
+            const entries = await readdir(directory, { withFileTypes: true }).catch(
+              () => undefined,
             );
-          });
+            if (!entries) return;
+            for (const entry of entries) {
+              if (matchCount >= effectiveLimit) break;
+              const filePath = join(directory, entry.name);
+              if (entry.isDirectory()) {
+                if (!ignoredDirectories.has(entry.name)) await walk(filePath);
+              } else if (entry.isFile()) {
+                await scanFile(filePath);
+              }
+            }
+          };
+
+          try {
+            if (isDirectory) await walk(normalized);
+            else await scanFile(normalized);
+          } catch (error) {
+            resolveResult(self.failure(`Native grep failed: ${(error as Error).message}`));
+            return;
+          }
+
+          if (matchCount === 0) {
+            resolveResult(self.success('No matches found.'));
+            return;
+          }
+          const output = await formatMatches(matches);
+          resolveResult(
+            self.success(
+              `Found ${matchCount} matches (used built-in scan — rg unavailable):\n\n${output}`,
+            ),
+          );
         }
 
         // Build ripgrep arguments
@@ -331,31 +374,35 @@ export function createGrepTool(workingDir: string) {
           args.push('--type', fileType);
         }
 
-        args.push('--', pattern, '.');
+        args.push('--', pattern, searchTarget);
 
         let child: ReturnType<typeof spawn>;
         try {
           child = spawn('rg', args, {
-            cwd: normalized,
-            env: process.env,
+            cwd: processCwd,
+            env: executionEnvironment.env,
             stdio: ['ignore', 'pipe', 'pipe'],
           });
         } catch (_err) {
-          // rg not available, fall through to system grep below
-          runSystemGrepFallback();
+          // rg not available, fall through to the built-in scanner.
+          void runNativeGrepFallback();
           return;
         }
 
         child.on('error', (err) => {
           if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-            // rg binary not found, fall back to system grep
-            runSystemGrepFallback();
+            // rg binary not found, fall back to the built-in scanner.
+            void runNativeGrepFallback();
           } else {
             resolveResult(this.failure(`Grep error: ${err.message}`));
           }
         });
 
-        const rl = createInterface({ input: child.stdout! });
+        if (!child.stdout) {
+          void runNativeGrepFallback();
+          return;
+        }
+        const rl = createInterface({ input: child.stdout });
         let _stderr = '';
         const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
 
@@ -374,7 +421,11 @@ export function createGrepTool(workingDir: string) {
             const lineNumber = data?.line_number as number | undefined;
             const lineText = (data?.lines as Record<string, unknown>)?.text as string;
             if (filePath && typeof lineNumber === 'number') {
-              matches.push({ filePath, lineNumber, lineText });
+              matches.push({
+                filePath: resolve(processCwd, filePath),
+                lineNumber,
+                lineText,
+              });
             }
             if (matchCount >= effectiveLimit) {
               matchLimitReached = true;
@@ -391,8 +442,8 @@ export function createGrepTool(workingDir: string) {
           rl.close();
 
           if ((code !== 0 && code !== 1) || (code !== 0 && matchCount === 0)) {
-            // rg failed, fall back to system grep
-            runSystemGrepFallback();
+            // rg failed, fall back to the built-in scanner.
+            void runNativeGrepFallback();
             return;
           }
 

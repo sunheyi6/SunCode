@@ -72,14 +72,11 @@ describe('isVerificationCommand', () => {
 });
 
 describe('isCompletionGateEnabled', () => {
-  it('defaults on for write-capable modes', () => {
+  it('defaults on for full access', () => {
     expect(isCompletionGateEnabled({ permissionMode: 'full_access' })).toBe(true);
-    expect(isCompletionGateEnabled({ permissionMode: 'auto_edit' })).toBe(true);
-    expect(isCompletionGateEnabled({ permissionMode: 'confirm_changes' })).toBe(true);
   });
 
-  it('is off in plan mode or when explicitly disabled', () => {
-    expect(isCompletionGateEnabled({ permissionMode: 'plan' })).toBe(false);
+  it('is off when explicitly disabled', () => {
     expect(
       isCompletionGateEnabled({ permissionMode: 'full_access', completionGateEnabled: false }),
     ).toBe(false);

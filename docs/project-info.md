@@ -153,8 +153,8 @@
 
 - **单向依赖**：Electron Main → Worker Thread → Agent → AgentLoop
 - **IPC 通信**：Renderer ↔ Main (contextBridge) ↔ Worker (postMessage)
-- **工具接口**：`Tool` 接口，标记 `isReadonly` 控制权限
-- **权限模式**：`plan`（只读工具） | `confirm_changes`（弹窗确认） | `auto_edit` | `full_access`
+- **工具接口**：`Tool` 接口；`isReadonly` 仅用于流式预执行调度
+- **权限模式**：固定为 `full_access`，不提供模式切换或工具确认弹窗；文件工具可访问工作目录外路径
 - **会话分组**：按 `workingDirectory` 分组，切换会话时同步 Worker 工作目录
 
 ---

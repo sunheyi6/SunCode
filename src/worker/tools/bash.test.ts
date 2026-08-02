@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import {
   buildWindowsProjectProcessEvidenceCommand,
   createBashTool,
+  findGitBashPath,
   isForegroundElectronLaunch,
   killProcessTree,
   resolveProjectEvidenceRoot,
@@ -29,9 +30,20 @@ async function removeTempDir(path: string): Promise<void> {
 }
 
 describe('bash tool details', () => {
+  test('resolves Git Bash beside a non-standard Git cmd directory', () => {
+    const bashPath = findGitBashPath(
+      { PATH: 'D:\\soft\\Git\\cmd' },
+      (candidate) => candidate === 'D:\\soft\\Git\\bin\\bash.exe',
+    );
+
+    expect(bashPath).toBe('D:\\soft\\Git\\bin\\bash.exe');
+  });
+
   test('returns command metadata and stdout', async () => {
     const command = process.platform === 'win32' ? 'echo hello' : "printf 'hello\\n'";
-    const result = await createBashTool(process.cwd()).execute({ command });
+    const result = await createBashTool(process.cwd(), undefined, windowsPowerShellOptions).execute(
+      { command },
+    );
 
     expect(result.details).toMatchObject({
       type: 'command',
@@ -46,7 +58,9 @@ describe('bash tool details', () => {
   test('retains a non-zero exit code', async () => {
     // On Windows, use cmd to produce a known non-zero exit code
     const command = process.platform === 'win32' ? 'cmd /c "exit 7"' : 'bash -c "exit 7"';
-    const result = await createBashTool(process.cwd()).execute({ command });
+    const result = await createBashTool(process.cwd(), undefined, windowsPowerShellOptions).execute(
+      { command },
+    );
 
     expect(result.details).toMatchObject({
       type: 'command',
@@ -243,12 +257,14 @@ describe('bash tool details', () => {
   test('uses a short observation window for service commands without a startup marker', async () => {
     const command = process.platform === 'win32' ? 'Start-Sleep -Seconds 2' : "sh -c 'sleep 2'";
     const startedAt = Date.now();
-    const result = await createBashTool(process.cwd()).execute({
-      command,
-      run_in_background: true,
-      background_mode: 'service',
-      readiness_timeout: 30000,
-    });
+    const result = await createBashTool(process.cwd(), undefined, windowsPowerShellOptions).execute(
+      {
+        command,
+        run_in_background: true,
+        background_mode: 'service',
+        readiness_timeout: 30000,
+      },
+    );
 
     expect(Date.now() - startedAt).toBeLessThan(5000);
     expect(result.success).toBe(true);
@@ -368,7 +384,11 @@ describe('bash tool details', () => {
 
     try {
       const command = `node ${scriptPath}`;
-      const result = await createBashTool(process.cwd()).execute({ command });
+      const result = await createBashTool(
+        process.cwd(),
+        undefined,
+        windowsPowerShellOptions,
+      ).execute({ command });
 
       expect(result.success).toBe(true);
       expect(result.details?.type).toBe('command');

@@ -168,7 +168,7 @@ abstract class BaseTool implements Tool {
 输入: file_path, content
 输出: 成功信息 + 行变更统计
 
-安全: 禁止写入工作目录之外
+路径: 支持绝对路径，可写入工作目录之外
 特殊: 自动创建父目录 (mkdir -p)
 v2: 接入 file-mutation-queue 串行锁
 ```
@@ -211,6 +211,8 @@ v2: 批量 edits + BOM/LF 规范化 + 模糊匹配降级 + 文件并发锁（详
   2. 超时限制（默认 60s，最大 300s）
   3. 溢出保护（stdout+stderr 超 200KB 时 kill 进程树）
 
+执行环境: 工具注册时统一解析；Windows 自动优先 Git Bash，找不到时回退 PowerShell
+
 v2: 尾部截断（保留末尾 2000 行/50KB）+ 临时文件保存 + taskkill /T 进程树 kill
 ```
 
@@ -222,7 +224,7 @@ v2: 尾部截断（保留末尾 2000 行/50KB）+ 临时文件保存 + taskkill 
 输入: pattern, path?, glob?, type?, ignoreCase?, literal?, context?, limit?
 输出: 匹配行 + 行号 + 可选上下文行
 
-实现: 调用系统 rg，--json 结构化输出解析
+实现: 优先调用统一执行环境 PATH 中的 rg，--json 结构化输出解析；rg 不可用时使用 Node.js 内置扫描
 
 v2: JSON 解析 + 隐藏文件 + 字面量搜索 + 文件缓存上下文 + 提前 kill
 ```
@@ -254,6 +256,10 @@ class ToolRegistry {
   execute(name, callId, params): Promise<ToolResult>;  // 执行
 }
 ```
+
+`createToolRegistry()` 会先解析一次当前执行环境，再把同一份 Shell 与子进程 PATH
+传给 `bash`、`grep` 等需要启动外部进程的工具。`read`、`edit`、`glob` 等纯文件工具
+不经过 Shell，直接使用 Node.js 文件 API，但仍共享同一工作目录。
 
 ### MCP 工具集成
 

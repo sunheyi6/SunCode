@@ -28,6 +28,7 @@ const commonProviders = [
   { id: 'groq', name: 'Groq', env: 'GROQ_API_KEY' },
   { id: 'mistral', name: 'Mistral', env: 'MISTRAL_API_KEY' },
   { id: 'openrouter', name: 'OpenRouter', env: 'OPENROUTER_API_KEY' },
+  { id: 'opencode-go', name: 'OpenCode Go', env: 'OPENCODE_API_KEY' },
   { id: 'together', name: 'Together AI', env: 'TOGETHER_API_KEY' },
   { id: 'fireworks', name: 'Fireworks', env: 'FIREWORKS_API_KEY' },
   { id: 'cerebras', name: 'Cerebras', env: 'CEREBRAS_API_KEY' },

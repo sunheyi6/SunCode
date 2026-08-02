@@ -1,5 +1,10 @@
 import type { AppSettings } from '@shared/types';
-import { type BashToolCallbacks, type BashToolOptions, createBashTool } from './bash';
+import {
+  type BashToolCallbacks,
+  type BashToolOptions,
+  createBashTool,
+  resolveToolExecutionEnvironment,
+} from './bash';
 import { createEditTool } from './edit';
 import { createFindTool } from './find';
 import { createGlobTool } from './glob';
@@ -86,16 +91,18 @@ export function createToolRegistry(
   sessionId?: string,
 ): ToolRegistry {
   const registry = new ToolRegistry();
+  const executionEnvironment = resolveToolExecutionEnvironment(settings?.windowsShell);
   const bashToolOptions: BashToolOptions = {
     ...bashOptions,
     windowsShell: settings?.windowsShell,
+    executionEnvironment,
   };
 
   registry.register(createReadTool(workingDir));
   registry.register(createWriteTool(workingDir));
   registry.register(createEditTool(workingDir));
   registry.register(createBashTool(workingDir, callbacks, bashToolOptions));
-  registry.register(createGrepTool(workingDir));
+  registry.register(createGrepTool(workingDir, executionEnvironment));
   registry.register(createGlobTool(workingDir));
   registry.register(createLsTool(workingDir));
   registry.register(createFindTool(workingDir));

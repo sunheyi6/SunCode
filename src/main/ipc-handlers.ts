@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, watch as fsWatch, readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
@@ -12,6 +12,7 @@ import {
   RECOMMENDED_MODELS,
   TITLE_GENERATION_PROMPT,
 } from '@shared/constants';
+import { getProviderEnvKey } from '@shared/provider-env';
 import type { RuntimeEventDraft, RuntimeTerminationStatus } from '@shared/runtime-events';
 import { runtimeIdentityEnvironment } from '@shared/runtime-identity';
 import { getVendorSkillDirectories } from '@shared/skill-directories';
@@ -92,7 +93,7 @@ function loadSettings(): AppSettings {
       // Migrate the old 200-turn default. Goal mode has its own explicit budget;
       // ordinary tasks should not inherit an effectively unbounded legacy value.
       if (saved.maxTurns === 200) saved.maxTurns = DEFAULT_SETTINGS.maxTurns;
-      return { ...DEFAULT_SETTINGS, ...saved };
+      return { ...DEFAULT_SETTINGS, ...saved, permissionMode: 'full_access' };
     }
   } catch (e) {
     console.warn('[Main] Failed to load settings:', (e as Error).message);
@@ -214,6 +215,16 @@ function stableTextToken(text: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(36);
+}
+
+/**
+ * Content-addressed suffix for deterministic event IDs whose payload can
+ * legitimately change multiple times within one run (e.g. the system prompt
+ * is rebuilt each turn). Same content → same event ID (idempotent replay);
+ * changed content → a new event instead of a collision.
+ */
+function stableContentToken(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 }
 
 async function persistRuntimeProjection(sessionId: string): Promise<Message[]> {
@@ -357,7 +368,7 @@ async function handleWorkerMessage(worker: Worker, msg: WorkerOutMessage): Promi
   ) {
     if (
       !(await commitWorkerRuntimeFact(sid, {
-        eventId: `${context.runId}:system-prompt`,
+        eventId: `${context.runId}:system-prompt:${stableContentToken(msg.event.systemPrompt)}`,
         runId: context.runId,
         turnId: context.turnId,
         invocationId: context.runId,
@@ -384,17 +395,6 @@ async function handleWorkerMessage(worker: Worker, msg: WorkerOutMessage): Promi
         turnId: context.turnId,
         invocationId: context.runId,
         fact: { type: 'tool_result_committed', toolResult: msg.toolResult },
-      }))
-    )
-      return;
-  } else if (msg.type === 'confirmRequest' && context) {
-    if (
-      !(await commitWorkerRuntimeFact(sid, {
-        eventId: `${context.runId}:permission:${msg.toolCall.id}:requested`,
-        runId: context.runId,
-        turnId: context.turnId,
-        invocationId: context.runId,
-        fact: { type: 'permission_requested', toolCall: msg.toolCall },
       }))
     )
       return;
@@ -497,14 +497,6 @@ async function handleWorkerMessage(worker: Worker, msg: WorkerOutMessage): Promi
       break;
     case 'goalEvent':
       mainWindow.webContents.send('agent:goal-event', { sessionId: sid, event: msg.event });
-      break;
-    case 'confirmRequest':
-      mainWindow.webContents.send('agent:confirm-request', {
-        sessionId: sid,
-        toolCallId: msg.toolCall.id,
-        toolName: msg.toolCall.name,
-        description: msg.toolCall.arguments || '',
-      });
       break;
   }
 }
@@ -783,40 +775,6 @@ export function registerIpcHandlers(wm: WindowManager): void {
       console.error('[Main] agent:continue failed:', (err as Error).message);
     }
   });
-
-  // Tool confirmation response from renderer → worker
-  ipcMain.on(
-    'agent:confirm-response',
-    (_event, toolCallId: string, confirmed: boolean, sessionId?: string) => {
-      try {
-        const sid = sessionId || currentSessionId;
-        if (!sid) {
-          console.error('[Main] confirm-response: no sessionId');
-          return;
-        }
-        const context = activeInvocation(sid);
-        if (context) {
-          void commitRuntimeFact(sid, {
-            eventId: `${context.runId}:permission:${toolCallId}:decided`,
-            runId: context.runId,
-            turnId: context.turnId,
-            invocationId: context.runId,
-            fact: { type: 'permission_decided', toolCallId, allowed: confirmed },
-          })
-            .then(() =>
-              sendToWorker({ type: 'confirmResponse', sessionId: sid, toolCallId, confirmed }),
-            )
-            .catch((error: unknown) => {
-              logger.error('[RuntimeEvent] Failed to commit permission decision', error);
-            });
-        } else {
-          sendToWorker({ type: 'confirmResponse', sessionId: sid, toolCallId, confirmed });
-        }
-      } catch (err) {
-        console.error('[Main] agent:confirm-response failed:', (err as Error).message);
-      }
-    },
-  );
 
   // Kill background process from renderer → worker
   ipcMain.on('agent:kill-bg-process', (_event, pid: number) => {
@@ -1183,7 +1141,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   ipcMain.handle('settings:update', async (_event, partial: Partial<AppSettings>) => {
     try {
-      currentSettings = { ...currentSettings, ...partial };
+      currentSettings = { ...currentSettings, ...partial, permissionMode: 'full_access' };
 
       if (partial.envApiKeys) {
         for (const [provider, key] of Object.entries(partial.envApiKeys)) {
@@ -1561,7 +1519,17 @@ export function registerIpcHandlers(wm: WindowManager): void {
       return getProviders();
     } catch {
       // Fallback providers if pi-ai is unavailable
-      return ['anthropic', 'openai', 'google', 'deepseek', 'xai', 'groq', 'mistral', 'openrouter'];
+      return [
+        'anthropic',
+        'openai',
+        'google',
+        'deepseek',
+        'xai',
+        'groq',
+        'mistral',
+        'openrouter',
+        'opencode-go',
+      ];
     }
   });
 
@@ -2069,26 +2037,6 @@ function extractText(message: Message): string {
     .filter((block) => block.type === 'text')
     .map((block) => ('text' in block ? block.text : ''))
     .join(' ');
-}
-
-function getProviderEnvKey(provider: string): string | undefined {
-  const keyMap: Record<string, string> = {
-    openai: 'OPENAI_API_KEY',
-    anthropic: 'ANTHROPIC_API_KEY',
-    google: 'GEMINI_API_KEY',
-    deepseek: 'DEEPSEEK_API_KEY',
-    xai: 'XAI_API_KEY',
-    groq: 'GROQ_API_KEY',
-    mistral: 'MISTRAL_API_KEY',
-    openrouter: 'OPENROUTER_API_KEY',
-    together: 'TOGETHER_API_KEY',
-    fireworks: 'FIREWORKS_API_KEY',
-    cerebras: 'CEREBRAS_API_KEY',
-    'kimi-coding': 'KIMI_API_KEY',
-    moonshotai: 'MOONSHOT_API_KEY',
-    minimax: 'MINIMAX_API_KEY',
-  };
-  return keyMap[provider];
 }
 
 function generateSessionHtml(messages: Message[]): string {

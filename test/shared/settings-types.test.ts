@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@shared/constants';
 import { normalizeCustomEndpointBaseUrl } from '@shared/custom-endpoints';
+import { getProviderEnvKey } from '@shared/provider-env';
 import type {
   AppearanceStyle,
   AppSettings,
@@ -55,5 +56,11 @@ describe('normalizeCustomEndpointBaseUrl', () => {
     expect(
       normalizeCustomEndpointBaseUrl('https://gw.example/v1/messages', 'anthropic-messages'),
     ).toBe('https://gw.example/v1');
+  });
+});
+
+describe('getProviderEnvKey', () => {
+  it('OpenCode Go 使用 OpenCode API Key', () => {
+    expect(getProviderEnvKey('opencode-go')).toBe('OPENCODE_API_KEY');
   });
 });

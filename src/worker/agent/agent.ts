@@ -85,7 +85,6 @@ export class Agent {
   private onRunEvent: (event: RunEvent) => void;
   private onSubagentEvent: (type: string, data: unknown) => void;
   private onGoalEvent: (event: GoalEvent) => void;
-  private requestConfirmation: ((toolCall: ToolCallContent) => Promise<boolean>) | undefined;
   /** Plan approval callback — blocks the agent loop until user responds. */
   private onPlanApprovalRequest:
     | ((planContent: string, planFilePath: string) => Promise<boolean>)
@@ -107,7 +106,6 @@ export class Agent {
     onRunEvent: (event: RunEvent) => void,
     onSubagentEvent: (type: string, data: unknown) => void,
     onGoalEvent: (event: GoalEvent) => void,
-    requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>,
     sessionId?: string,
   ) {
     this.workingDir = workingDir;
@@ -125,7 +123,6 @@ export class Agent {
     this.onRunEvent = onRunEvent;
     this.onSubagentEvent = onSubagentEvent;
     this.onGoalEvent = onGoalEvent;
-    this.requestConfirmation = requestConfirmation;
     this.sessionId = sessionId ?? randomUUID();
 
     // Skill discovery performs filesystem I/O. Start it in the background so
@@ -175,11 +172,8 @@ export class Agent {
     }
   }
 
-  /** Return tools filtered by the current permission mode. */
+  /** All registered tools are always available. */
   private getEffectiveTools(): Tool[] {
-    if (this.settings.permissionMode === 'plan') {
-      return this.tools.filter((t) => t.isReadonly || t.name === 'write' || t.name === 'edit');
-    }
     return this.tools;
   }
 
@@ -687,7 +681,6 @@ export class Agent {
           }
         : undefined,
       stopHooks: createDefaultStopHookRegistry(),
-      requestConfirmation: this.requestConfirmation,
     });
 
     this.turnCount = result.turnCount;

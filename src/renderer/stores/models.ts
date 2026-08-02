@@ -59,6 +59,7 @@ export const BUILTIN_PROVIDERS = [
   'groq',
   'mistral',
   'openrouter',
+  'opencode-go',
   'together',
   'fireworks',
   'cerebras',
@@ -67,9 +68,19 @@ export const BUILTIN_PROVIDERS = [
   'minimax',
 ];
 
+function mergeModelOptions(...groups: ModelOption[][]): ModelOption[] {
+  const models = new Map<string, ModelOption>();
+  for (const group of groups) {
+    for (const model of group) models.set(`${model.provider}\0${model.model}`, model);
+  }
+  return [...models.values()];
+}
+
 export const useModelsStore = defineStore('models', () => {
   const activeProvider = ref('deepseek');
   const activeModel = ref('deepseek-v4-pro');
+  /** pi-ai 当前实际提供的供应商；常量列表只在发现接口不可用时兜底。 */
+  const builtinProviders = ref<string[]>([...BUILTIN_PROVIDERS]);
   const providers = ref<string[]>([...BUILTIN_PROVIDERS]);
   const providerModels = ref<Map<string, ModelOption[]>>(new Map());
   const loadingProviders = ref<Set<string>>(new Set());
@@ -77,21 +88,21 @@ export const useModelsStore = defineStore('models', () => {
   const isLoaded = ref(false);
   const keyStatus = ref<Record<string, boolean>>({});
 
-  const builtinProviderSet = new Set(BUILTIN_PROVIDERS);
+  let customProviderIds = new Set<string>();
 
   /** 把自定义 endpoint 注入 providers / providerModels / keyStatus，并清理旧的自定义条目。 */
   function syncCustomEndpoints(endpoints: CustomEndpoint[]): void {
     const state = computeCustomEndpointState(endpoints);
+    const builtinProviderSet = new Set(builtinProviders.value);
 
     // providers = 内置 + 自定义（去重）
     const customIds = state.providerIds.filter((id) => !builtinProviderSet.has(id));
-    providers.value = [...BUILTIN_PROVIDERS, ...customIds];
+    providers.value = [...builtinProviders.value, ...customIds];
 
     // 清理旧的自定义 providerModels，再写入新的
-    for (const id of [...providerModels.value.keys()]) {
-      if (!builtinProviderSet.has(id)) providerModels.value.delete(id);
-    }
+    for (const id of customProviderIds) providerModels.value.delete(id);
     for (const [id, opts] of state.providerModels) providerModels.value.set(id, opts);
+    customProviderIds = new Set(state.providerIds);
 
     // 清理旧的自定义 keyStatus，再写入新的
     const nextKeyStatus: Record<string, boolean> = {};
@@ -103,9 +114,7 @@ export const useModelsStore = defineStore('models', () => {
   }
 
   const allModels = computed<ModelOption[]>(() => {
-    const result: ModelOption[] = [...recommendedModels.value];
-    for (const models of providerModels.value.values()) result.push(...models);
-    return result;
+    return mergeModelOptions(recommendedModels.value, ...providerModels.value.values());
   });
 
   const switchableModelOptions = computed<ModelOption[]>(() =>
@@ -188,10 +197,11 @@ export const useModelsStore = defineStore('models', () => {
     try {
       const p = await bridge.getProviders();
       if (p?.length) {
-        const customIds = [...providerModels.value.keys()].filter(
-          (id) => !builtinProviderSet.has(id),
-        );
+        builtinProviders.value = p;
+        const customIds = [...customProviderIds].filter((id) => !p.includes(id));
         providers.value = mergeProvidersWithCustom(p, customIds);
+        await Promise.all(p.map((provider) => loadModels(provider)));
+        syncKeyStatusFromSettings();
       }
     } catch {
       /* keep builtin */
@@ -244,6 +254,7 @@ export const useModelsStore = defineStore('models', () => {
     activeProvider,
     activeModel,
     providers,
+    builtinProviders,
     providerModels,
     enabledProviders,
     switchableModelOptions,

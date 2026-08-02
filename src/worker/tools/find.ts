@@ -28,12 +28,6 @@ export function createFindTool(workingDir: string) {
         isAbsolute(searchPath) ? searchPath : resolve(workingDir, searchPath),
       );
 
-      // Security: prevent searching outside working directory
-      const workRoot = normalize(resolve(workingDir));
-      if (!absPath.startsWith(workRoot)) {
-        return this.failure(`Cannot search outside working directory: ${absPath}`);
-      }
-
       try {
         const results = await findByName(absPath, pattern, maxResults);
 
@@ -42,7 +36,7 @@ export function createFindTool(workingDir: string) {
         }
 
         const display = results.map((f) => {
-          const rel = relative(workRoot, f.path);
+          const rel = relative(absPath, f.path);
           return `  ${rel}${f.isDirectory ? '/' : ''}`;
         });
 

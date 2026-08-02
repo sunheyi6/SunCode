@@ -23,13 +23,6 @@ export function createLsTool(workingDir: string) {
       const limit = (params.limit as number) || 100;
 
       const absPath = normalizePath(isAbsolute(dirPath) ? dirPath : resolve(workingDir, dirPath));
-      const workRoot = normalizePath(resolve(workingDir));
-
-      // Security: prevent listing outside working directory
-      if (!absPath.startsWith(workRoot)) {
-        return this.failure(`Cannot list directory outside working directory: ${absPath}`);
-      }
-
       try {
         const entries = await listDir(absPath, recursive, limit);
 

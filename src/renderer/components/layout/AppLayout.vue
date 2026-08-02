@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref } from 'vue';
-import { useConfirmDialog } from '../../composables/useConfirmDialog';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
 import CallTracePanel from '../chat/CallTracePanel.vue';
 import ChatPanel from '../chat/ChatPanel.vue';
-import ConfirmDialog from '../chat/ConfirmDialog.vue';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
 import ConversationSidebar from './ConversationSidebar.vue';
@@ -38,10 +36,6 @@ function openSettingsAt(section: string): void {
   settingsSection.value = section;
   showSettings.value = true;
 }
-
-// Tool confirmation dialog (confirm_changes permission mode)
-// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-const { confirmState, handleConfirm, handleDeny } = useConfirmDialog();
 
 function startResize(e: MouseEvent): void {
   isResizing.value = true;
@@ -161,15 +155,6 @@ const traceSystemPrompt = computed(() => {
 
     <!-- Settings Modal -->
     <SettingsPanel v-if="showSettings" :initial-section="settingsSection" @close="showSettings = false" />
-
-    <!-- Tool Confirmation Dialog -->
-    <ConfirmDialog
-      :tool-name="confirmState.toolName"
-      :description="confirmState.description"
-      :visible="confirmState.visible"
-      @confirm="handleConfirm"
-      @deny="handleDeny"
-    />
 
     <!-- Toast Notifications -->
     <ToastContainer />

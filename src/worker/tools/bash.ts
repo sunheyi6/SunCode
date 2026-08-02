@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve, win32 } from 'node:path';
 import type { BackgroundProcess, ToolResult } from '@shared/types';
 import { BaseTool, obj, p } from './types';
 
@@ -12,51 +12,100 @@ import { BaseTool, obj, p } from './types';
  *  System32 is not in PATH (e.g. Bun/Electron detached processes).
  *  Forward slashes work fine with Node.js spawn on Windows and avoid
  *  source-level escape-sequence issues. */
-function getPowerShellPath(): string {
+function getPowerShellPath(environment: NodeJS.ProcessEnv = process.env): string {
   if (process.platform !== 'win32') return 'powershell.exe';
-  const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+  const systemRoot = environment.SystemRoot || environment.windir || 'C:\\Windows';
   return `${systemRoot}/System32/WindowsPowerShell/v1.0/powershell.exe`;
 }
 
 export type WindowsShellPreference = 'auto' | 'git_bash' | 'powershell';
 
-type ResolvedShell = {
+export type ResolvedShell = {
   path: string;
   type: 'bash' | 'powershell';
 };
 
-function pathEntries(): string[] {
-  return (process.env.PATH || process.env.Path || '')
+export type ToolExecutionEnvironment = {
+  shell: ResolvedShell;
+  env: NodeJS.ProcessEnv;
+};
+
+function pathEntries(environment: NodeJS.ProcessEnv): string[] {
+  return (environment.PATH || environment.Path || '')
     .split(';')
     .map((entry) => entry.trim())
     .filter(Boolean);
 }
 
-function findGitBashPath(): string | undefined {
+export function findGitBashPath(
+  environment: NodeJS.ProcessEnv = process.env,
+  pathExists: (path: string) => boolean = existsSync,
+): string | undefined {
   const candidates = [
-    process.env.ProgramFiles ? `${process.env.ProgramFiles}\\Git\\bin\\bash.exe` : undefined,
-    process.env['ProgramFiles(x86)']
-      ? `${process.env['ProgramFiles(x86)']}\\Git\\bin\\bash.exe`
+    environment.ProgramFiles ? `${environment.ProgramFiles}\\Git\\bin\\bash.exe` : undefined,
+    environment['ProgramFiles(x86)']
+      ? `${environment['ProgramFiles(x86)']}\\Git\\bin\\bash.exe`
       : undefined,
-    process.env.LocalAppData
-      ? `${process.env.LocalAppData}\\Programs\\Git\\bin\\bash.exe`
+    environment.LocalAppData
+      ? `${environment.LocalAppData}\\Programs\\Git\\bin\\bash.exe`
       : undefined,
-    ...pathEntries()
+    ...pathEntries(environment)
       .filter((entry) => /\\Git\\(cmd|bin|usr\\bin)$/i.test(entry))
-      .map((entry) => `${entry}\\bash.exe`),
+      .map((entry) => {
+        if (/\\Git\\cmd$/i.test(entry)) return win32.resolve(entry, '..', 'bin', 'bash.exe');
+        return win32.join(entry, 'bash.exe');
+      }),
   ];
 
   return candidates.find((candidate): candidate is string =>
-    Boolean(candidate && existsSync(candidate)),
+    Boolean(candidate && pathExists(candidate)),
   );
 }
 
-export function resolveWindowsShell(preference: WindowsShellPreference = 'auto'): ResolvedShell {
+export function resolveWindowsShell(
+  preference: WindowsShellPreference = 'auto',
+  environment: NodeJS.ProcessEnv = process.env,
+): ResolvedShell {
   if (preference !== 'powershell') {
-    const gitBash = findGitBashPath();
+    const gitBash = findGitBashPath(environment);
     if (gitBash) return { path: gitBash, type: 'bash' };
   }
-  return { path: getPowerShellPath(), type: 'powershell' };
+  return { path: getPowerShellPath(environment), type: 'powershell' };
+}
+
+export function resolveToolExecutionEnvironment(
+  preference: WindowsShellPreference = 'auto',
+  environment: NodeJS.ProcessEnv = process.env,
+): ToolExecutionEnvironment {
+  const env = { ...environment };
+  const shell =
+    process.platform === 'win32'
+      ? resolveWindowsShell(preference, env)
+      : { path: '/bin/bash', type: 'bash' as const };
+
+  if (process.platform === 'win32' && shell.type === 'bash') {
+    const gitRoot = resolve(dirname(shell.path), '..');
+    const executableDirs = [
+      join(gitRoot, 'bin'),
+      join(gitRoot, 'usr', 'bin'),
+      join(gitRoot, 'cmd'),
+    ];
+    const existingEntries = pathEntries(env);
+    const seen = new Set<string>();
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === 'path') delete env[key];
+    }
+    env.PATH = [...executableDirs, ...existingEntries]
+      .filter((entry) => {
+        const normalizedEntry = entry.toLowerCase();
+        if (seen.has(normalizedEntry)) return false;
+        seen.add(normalizedEntry);
+        return true;
+      })
+      .join(';');
+  }
+
+  return { shell, env };
 }
 
 /** Maximum output lines before tail truncation. */
@@ -83,6 +132,7 @@ export interface BashToolCallbacks {
 export interface BashToolOptions {
   protectedPids?: number[];
   windowsShell?: WindowsShellPreference;
+  executionEnvironment?: ToolExecutionEnvironment;
 }
 
 /**
@@ -524,8 +574,8 @@ function isCrossProjectSunCodeStartupMarker(
   return resolve(cwd, cdTarget).toLowerCase() !== cwd.toLowerCase();
 }
 
-function buildChildProcessEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+function buildChildProcessEnv(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...environment };
   delete env.VITE_DEV_SERVER_URL;
   return env;
 }
@@ -537,6 +587,8 @@ export function createBashTool(
 ) {
   const protectedPids = options?.protectedPids || [];
   const windowsShell = options?.windowsShell ?? 'auto';
+  const executionEnvironment =
+    options?.executionEnvironment ?? resolveToolExecutionEnvironment(windowsShell);
 
   return new (class BashTool extends BaseTool {
     readonly name = 'bash';
@@ -655,10 +707,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
       }
       const effectiveCommand = killResult.rewritten;
 
-      const resolvedShell =
-        process.platform === 'win32'
-          ? resolveWindowsShell(windowsShell)
-          : { path: '/bin/bash', type: 'bash' as const };
+      const resolvedShell = executionEnvironment.shell;
       const shell = resolvedShell.path;
       const shellArgs =
         resolvedShell.type === 'powershell'
@@ -679,7 +728,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
             // valid stdio handles to create visible windows on Windows.
             child = spawn(shell, shellArgs, {
               cwd,
-              env: buildChildProcessEnv(),
+              env: buildChildProcessEnv(executionEnvironment.env),
               stdio: 'pipe',
               detached: backgroundMode !== 'service',
             });
@@ -932,7 +981,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
       return new Promise((resolveResult) => {
         const child = spawn(shell, shellArgs, {
           cwd,
-          env: buildChildProcessEnv(),
+          env: buildChildProcessEnv(executionEnvironment.env),
           timeout,
           stdio: ['pipe', 'pipe', 'pipe'],
         });

@@ -66,7 +66,7 @@ class FakeWriteTool implements Tool {
 describe('StreamingToolExecutor', () => {
   test('emits run events for pre-executed tools including failure status', async () => {
     const events: RunEvent[] = [];
-    const executor = new StreamingToolExecutor([new FakeReadonlyTool()], process.cwd(), false, {
+    const executor = new StreamingToolExecutor([new FakeReadonlyTool()], {
       runId: 'run-1',
       onRunEvent: (event) => events.push(event),
     });
@@ -98,7 +98,7 @@ describe('StreamingToolExecutor', () => {
 
   test('does not pre-execute mutating tools while streaming', async () => {
     const tool = new FakeWriteTool();
-    const executor = new StreamingToolExecutor([tool], process.cwd(), false);
+    const executor = new StreamingToolExecutor([tool]);
 
     executor.onToolCallComplete({
       type: 'tool_call',

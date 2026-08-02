@@ -12,7 +12,7 @@ write 是 SunCode 的新建/覆盖写入工具。v2 接入 `file-mutation-queue`
 ┌──────────────────────────────────────┐
 │           write.ts (工具入口)          │
 │                                      │
-│  1. 路径校验（禁止写出工作目录）       │
+│  1. 路径解析（支持工作目录外路径）       │
 │  2. 内容必填校验                      │
 │                                      │
 │  3. withFileMutationQueue(absPath)   │
@@ -56,11 +56,11 @@ write 和 edit 共享同一个全局 `fileMutationQueues` Map，按物理文件�
 
 ---
 
-## 4. 安全措施
+## 4. 执行约束
 
 | 措施 | 实现 |
 |------|------|
-| 路径限制 | 禁止写出工作目录之外 |
+| 路径范围 | 支持写入工作目录之外 |
 | 内容必填 | content 为 undefined 时拒绝 |
 | 同文件串行 | `withFileMutationQueue()` 防止竞态 |
 | 文件存在保护 | 覆盖前读旧内容（用于 diff 统计） |

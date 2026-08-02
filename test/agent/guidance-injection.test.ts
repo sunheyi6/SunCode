@@ -344,7 +344,6 @@ describe('Agent.injectGuidance / drainGuidance', () => {
       noop,
       noop,
       noop,
-      undefined,
       'test-session',
     );
   }
@@ -394,7 +393,6 @@ describe('Agent.injectGuidance / drainGuidance', () => {
       (e) => runEvents.push(e),
       () => {},
       () => {},
-      undefined,
       'test-session',
     );
     agent.injectGuidance('silent-guidance');

@@ -276,8 +276,8 @@ export interface AppSettings {
    * When unset/empty, the active theme palette is used.
    */
   backgroundColor?: string;
-  /** Agent permission mode */
-  permissionMode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes';
+  /** Agent always runs with unrestricted filesystem and tool access. */
+  permissionMode: 'full_access';
   /** Shell preference for command execution on Windows. */
   windowsShell: 'auto' | 'git_bash' | 'powershell';
   /** How plan approval requests are handled when the agent enters Plan Mode. */
@@ -384,8 +384,6 @@ export type PlanPhase = 'exploring' | 'implementing';
 /** Runtime state for plan mode. */
 export interface PlanState {
   phase: PlanPhase;
-  /** Permission mode saved before entering plan mode, restored on exit. */
-  savedPermissionMode: AppSettings['permissionMode'];
   /** Path to the plan file being written. */
   planFilePath: string;
   /** Whether the plan was approved by the user. */
@@ -401,7 +399,7 @@ export type PlanModeEvent =
   | { type: 'plan_entered'; planFilePath: string }
   | { type: 'plan_approved'; planFilePath: string }
   | { type: 'plan_rejected'; planFilePath: string }
-  | { type: 'plan_exited'; restoredMode: AppSettings['permissionMode'] };
+  | { type: 'plan_exited' };
 
 // ===== Goal Types =====
 
@@ -518,7 +516,6 @@ export type HookEventType =
   | 'pre_tool_use' // Before a tool is executed
   | 'post_tool_use' // After a tool completes successfully
   | 'post_tool_use_failure' // After a tool fails
-  | 'permission_request' // When permission confirmation is needed
   | 'stop' // Before turn finalization (backward compatible with StopHook)
   | 'session_start' // When a new session begins
   | 'session_end' // When a session ends
@@ -528,7 +525,7 @@ export type HookEventType =
 /** Unified context passed to all hook types. */
 export interface HookContext {
   eventType: HookEventType;
-  /** Tool call data (for pre_tool_use, post_tool_use, post_tool_use_failure, permission_request). */
+  /** Tool call data (for pre_tool_use, post_tool_use, post_tool_use_failure). */
   toolCall?: ToolCallContent;
   /** Tool result (for post_tool_use, post_tool_use_failure). */
   toolResult?: ToolResult;
@@ -555,8 +552,6 @@ export interface HookResult {
   continuationPrompt?: string;
   /** Human-readable reason. */
   reason?: string;
-  /** Whether to allow the action (for permission_request hooks). */
-  allow?: boolean;
 }
 
 /** A hook that runs on specific events. */
@@ -576,46 +571,6 @@ export interface HookRegistry {
   unregister(name: string): void;
   /** Run all matching hooks for an event. Returns the first non-neutral result. */
   runEvent(eventType: HookEventType, ctx: HookContext): Promise<HookResult>;
-}
-
-// ===== Permission Rule Types =====
-
-/** How a rule pattern is matched against a tool name. */
-export type RuleMatchMode = 'exact' | 'prefix' | 'wildcard';
-
-/** Permission rule source priority (higher = more authoritative). */
-export type RuleSource =
-  | 'policySettings' // Enterprise MDM (highest)
-  | 'userSettings' // User-level ~/.suncode/permissions.json
-  | 'projectSettings' // Project-level .suncode/permissions.json
-  | 'localSettings' // Workspace local
-  | 'flagSettings' // CLI flags
-  | 'cliArg' // Per-invocation CLI args
-  | 'command' // In-command override
-  | 'session'; // Session-level (lowest)
-
-/** A single permission rule. */
-export interface PermissionRule {
-  type: 'allow' | 'deny';
-  /** Tool name pattern to match. */
-  toolPattern: string;
-  /** How to interpret the pattern. */
-  matchMode: RuleMatchMode;
-  /** Where this rule came from (determines priority). */
-  source: RuleSource;
-  /** Optional argument filter (key=value). */
-  argFilter?: Record<string, string>;
-}
-
-/** Set of permission rules with resolution logic. */
-export interface PermissionRuleSet {
-  rules: PermissionRule[];
-  /**
-   * Resolve whether a tool call is allowed.
-   * Returns 'allow' | 'deny' | 'uncertain'.
-   * Deny rules always take precedence regardless of source.
-   */
-  resolve(toolName: string, params: Record<string, unknown>): 'allow' | 'deny' | 'uncertain';
 }
 
 // ===== Streaming Tool Pre-execution Types =====
@@ -650,7 +605,6 @@ export type WorkerInMessage =
   | { type: 'config'; settings: AppSettings }
   | { type: 'setWorkingDir'; sessionId: string; path: string }
   | { type: 'setMessages'; sessionId: string; messages: Message[] }
-  | { type: 'confirmResponse'; sessionId: string; toolCallId: string; confirmed: boolean }
   | { type: 'killBgProcess'; sessionId: string; pid: number }
   | { type: 'planResponse'; sessionId: string; runId: string; approved: boolean }
   | { type: 'hookConfig'; sessionId: string; hooks: HookInterface[] };
@@ -679,7 +633,6 @@ export type WorkerOutMessage =
       delta: SubagentProgressDelta;
     }
   | { type: 'goalEvent'; sessionId: string; event: GoalEvent }
-  | { type: 'confirmRequest'; sessionId: string; toolCall: ToolCallContent }
   | {
       type: 'planRequest';
       sessionId: string;

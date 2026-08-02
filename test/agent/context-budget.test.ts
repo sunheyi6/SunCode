@@ -261,6 +261,90 @@ describe('pruneStaleToolResults', () => {
     expect(readFileSync(placeholder.artifactPath as string, 'utf8')).toBe(bigOutput);
   });
 
+  it('does not re-prune a recovery read of an archived artifact (active prune)', () => {
+    const archiveDir = makeArchiveDir();
+    // read tool call whose file_path points inside the archive directory;
+    // arguments are JSON, so the path arrives with escaped backslashes.
+    const artifactPath = join(archiveDir, 'call_00_abcdef.txt');
+    const readArgs = JSON.stringify({ file_path: artifactPath });
+    const readOutput = `File: ${artifactPath} (7 lines)\n\n   1  {\n   2    \"type\": \"tool_result\"\n   3  }\n${'x'.repeat(10_000)}`;
+    const msgs: Message[] = [
+      system('System prompt'),
+      user('Recover the archived result'),
+      assistant('Reading artifact', [
+        { type: 'tool_call', id: 'tc_read', name: 'read', arguments: readArgs },
+      ]),
+      toolResult('tc_read', readOutput),
+    ];
+
+    const { messages, prunedCount } = pruneActiveToolResults(
+      msgs,
+      defaultPolicy({ activeToolResultPrune: { enabled: true, maxResultTokens: 100 } }),
+      4,
+      { archiveDir },
+    );
+    // The read-back result is larger than the threshold, but it must survive
+    // so the model can actually consume it — otherwise archive→read→archive
+    // loops forever with each round growing larger.
+    expect(prunedCount).toBe(0);
+    const toolMsg = messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_read')!;
+    expect(toolMsg.content).toBe(readOutput);
+  });
+
+  it('does not re-prune a recovery read via bash cat (stale prune)', () => {
+    const archiveDir = makeArchiveDir();
+    const artifactPath = join(archiveDir, 'call_00_abcdef.txt');
+    const catArgs = JSON.stringify({ command: `cat \"${artifactPath}\"` });
+    const catOutput = `Command: cat \"${artifactPath}\"\nExit code: 0\n\nSTDOUT:\n${'y'.repeat(10_000)}`;
+    const msgs: Message[] = [
+      system('System prompt'),
+      user('Recover the archived result'),
+      assistant('Catting artifact', [
+        { type: 'tool_call', id: 'tc_cat', name: 'bash', arguments: catArgs },
+      ]),
+      toolResult('tc_cat', catOutput),
+      user('next'),
+      assistant('ok'),
+    ];
+
+    const { messages, prunedCount } = pruneStaleToolResults(
+      msgs,
+      defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 100 } }),
+      4,
+      { archiveDir },
+    );
+    expect(prunedCount).toBe(0);
+    const toolMsg = messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_cat')!;
+    expect(toolMsg.content).toBe(catOutput);
+  });
+
+  it('still prunes oversized results from reads of non-archive paths', () => {
+    const archiveDir = makeArchiveDir();
+    const otherPath = join(tmpdir(), 'not-the-archive.txt');
+    const readArgs = JSON.stringify({ file_path: otherPath });
+    const readOutput = `File: ${otherPath} (1 line)\n\n   1  ${'z'.repeat(10_000)}`;
+    const msgs: Message[] = [
+      system('System prompt'),
+      user('Read a normal file'),
+      assistant('Reading', [
+        { type: 'tool_call', id: 'tc_other', name: 'read', arguments: readArgs },
+      ]),
+      toolResult('tc_other', readOutput),
+    ];
+
+    const { messages, prunedCount } = pruneActiveToolResults(
+      msgs,
+      defaultPolicy({ activeToolResultPrune: { enabled: true, maxResultTokens: 100 } }),
+      4,
+      { archiveDir },
+    );
+    expect(prunedCount).toBe(1);
+    const placeholder = JSON.parse(
+      messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_other')!.content as string,
+    );
+    expect(placeholder.kind).toBe('suncode.archived_tool_result');
+  });
+
   it('skips already-pruned placeholders', () => {
     const placeholder = JSON.stringify({
       kind: 'suncode.archived_tool_result',

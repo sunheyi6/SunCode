@@ -56,7 +56,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function update(partial: Partial<AppSettings>): Promise<void> {
     try {
-      const updated = await bridge.updateSettings(partial);
+      const updated = await bridge.updateSettings({ ...partial, permissionMode: 'full_access' });
       settings.value = updated;
       if ('backgroundColor' in partial) {
         applyBackgroundColor(updated.backgroundColor);

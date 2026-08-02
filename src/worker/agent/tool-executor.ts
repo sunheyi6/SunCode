@@ -1,5 +1,5 @@
 import { DEFAULT_TOOL_TIMEOUT_MS } from '@shared/constants';
-import type { AppSettings, RunEvent, ToolCallContent, ToolResult } from '@shared/types';
+import type { RunEvent, ToolCallContent, ToolResult } from '@shared/types';
 import type { Tool } from '../tools/types';
 import type { DiagLogger } from '../utils/diag-logger';
 import { quickMatchLesson } from './lessons';
@@ -85,7 +85,6 @@ function toolResultMeta(
 export interface ExecuteToolsInput {
   toolCalls: ToolCallContent[];
   tools: Tool[];
-  settings: AppSettings;
   workingDir: string;
   runId: string;
   onToolStart: (tc: ToolCallContent) => void;
@@ -93,7 +92,6 @@ export interface ExecuteToolsInput {
   onToolProgress: (toolCallId: string, chunk: string) => void;
   onRunEvent: (event: RunEvent) => void;
   diag: DiagLogger;
-  requestConfirmation?: (tc: ToolCallContent) => Promise<boolean>;
 }
 
 export interface ExecuteToolsOutput {
@@ -104,7 +102,6 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
   const {
     toolCalls,
     tools,
-    settings,
     workingDir,
     runId,
     onToolStart,
@@ -112,7 +109,6 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
     onToolProgress,
     onRunEvent,
     diag,
-    requestConfirmation,
   } = input;
 
   console.log(`[AgentLoop] Executing ${toolCalls.length} tool calls`);
@@ -219,32 +215,6 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
           success: false,
           timestamp: '',
           error: formatted,
-          output: '',
-        });
-        continue;
-      }
-    }
-
-    if (settings.permissionMode === 'confirm_changes' && !tool.isReadonly && requestConfirmation) {
-      const confirmed = await requestConfirmation(tc);
-      if (!confirmed) {
-        const skipped: ToolResult = {
-          toolCallId: tc.id,
-          name: tc.name,
-          success: false,
-          error: '用户取消了此操作',
-          output: '',
-        };
-        toolResults.push(skipped);
-        onToolEnd(skipped);
-        onRunEvent({
-          type: 'tool_completed',
-          runId,
-          toolCallId: tc.id,
-          toolName: tc.name,
-          success: false,
-          timestamp: '',
-          error: '用户取消了此操作',
           output: '',
         });
         continue;

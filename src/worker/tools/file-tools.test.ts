@@ -1,8 +1,13 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { createEditTool } from './edit';
+import { createFindTool } from './find';
+import { createGlobTool } from './glob';
+import { createGrepTool } from './grep';
+import { createLsTool } from './ls';
+import { createReadTool } from './read';
 import { createWriteTool } from './write';
 
 const dirs: string[] = [];
@@ -58,10 +63,11 @@ describe('file tool details', () => {
     });
   });
 
-  test('edit sandbox failure retains the normalized target path', async () => {
+  test('edit can modify a file outside the working directory', async () => {
     const dir = await makeDir();
     const outsideDir = await makeDir();
     const filePath = join(outsideDir, 'outside.ts');
+    await writeFile(filePath, 'one');
 
     const result = await createEditTool(dir).execute({
       file_path: filePath,
@@ -69,13 +75,81 @@ describe('file tool details', () => {
       new_string: 'two',
     });
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(await readFile(filePath, 'utf-8')).toBe('two');
     expect(result.details).toMatchObject({
       type: 'file_edit',
       filePath,
-      status: 'failed',
-      error: `Cannot edit outside working directory: ${filePath}`,
+      status: 'edited',
     });
+  });
+
+  test('read and discovery tools can access sensitive files outside the working directory', async () => {
+    const dir = await makeDir();
+    const outsideDir = await makeDir();
+    const filePath = join(outsideDir, '.env');
+    await writeFile(filePath, 'EXTERNAL_TOKEN=visible');
+
+    const readResult = await createReadTool(dir).execute({ file_path: filePath });
+    const findResult = await createFindTool(dir).execute({ path: outsideDir, pattern: '.env' });
+    const globResult = await createGlobTool(dir).execute({ path: outsideDir, pattern: '*.env' });
+    const grepResult = await createGrepTool(dir).execute({
+      path: outsideDir,
+      pattern: 'EXTERNAL_TOKEN',
+    });
+    const lsResult = await createLsTool(dir).execute({ path: outsideDir });
+
+    for (const result of [readResult, findResult, globResult, grepResult, lsResult]) {
+      expect(result.success).toBe(true);
+    }
+    expect(readResult.output).toContain('EXTERNAL_TOKEN=visible');
+  });
+
+  test('glob matches files at every depth after a recursive wildcard', async () => {
+    const dir = await makeDir();
+    await writeFile(join(dir, 'root.ts'), 'root');
+    const nestedDir = join(dir, 'nested');
+    await mkdir(nestedDir);
+    await writeFile(join(nestedDir, 'child.ts'), 'child');
+
+    const result = await createGlobTool(dir).execute({ pattern: '**/*.ts' });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('root.ts');
+    expect(result.output).toContain('nested');
+    expect(result.output).toContain('child.ts');
+  });
+
+  test('grep uses the built-in scanner when external search commands are unavailable', async () => {
+    const dir = await makeDir();
+    const nestedDir = join(dir, 'nested');
+    await mkdir(nestedDir);
+    await writeFile(join(nestedDir, 'sample.ts'), 'const searchableValue = true;\n');
+    const result = await createGrepTool(dir, {
+      shell: { path: 'unused', type: 'powershell' },
+      env: { PATH: '' },
+    }).execute({
+      pattern: 'searchableValue',
+      glob: '**/*.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('used built-in scan');
+    expect(result.output).toContain('nested/sample.ts:1');
+  });
+
+  test('write can create a file outside the working directory', async () => {
+    const dir = await makeDir();
+    const outsideDir = await makeDir();
+    const filePath = join(outsideDir, '.env');
+
+    const result = await createWriteTool(dir).execute({
+      file_path: filePath,
+      content: 'EXTERNAL_TOKEN=written',
+    });
+
+    expect(result.success).toBe(true);
+    expect(await readFile(filePath, 'utf-8')).toBe('EXTERNAL_TOKEN=written');
   });
 
   test('write reports all lines when creating a file', async () => {

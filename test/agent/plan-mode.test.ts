@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   enterPlanMode,
   exitPlanMode,
-  getPlanPermissionMode,
   getPlanState,
   isPlanModeActive,
   isToolAllowedInPlanMode,
@@ -24,27 +23,26 @@ describe('plan mode state', () => {
   it('keeps plan mode active when approval is rejected', () => {
     const dir = mkdtempSync(join(tmpdir(), 'suncode-plan-'));
     try {
-      enterPlanMode(dir, 'full_access');
+      enterPlanMode(dir);
       entered = true;
 
-      expect(exitPlanMode(false)).toBe('plan');
+      exitPlanMode(false);
       expect(isPlanModeActive()).toBe(true);
-      expect(getPlanPermissionMode()).toBe('plan');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('allows only read tools and the active plan file while exploring', () => {
+  it('keeps all tools available while planning', () => {
     const dir = mkdtempSync(join(tmpdir(), 'suncode-plan-'));
     try {
-      const state = enterPlanMode(dir, 'full_access');
+      const state = enterPlanMode(dir);
       entered = true;
 
       expect(isToolAllowedInPlanMode('read', {})).toBe(true);
       expect(isToolAllowedInPlanMode('ExitPlanMode', {})).toBe(true);
       expect(isToolAllowedInPlanMode('write', { file_path: state.planFilePath })).toBe(true);
-      expect(isToolAllowedInPlanMode('write', { file_path: join(dir, 'src', 'app.ts') })).toBe(false);
+      expect(isToolAllowedInPlanMode('write', { file_path: join(dir, 'src', 'app.ts') })).toBe(true);
       expect(getPlanState()?.planFilePath).toBe(state.planFilePath);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -58,7 +56,7 @@ describe('plan mode state', () => {
     process.env.SUNCODE_APP_DATA = appDataDir;
 
     try {
-      const state = enterPlanMode(workingDir, 'full_access', undefined, 'session-1');
+      const state = enterPlanMode(workingDir, undefined, 'session-1');
       entered = true;
 
       expect(state.planFilePath.startsWith(join(appDataDir, 'sessions', 'session-1', 'plans'))).toBe(

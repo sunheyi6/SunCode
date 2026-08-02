@@ -177,6 +177,35 @@ describe('Runtime Event Log', () => {
     });
   });
 
+  test('records multiple system-prompt updates within one run; projection keeps the latest', async () => {
+    const sessionId = 'sysprompt-update-session';
+    const base = { runId: 'run-sys', turnId: 'turn-sys', invocationId: 'run-sys' };
+    // Content-addressed event IDs: changed payload → new event, no collision.
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-sys:system-prompt:aaaa1111',
+      fact: { type: 'system_prompt_committed', systemPrompt: 'first prompt' },
+    });
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-sys:system-prompt:bbbb2222',
+      fact: { type: 'system_prompt_committed', systemPrompt: 'second prompt' },
+    });
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-sys:assistant',
+      fact: {
+        type: 'assistant_message_committed',
+        message: { role: 'assistant', content: 'done' },
+      },
+    });
+
+    const events = await readRuntimeEvents(sessionId);
+    expect(events.filter((event) => event.fact.type === 'system_prompt_committed')).toHaveLength(2);
+    const message = projectSessionRuntime(events).messages.at(-1);
+    expect(message).toMatchObject({ role: 'assistant', content: 'done', systemPrompt: 'second prompt' });
+  });
+
   test('keeps streaming output in one replaceable partial snapshot', async () => {
     const sessionId = 'partial-session';
     scheduleRuntimePartial({

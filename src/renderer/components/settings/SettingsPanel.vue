@@ -235,13 +235,6 @@ const thinkingLevels = [
   { value: 'xhigh', label: '最大', desc: '优先质量，速度和费用更高' },
 ];
 
-const permissionModes = [
-  { value: 'plan' as const, label: '计划模式', desc: '仅规划，不修改文件' },
-  { value: 'confirm_changes' as const, label: '变更前确认', desc: '修改前需要用户确认' },
-  { value: 'auto_edit' as const, label: '自动编辑', desc: '自动编辑文件，无需逐次确认' },
-  { value: 'full_access' as const, label: '完全访问', desc: '允许自由读写和执行命令' },
-];
-
 const enabledMcpCount = computed(
   () => settingsStore.settings.mcpServers.filter((server) => server.enabled).length,
 );
@@ -343,11 +336,6 @@ function updateMaxLessons(event: Event): void {
   if (Number.isFinite(value) && value >= 20 && value <= 1000) {
     settingsStore.update({ maxLessons: value });
   }
-}
-
-function updatePermissionMode(event: Event): void {
-  const mode = (event.target as HTMLSelectElement).value as AppSettings['permissionMode'];
-  settingsStore.update({ permissionMode: mode });
 }
 
 function updateWindowsShell(event: Event): void {
@@ -819,22 +807,6 @@ function resetBackgroundColor(): void {
             </div>
 
             <div class="settings-card">
-              <label class="setting-row">
-                <span class="setting-copy">
-                  <strong>权限模式</strong>
-                  <small>控制 Agent 对文件和命令的访问权限。</small>
-                </span>
-                <select
-                  class="setting-select"
-                  :value="settingsStore.settings.permissionMode"
-                  @change="updatePermissionMode"
-                >
-                  <option v-for="mode in permissionModes" :key="mode.value" :value="mode.value">
-                    {{ mode.label }}
-                  </option>
-                </select>
-              </label>
-
               <label class="setting-row">
                 <span class="setting-copy">
                   <strong>Windows Shell</strong>

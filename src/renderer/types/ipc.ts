@@ -90,13 +90,6 @@ export interface SessionGoalEvent {
   sessionId: string;
   event: GoalEvent;
 }
-export interface SessionConfirmRequestEvent {
-  sessionId: string;
-  toolCallId: string;
-  toolName: string;
-  description: string;
-}
-
 declare global {
   interface Window {
     suncode: {
@@ -195,10 +188,6 @@ declare global {
       onSubagentProgress(callback: (data: SessionSubagentProgressEvent) => void): () => void;
       // Goal
       onGoalEvent(callback: (data: SessionGoalEvent) => void): () => void;
-
-      // Permission confirmation
-      onConfirmRequest(callback: (data: SessionConfirmRequestEvent) => void): () => void;
-      respondConfirm(toolCallId: string, confirmed: boolean, sessionId?: string): void;
 
       // Session updates (e.g. AI-generated title)
       onSessionUpdated(callback: (meta: SessionMeta) => void): () => void;

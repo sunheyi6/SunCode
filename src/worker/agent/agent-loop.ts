@@ -117,9 +117,6 @@ export interface AgentLoopInput {
     context: Record<string, unknown>,
     options?: Record<string, unknown>,
   ) => AsyncIterable<AssistantMessageEvent>;
-  /** Callback to request user confirmation before executing a destructive tool.
-   *  Only called when permissionMode is 'confirm_changes'. */
-  requestConfirmation?: (toolCall: ToolCallContent) => Promise<boolean>;
   /** Optional callback fired on each turn_start to keep external state in sync.
    *  tokenUsage is the accumulated token count for the current run so far. */
   onTurnStart?: (
@@ -186,7 +183,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     prepareNextTurn,
     stopHooks,
     hasPendingInput: inputHasPending,
-    requestConfirmation,
   } = input;
 
   if (!model) {
@@ -287,7 +283,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     try {
-      const effectivePermissionMode = settings.permissionMode;
       const effectiveTools = tools;
       const toolDefs = effectiveTools.map((t) => t.getDefinition());
       const turnEvidenceContent = turnEvidence.formatPromptWindow();
@@ -295,7 +290,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         workingDir,
         tools: toolDefs,
         skillsContent,
-        permissionMode: effectivePermissionMode,
+        permissionMode: 'full_access',
         agentsMdContent,
         memoryContent,
         relevantLessonsContent,
@@ -368,18 +363,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       // ===== Streaming Tool Pre-Executor =====
       // Create executor that can start read-only tools during LLM streaming
-      const streamingExecutor = new StreamingToolExecutor(
-        effectiveTools,
-        workingDir,
-        effectivePermissionMode === 'confirm_changes',
-        {
-          runId,
-          onToolStart,
-          onToolEnd,
-          onToolProgress: (toolCallId, output) => onToolProgress(toolCallId, output),
-          onRunEvent: (event) => onRunEvent(event),
-        },
-      );
+      const streamingExecutor = new StreamingToolExecutor(effectiveTools, {
+        runId,
+        onToolStart,
+        onToolEnd,
+        onToolProgress: (toolCallId, output) => onToolProgress(toolCallId, output),
+        onRunEvent: (event) => onRunEvent(event),
+      });
 
       const stream = streamSimpleFn(model, piContext, {
         reasoning: settings.thinkingLevel,
@@ -701,7 +691,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         const deferredResult = await executeTools({
           toolCalls: remainingCalls,
           tools: effectiveTools,
-          settings: { ...settings, permissionMode: effectivePermissionMode },
           workingDir,
           runId,
           onToolStart,
@@ -709,7 +698,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           onToolProgress,
           onRunEvent: (event) => onRunEvent(event),
           diag,
-          requestConfirmation,
         });
         toolResults = [...preExecResults, ...deferredResult.results];
       } else {

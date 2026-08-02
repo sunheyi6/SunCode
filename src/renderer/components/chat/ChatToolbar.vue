@@ -11,13 +11,11 @@ const settingsStore = useSettingsStore();
 // ── dropdown state ──
 const modelOpen = ref(false);
 const thinkingOpen = ref(false);
-const permOpen = ref(false);
 const toolbarRef = ref<HTMLElement | null>(null);
 
 function closeAll(): void {
   modelOpen.value = false;
   thinkingOpen.value = false;
-  permOpen.value = false;
 }
 
 function onDocumentClick(e: MouseEvent): void {
@@ -39,12 +37,6 @@ function toggleModel(): void {
 function toggleThinking(): void {
   closeAll();
   thinkingOpen.value = !thinkingOpen.value;
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-function togglePerm(): void {
-  closeAll();
-  permOpen.value = !permOpen.value;
 }
 
 // ── model list ──
@@ -84,32 +76,6 @@ const currentThinking = computed(
 function selectThinking(level: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'): void {
   settingsStore.update({ thinkingLevel: level });
   thinkingOpen.value = false;
-}
-
-// ── permission mode ──
-const permissionModes = [
-  { value: 'plan' as const, label: '计划模式', icon: 'list-checks', desc: '仅规划，不修改文件' },
-  { value: 'full_access' as const, label: '完全访问', icon: 'unlock', desc: '无限制访问' },
-  { value: 'auto_edit' as const, label: '自动编辑', icon: 'pencil', desc: '自动编辑文件' },
-  {
-    value: 'confirm_changes' as const,
-    label: '变更前确认',
-    icon: 'shield-check',
-    desc: '修改前需确认',
-  },
-];
-
-// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-const currentPerm = computed(
-  () =>
-    permissionModes.find((p) => p.value === settingsStore.settings.permissionMode) ??
-    permissionModes[1],
-);
-
-// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_changes'): void {
-  settingsStore.update({ permissionMode: mode });
-  permOpen.value = false;
 }
 </script>
 
@@ -155,31 +121,6 @@ function selectPerm(mode: 'plan' | 'full_access' | 'auto_edit' | 'confirm_change
       </div>
     </div>
 
-    <!-- Permission mode -->
-    <div class="toolbar-dropdown" :class="{ open: permOpen }">
-      <button class="toolbar-btn perm-btn" @click="togglePerm">
-        <span class="btn-label">
-          <AppIcon :name="currentPerm.icon" :size="14" />
-          {{ currentPerm.label }}
-        </span>
-        <span class="btn-caret"><AppIcon name="chevron-down" :size="14" /></span>
-      </button>
-      <div v-if="permOpen" class="dropdown-menu">
-        <button
-          v-for="p in permissionModes"
-          :key="p.value"
-          class="dropdown-item"
-          :class="{ active: p.value === settingsStore.settings.permissionMode }"
-          @click="selectPerm(p.value)"
-        >
-          <span class="item-icon"><AppIcon :name="p.icon" :size="14" /></span>
-          <div class="item-info">
-            <span class="item-label">{{ p.label }}</span>
-            <span class="item-desc">{{ p.desc }}</span>
-          </div>
-        </button>
-      </div>
-    </div>
   </div>
 </template>
 

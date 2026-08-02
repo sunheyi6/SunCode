@@ -6,7 +6,7 @@ export interface SystemPromptInput {
   workingDir: string;
   tools: ToolDefinition[];
   skillsContent: string;
-  /** Permission mode controls how the model should approach tool execution. */
+  /** The sole permission mode exposed to the model. */
   permissionMode: AppSettings['permissionMode'];
   /** Optional: Custom system prompt to override the default */
   customPrompt?: string;
@@ -52,7 +52,6 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   return buildStructuredSystemPrompt({
     basePrompt: customPrompt || DEFAULT_SYSTEM_PROMPT,
     permissionMode,
-    planModeNotice: permissionMode === 'plan' ? 'read-only tools only' : undefined,
     guidelines: toolGuidelines,
     tools: sortedTools.map((tool) => ({ ...tool, snippet: getToolSnippet(tool) })),
     memoryContent,

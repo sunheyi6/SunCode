@@ -208,7 +208,7 @@ export function pruneActiveToolResults(
     activePolicy.maxResultTokens ?? policy.staleToolResultPrune?.maxResultTokens ?? 2048;
   const messageTurnMap = buildMessageTurnMap(messages);
   const activeTurnIds = recentTurnIdsFromGroups(messageTurnMap, 1);
-  const toolNameByCallId = buildToolNameIndex(messages);
+  const toolNameByCallId = buildToolNameIndex(messages, options?.archiveDir);
 
   return rewriteEligibleToolResults(messages, {
     maxResultTokens,
@@ -251,7 +251,7 @@ export function pruneStaleToolResults(
 
   const messageTurnMap = buildMessageTurnMap(messages);
   const protectedTurnIds = recentTurnIdsFromGroups(messageTurnMap, minRecentTurnsFull);
-  const toolNameByCallId = buildToolNameIndex(messages);
+  const toolNameByCallId = buildToolNameIndex(messages, options?.archiveDir);
 
   return rewriteEligibleToolResults(messages, {
     maxResultTokens,
@@ -271,7 +271,7 @@ interface RewriteArgs {
   maxResultTokens: number;
   isEligible: (msg: Message) => boolean;
   turnIdFor: (msg: Message) => string | undefined;
-  toolNameByCallId: Map<string, string>;
+  toolNameByCallId: Map<string, ToolCallMeta>;
   reason: ToolResultPruneReason;
   options?: ContextBudgetOptions;
 }
@@ -288,6 +288,11 @@ function rewriteEligibleToolResults(
     if (msg.role !== 'tool' || typeof msg.content !== 'string') return msg;
     if (!args.isEligible(msg)) return msg;
     if (isPlaceholderString(msg.content)) return msg;
+
+    // Recovery reads of archived tool results must not be pruned again, or the
+    // model chases its own tail: archive → read artifact → archive the read
+    // output (which is larger due to formatting) → read again, forever.
+    if (args.toolNameByCallId.get(msg.toolCallId ?? '')?.recovery) return msg;
 
     const { tokens } = countStringTokens(msg.content);
     if (tokens <= args.maxResultTokens) return msg;
@@ -422,14 +427,14 @@ function buildPlaceholder(args: {
   msg: Message;
   content: string;
   tokens: number;
-  toolNameByCallId: Map<string, string>;
+  toolNameByCallId: Map<string, ToolCallMeta>;
   archive: { artifactId: string; bodySha256: string; originalBytes: number; absolutePath: string };
   reason: ToolResultPruneReason;
   turnId?: string;
 }): string {
   const toolCallId = args.msg.toolCallId ?? 'unknown';
   const toolName =
-    (args.msg.toolCallId ? args.toolNameByCallId.get(args.msg.toolCallId) : undefined) ??
+    (args.msg.toolCallId ? args.toolNameByCallId.get(args.msg.toolCallId)?.name : undefined) ??
     extractToolNameFromContent(args.content) ??
     'unknown';
 
@@ -454,23 +459,54 @@ function buildPlaceholder(args: {
   return JSON.stringify(placeholder);
 }
 
+/** Tool call metadata used by prune decisions. */
+interface ToolCallMeta {
+  name: string;
+  /** True when the call reads back an archived tool result (recovery read). */
+  recovery: boolean;
+}
+
 /**
- * Resolve tool names from assistant toolCalls and model-facing tool result JSON.
+ * Resolve tool names and recovery-read flags from assistant toolCalls and
+ * model-facing tool result JSON.
  */
-function buildToolNameIndex(messages: Message[]): Map<string, string> {
-  const map = new Map<string, string>();
+function buildToolNameIndex(messages: Message[], archiveDir?: string): Map<string, ToolCallMeta> {
+  const map = new Map<string, ToolCallMeta>();
   for (const msg of messages) {
     if (msg.role === 'assistant' && msg.toolCalls) {
       for (const tc of msg.toolCalls) {
-        if (tc.id && tc.name) map.set(tc.id, tc.name);
+        if (!tc.id) continue;
+        map.set(tc.id, {
+          name: tc.name ?? 'unknown',
+          recovery: toolCallTargetsArchiveDir(tc.arguments, archiveDir),
+        });
       }
     }
     if (msg.role === 'tool' && msg.toolCallId && typeof msg.content === 'string') {
       const name = extractToolNameFromContent(msg.content);
-      if (name) map.set(msg.toolCallId, name);
+      if (name) {
+        const existing = map.get(msg.toolCallId);
+        map.set(msg.toolCallId, { name, recovery: existing?.recovery ?? false });
+      }
     }
   }
   return map;
+}
+
+/**
+ * True when a tool call's JSON arguments reference a file inside the archive
+ * directory — i.e. the call is a recovery read of a previously pruned result.
+ * Arguments are JSON, so backslashes are escaped (\\ in the raw string); both
+ * sides are normalized to forward slashes before comparison.
+ */
+function toolCallTargetsArchiveDir(
+  argsJson: string | undefined,
+  archiveDir: string | undefined,
+): boolean {
+  if (!argsJson || !archiveDir) return false;
+  const normArchive = archiveDir.replace(/\\/g, '/').toLowerCase();
+  const normArgs = argsJson.replace(/\\\\/g, '/').toLowerCase();
+  return normArgs.includes(normArchive);
 }
 
 function extractToolNameFromContent(content: string): string | undefined {

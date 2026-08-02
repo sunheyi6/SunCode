@@ -68,3 +68,14 @@ describe('createModelRegistry.getModel 自定义短路', () => {
     expect(m).toBeNull();
   });
 });
+
+describe('createModelRegistry OpenCode Go', () => {
+  it('可发现并加载 OpenCode Go 模型', async () => {
+    const reg = createModelRegistry();
+    const models = await reg.getModels('opencode-go');
+
+    expect(models.length).toBeGreaterThan(0);
+    expect(models.every((model) => model.provider === 'opencode-go')).toBe(true);
+    expect(await reg.getModel('opencode-go', models[0].id)).not.toBeNull();
+  });
+});

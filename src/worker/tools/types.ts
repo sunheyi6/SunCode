@@ -7,7 +7,7 @@ export interface Tool {
   readonly name: string;
   readonly description: string;
   readonly parameters: ToolDefinition['parameters'];
-  /** Whether this tool is read-only (does not modify files or run commands). */
+  /** Whether this tool is read-only, used only for streaming pre-execution scheduling. */
   readonly isReadonly: boolean;
   execute(params: Record<string, unknown>): Promise<ToolResult>;
   getDefinition(): ToolDefinition;

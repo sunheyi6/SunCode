@@ -114,6 +114,7 @@ export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
           'groq',
           'mistral',
           'openrouter',
+          'opencode-go',
         ];
         return providersCache;
       }

@@ -56,7 +56,7 @@ export class DefaultHookRegistry implements HookRegistry {
       try {
         const result = await hook.check(ctx);
         // If the hook made a decision, return it immediately (short-circuit)
-        if (result.shouldStop || result.shouldBlock || result.allow !== undefined) {
+        if (result.shouldStop || result.shouldBlock) {
           return result;
         }
       } catch (err) {
@@ -155,7 +155,7 @@ export function hookRegistryAsStopRegistry(hookRegistry: DefaultHookRegistry): S
 
 /** Check if a hook result is neutral (no action taken). */
 export function isNeutralResult(result: HookResult): boolean {
-  return !result.shouldBlock && !result.shouldStop && result.allow === undefined;
+  return !result.shouldBlock && !result.shouldStop;
 }
 
 /** Build a HookContext for a pre_tool_use event. */
@@ -175,14 +175,6 @@ export function buildPostToolUseContext(
     eventType: toolResult.success ? 'post_tool_use' : 'post_tool_use_failure',
     toolCall,
     toolResult,
-  };
-}
-
-/** Build a HookContext for a permission_request event. */
-export function buildPermissionRequestContext(toolCall: ToolCallContent): HookContext {
-  return {
-    eventType: 'permission_request',
-    toolCall,
   };
 }
 

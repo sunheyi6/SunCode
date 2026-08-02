@@ -30,12 +30,6 @@ export function createGlobTool(workingDir: string) {
       // Extract directory prefix from pattern (e.g. "src/main/**" → base + "src/main", pattern → "**")
       const { searchDir, effectivePattern } = extractDirFromPattern(absPath, pattern);
 
-      // Security: prevent globbing outside working directory
-      const workRoot = normalize(resolve(workingDir));
-      if (!searchDir.startsWith(workRoot)) {
-        return this.failure(`Cannot search outside working directory: ${searchDir}`);
-      }
-
       try {
         const files = await findFiles(searchDir, effectivePattern);
         const relativeFiles = files.map((f) => relative(searchDir, f));
@@ -131,13 +125,16 @@ async function findFiles(rootDir: string, pattern: string, maxResults = 500): Pr
  * Convert a simple glob pattern to a RegExp.
  * Supports: ** (any depth), * (single level), ? (single char), {a,b} (alternatives)
  */
-function globToRegex(pattern: string): RegExp {
+export function globToRegex(pattern: string): RegExp {
   let regexStr = '^';
 
   const parts = pattern.split('/');
 
   for (let i = 0; i < parts.length; i++) {
-    if (i > 0) regexStr += '/';
+    // A non-terminal ** already emits its trailing slash as part of the
+    // optional directory group. Adding another slash would make **/*.ts
+    // require a leading slash and reject every relative path.
+    if (i > 0 && parts[i - 1] !== '**') regexStr += '/';
 
     const part = parts[i];
 

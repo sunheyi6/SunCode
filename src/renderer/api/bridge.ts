@@ -19,7 +19,6 @@ import type {
   SessionBgProcessCompletedEvent,
   SessionBgProcessPortsVerifiedEvent,
   SessionBgProcessStartedEvent,
-  SessionConfirmRequestEvent,
   SessionDoneEvent,
   SessionErrorEvent,
   SessionGoalEvent,
@@ -277,17 +276,8 @@ export const bridge = {
     return api().onSubagentProgress(callback);
   },
 
-  // ===== Permission Confirmation =====
-  onConfirmRequest(callback: (data: SessionConfirmRequestEvent) => void): () => void {
-    return api().onConfirmRequest(callback);
-  },
-
   onRunEvent(callback: (data: SessionRunEvent) => void): () => void {
     return api().onRunEvent(callback);
-  },
-
-  respondConfirm(toolCallId: string, confirmed: boolean, sessionId?: string): void {
-    api().respondConfirm(toolCallId, confirmed, sessionId);
   },
 
   // ===== Session Updates =====

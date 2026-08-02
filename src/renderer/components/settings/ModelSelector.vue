@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CustomEndpoint } from '@shared/types';
 import { computed, onMounted, ref } from 'vue';
-import { BUILTIN_PROVIDERS, useModelsStore } from '../../stores/models';
+import { useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
@@ -13,8 +13,6 @@ const settingsStore = useSettingsStore();
 const activeSource = ref<'builtin' | 'custom'>('builtin');
 const selectedProvider = ref('');
 const searchQuery = ref('');
-
-const builtinProviderSet = new Set(BUILTIN_PROVIDERS);
 
 // 内联 Key 输入状态
 const keyInputProvider = ref('');
@@ -36,6 +34,7 @@ const displayModels = computed(() => {
     source = modelsStore.providerModels.get(selectedProvider.value) || [];
   } else {
     // 全部内置模型（自定义端点走单独的「自定义模型」tab）
+    const builtinProviderSet = new Set(modelsStore.builtinProviders);
     source = modelsStore.allModels.filter((m) => builtinProviderSet.has(m.provider));
   }
 
@@ -48,9 +47,7 @@ const displayModels = computed(() => {
   );
 });
 
-const builtinProviders = computed(() =>
-  modelsStore.providers.filter((p) => builtinProviderSet.has(p)),
-);
+const builtinProviders = computed(() => modelsStore.builtinProviders);
 
 const customEndpoints = computed<CustomEndpoint[]>(
   () => settingsStore.settings.customEndpoints ?? [],
@@ -171,6 +168,7 @@ function providerLabel(id: string): string {
     groq: 'Groq',
     mistral: 'Mistral',
     openrouter: 'OpenRouter',
+    'opencode-go': 'OpenCode Go',
     together: 'Together',
     fireworks: 'Fireworks',
     cerebras: 'Cerebras',

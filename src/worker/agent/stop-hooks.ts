@@ -128,7 +128,7 @@ export function createDefaultStopHookRegistry(): StopHookRegistry {
 /**
  * Create a unified hook registry with the built-in SafetyStopHook
  * adapted to the new HookInterface. Provides the full lifecycle hook
- * capabilities (pre_tool_use, post_tool_use, permission_request, etc.)
+ * capabilities (pre_tool_use, post_tool_use, session lifecycle, etc.)
  * while maintaining backward compatibility with the legacy stop hook.
  */
 export function createUnifiedHookRegistry(): {

@@ -5,6 +5,7 @@
  */
 import { parentPort } from 'node:worker_threads';
 import { DEFAULT_SETTINGS } from '@shared/constants';
+import { getProviderEnvKey } from '@shared/provider-env';
 import type { AppSettings, WorkerInMessage, WorkerOutMessage } from '@shared/types';
 import { Agent } from './agent/agent';
 import { BackgroundProcessMonitor } from './tools/background-process-monitor';
@@ -52,51 +53,13 @@ function withSessionLock(sessionId: string, fn: () => Promise<void>): void {
   sessionLocks.set(sessionId, next);
 }
 
-/** Pending confirmations waiting for user response.
- *  Keyed by toolCallId (LLM-generated UUID, collision-safe across sessions). */
-const pendingConfirmations = new Map<
-  string,
-  { resolve: (confirmed: boolean) => void; timeout: ReturnType<typeof setTimeout> }
->();
-
-/** Request user confirmation before executing a destructive tool.
- *  Sends a message to the main process and waits for the response. */
-function requestConfirmation(
-  sessionId: string,
-  toolCall: import('@shared/types').ToolCallContent,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      pendingConfirmations.delete(toolCall.id);
-      resolve(false); // Timeout: deny by default
-    }, 120_000); // 2 minutes
-
-    pendingConfirmations.set(toolCall.id, { resolve, timeout });
-    post({ type: 'confirmRequest', sessionId, toolCall });
-  });
-}
-
 function post(msg: WorkerOutMessage): void {
   workerPort.postMessage(msg);
 }
 
 function syncApiKeys(nextSettings: AppSettings): void {
-  const envKeys: Record<string, string> = {
-    openai: 'OPENAI_API_KEY',
-    anthropic: 'ANTHROPIC_API_KEY',
-    google: 'GEMINI_API_KEY',
-    deepseek: 'DEEPSEEK_API_KEY',
-    xai: 'XAI_API_KEY',
-    groq: 'GROQ_API_KEY',
-    mistral: 'MISTRAL_API_KEY',
-    openrouter: 'OPENROUTER_API_KEY',
-    together: 'TOGETHER_API_KEY',
-    fireworks: 'FIREWORKS_API_KEY',
-    cerebras: 'CEREBRAS_API_KEY',
-  };
-
   for (const [provider, key] of Object.entries(nextSettings.envApiKeys || {})) {
-    const envKey = envKeys[provider];
+    const envKey = getProviderEnvKey(provider);
     if (envKey && key) {
       process.env[envKey] = key;
     }
@@ -146,8 +109,6 @@ function createCallbacks(sessionId: string) {
     },
     onGoalEvent: (event: import('@shared/types').GoalEvent) =>
       post({ type: 'goalEvent', sessionId, event }),
-    requestConfirmation: (toolCall: import('@shared/types').ToolCallContent) =>
-      requestConfirmation(sessionId, toolCall),
   };
 }
 
@@ -286,7 +247,6 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
             cbs.onRunEvent,
             cbs.onSubagentEvent,
             cbs.onGoalEvent,
-            cbs.requestConfirmation,
             sid,
           );
           agents.set(sid, newAgent);
@@ -318,16 +278,6 @@ async function handleMessage(msg: WorkerInMessage): Promise<void> {
           sid.slice(-8),
           '- no agent exists yet',
         );
-      }
-      break;
-    }
-
-    case 'confirmResponse': {
-      const pending = pendingConfirmations.get(msg.toolCallId);
-      if (pending) {
-        clearTimeout(pending.timeout);
-        pendingConfirmations.delete(msg.toolCallId);
-        pending.resolve(msg.confirmed);
       }
       break;
     }

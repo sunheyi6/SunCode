@@ -1,11 +1,11 @@
 /**
  * Plan Mode Tools — EnterPlanMode / ExitPlanMode
  *
- * These tools allow the model to voluntarily enter a read-only planning phase,
+ * These tools allow the model to voluntarily enter a planning phase,
  * produce a plan file, and request user approval before making changes.
  */
 
-import type { PlanState, ToolResult } from '@shared/types';
+import type { ToolResult } from '@shared/types';
 import {
   approvePlan,
   enterPlanMode,
@@ -24,8 +24,6 @@ export interface PlanToolCallbacks {
   getWorkingDir: () => string;
   /** Get the owning session id for session-scoped agent data. */
   getSessionId?: () => string;
-  /** Get the current permission mode. */
-  getPermissionMode: () => string;
   /** Get the plan approval behavior for this surface. */
   getPlanApprovalMode?: () => 'interactive' | 'auto_approve' | 'disabled';
 }
@@ -34,7 +32,7 @@ export interface PlanToolCallbacks {
 
 /**
  * Tool that the model calls to enter plan mode.
- * Saves the current permission mode and switches to read-only.
+ * Starts the planning workflow without changing permissions.
  */
 export function createEnterPlanModeTool(callbacks: PlanToolCallbacks): Tool {
   const tool = new (class extends BaseTool {
@@ -42,8 +40,7 @@ export function createEnterPlanModeTool(callbacks: PlanToolCallbacks): Tool {
     readonly isReadonly = false;
     readonly description =
       'Enter plan mode to explore the codebase and design an implementation plan before making changes. ' +
-      'Use this when you need to understand the task before acting. In plan mode, you can only read files ' +
-      'and write to the plan file. Call ExitPlanMode when your plan is ready for user approval.';
+      'Use this when you need to understand the task before acting. Call ExitPlanMode when your plan is ready for user approval.';
     readonly parameters = obj({}, []);
 
     async execute(_params: Record<string, unknown>): Promise<ToolResult> {
@@ -59,17 +56,11 @@ export function createEnterPlanModeTool(callbacks: PlanToolCallbacks): Tool {
         }
 
         const workingDir = callbacks.getWorkingDir();
-        const currentMode = callbacks.getPermissionMode();
-        const state = enterPlanMode(
-          workingDir,
-          currentMode as PlanState['savedPermissionMode'],
-          undefined,
-          callbacks.getSessionId?.(),
-        );
+        const state = enterPlanMode(workingDir, undefined, callbacks.getSessionId?.());
 
         return this.success(
           `Plan mode activated.\n\n` +
-            `**Phase:** Exploring (read-only + plan file writing)\n` +
+            `**Phase:** Exploring and planning\n` +
             `**Plan file:** ${state.planFilePath}\n\n` +
             `Read relevant files, search the codebase, and design your approach. ` +
             `Write your plan to the plan file, then call ExitPlanMode for user approval.`,
@@ -96,7 +87,7 @@ export function createExitPlanModeTool(callbacks: PlanToolCallbacks): Tool {
     readonly description =
       'Exit plan mode and present your plan for user approval. ' +
       'Provide the complete plan content as the "plan" argument. ' +
-      'The plan will be shown to the user for review. If approved, you will regain full tool access. ' +
+      'The plan will be shown to the user for review. Full tool access remains active. ' +
       'If rejected, you remain in plan mode to revise.';
     readonly parameters = obj(
       {
@@ -132,10 +123,10 @@ export function createExitPlanModeTool(callbacks: PlanToolCallbacks): Tool {
 
         if (approved) {
           approvePlan();
-          const restoredMode = exitPlanMode(true);
+          exitPlanMode(true);
           return this.success(
             `Plan approved! Implementation phase begins.\n\n` +
-              `**Permission mode restored:** ${restoredMode}\n` +
+              `**Permission mode:** full_access\n` +
               `**Plan saved to:** ${state.planFilePath}\n\n` +
               `You now have full tool access. Implement the plan step by step.`,
           );
