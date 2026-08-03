@@ -1,6 +1,6 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, Menu, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, crashReporter, Menu, nativeTheme, shell } from 'electron';
 // app-identity MUST be the first local import: it sets the dev app name before
 // any other module resolves app.getPath('userData') at import time.
 import { APP_RUNTIME_IDENTITY, IS_DEV } from './app-identity';
@@ -23,6 +23,15 @@ const __dirname = dirname(__filename);
 // The app is fully functional without GPU acceleration; only CSS
 // transforms/animations will fall back to software rendering.
 app.disableHardwareAcceleration();
+
+// Keep Crashpad connected even when uploads are disabled. Without an active
+// handler, Windows renderer failures collapse to exit code -36861 and no dump
+// is left behind, which hides the actual fault.
+crashReporter.start({
+  productName: 'SunCode',
+  companyName: 'SunCode',
+  uploadToServer: false,
+});
 
 // ── Single-instance lock ────────────────────────────────────────────
 const gotTheLock = app.requestSingleInstanceLock();
@@ -71,6 +80,9 @@ function createMainWindow(): BrowserWindow {
       height: isMac ? 34 : 44,
     },
   });
+  let rendererRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let rendererCrashCount = 0;
+  let rendererCrashWindowStartedAt = 0;
   win.setMenuBarVisibility(false);
 
   nativeTheme.on('updated', () => {
@@ -113,6 +125,40 @@ function createMainWindow(): BrowserWindow {
       reason: details.reason,
       exitCode: details.exitCode,
     });
+
+    if (details.reason === 'clean-exit' || win.isDestroyed()) return;
+
+    const now = Date.now();
+    if (now - rendererCrashWindowStartedAt > 60_000) {
+      rendererCrashWindowStartedAt = now;
+      rendererCrashCount = 0;
+    }
+    rendererCrashCount++;
+
+    if (rendererCrashCount > 2 || rendererRecoveryTimer) {
+      logger.error('[Window] Automatic renderer recovery suppressed', {
+        rendererCrashCount,
+        reason: details.reason,
+      });
+      return;
+    }
+
+    // Navigation from render-process-gone must be deferred until Chromium has
+    // finished tearing down the failed renderer. Reloading also preserves the
+    // BrowserWindow and lets an in-flight worker continue to completion.
+    rendererRecoveryTimer = setTimeout(() => {
+      rendererRecoveryTimer = null;
+      if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+      logger.warn('[Window] Reloading after renderer failure', {
+        rendererCrashCount,
+        reason: details.reason,
+      });
+      win.reload();
+    }, 1_000);
+  });
+
+  win.on('closed', () => {
+    if (rendererRecoveryTimer) clearTimeout(rendererRecoveryTimer);
   });
 
   win.on('unresponsive', () => {
@@ -213,6 +259,7 @@ logger.info('[App] Starting SunCode', {
   arch: process.arch,
   nodeVersion: process.version,
   logPath: getLogPath(),
+  crashDumpsPath: app.getPath('crashDumps'),
   cwd: process.cwd(),
   isPackaged: app.isPackaged,
 });
