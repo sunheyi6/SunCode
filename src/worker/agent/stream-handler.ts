@@ -49,6 +49,12 @@ export interface StreamHandlerOutput {
   };
 }
 
+const STREAM_UPDATE_INTERVAL_MS = 50;
+
+export function isStreamUpdateDue(lastEmittedAt: number | undefined, now: number): boolean {
+  return lastEmittedAt === undefined || now - lastEmittedAt >= STREAM_UPDATE_INTERVAL_MS;
+}
+
 export async function handleStream(input: StreamHandlerInput): Promise<StreamHandlerOutput> {
   const {
     stream,
@@ -81,6 +87,25 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
   let firstTokenTime: number | undefined;
+  let lastStreamUpdateAt: number | undefined;
+  let hasPendingStreamUpdate = false;
+
+  const emitStreamUpdate = (force = false): void => {
+    if (!emitToStream || !hasPendingStreamUpdate) return;
+    const now = Date.now();
+    if (!force && !isStreamUpdateDue(lastStreamUpdateAt, now)) return;
+
+    onStream({
+      type: 'message_update',
+      data: {
+        text: sanitizeStructuredMessageLeakStreaming(assistantText),
+        thinking: thinkingText,
+        toolCalls: [...toolCalls],
+      },
+    });
+    lastStreamUpdateAt = now;
+    hasPendingStreamUpdate = false;
+  };
 
   if (emitToStream) onStream({ type: 'message_start' });
 
@@ -102,14 +127,8 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
             part: { kind: 'text', text: event.delta },
             timestamp: '',
           });
-          onStream({
-            type: 'message_update',
-            data: {
-              text: sanitizeStructuredMessageLeakStreaming(assistantText),
-              thinking: thinkingText,
-              toolCalls: [...toolCalls],
-            },
-          });
+          hasPendingStreamUpdate = true;
+          emitStreamUpdate();
         }
         break;
       case 'text_end':
@@ -125,14 +144,8 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
             part: { kind: 'thinking', thinking: event.delta },
             timestamp: '',
           });
-          onStream({
-            type: 'message_update',
-            data: {
-              text: sanitizeStructuredMessageLeakStreaming(assistantText),
-              thinking: thinkingText,
-              toolCalls: [...toolCalls],
-            },
-          });
+          hasPendingStreamUpdate = true;
+          emitStreamUpdate();
         }
         break;
       case 'toolcall_start':
@@ -152,14 +165,8 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
         onToolCallComplete?.(tc);
 
         if (emitToStream) {
-          onStream({
-            type: 'message_update',
-            data: {
-              text: sanitizeStructuredMessageLeakStreaming(assistantText),
-              thinking: thinkingText,
-              toolCalls: [...toolCalls],
-            },
-          });
+          hasPendingStreamUpdate = true;
+          emitStreamUpdate(true);
         }
         break;
       }
@@ -192,6 +199,8 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
       }
     }
   }
+
+  emitStreamUpdate(true);
 
   console.log(`[AgentLoop] Stream done:`, {
     assistantTextLen: assistantText.length,

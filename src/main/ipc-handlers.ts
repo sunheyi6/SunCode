@@ -343,6 +343,13 @@ async function handleWorkerMessage(worker: Worker, msg: WorkerOutMessage): Promi
 
     if (evt.type !== 'content.part') await appendEvent(sid, evt.runId, evt);
 
+    // content.part is the token-level run feed. The renderer does not
+    // consume it (handleRunEvent only handles model_request_completed), and it
+    // already receives coalesced message_update snapshots through agent:stream.
+    // Forwarding both paths doubles IPC traffic during long runs and can starve
+    // the renderer event loop.
+    if (evt.type === 'content.part') return;
+
     const mainWindow = windowManager?.getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('agent:run-event', { sessionId: sid, event: evt });
