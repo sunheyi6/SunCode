@@ -34,7 +34,23 @@ interface ChatMessageBlock {
 
 工具调用按 ID 合并（`mergeStreamedToolCalls`），跨轮累积，不会被后一轮的空 `toolCalls` 覆盖。
 
-### 2.2 InlineCallTraceEntry — 渲染条目
+### 2.2 流式传输背压
+
+模型提供方通常按 token 产生 `text_delta` / `thinking_delta`。Worker 仍把每个 delta 写入 `content.part` 运行事件用于运行时观测，但 UI 不需要同时消费这条细粒度通道：Renderer 的 `handleRunEvent` 只处理 `model_request_completed`。
+
+面向 UI 的 `message_update` 使用累计快照，并在 `stream-handler.ts` 中合并到最多每 50ms 一次（20 FPS）；工具调用完成和模型流结束时强制刷新最后一份快照。Main 的 `ipc-handlers.ts` 不再把 `content.part` 转发给 Renderer，避免同一 token 沿 `agent:run-event` 和 `agent:stream` 重复跨 IPC。
+
+这条背压边界保证：
+
+- 运行时仍能看到每个原始 delta
+- Renderer 始终接收完整累计状态，不依赖中间快照逐条到达
+- 长 Agent 循环不会因 token 级 IPC 与 Markdown/Vue 重算形成事件风暴
+
+### 2.3 Renderer 故障恢复
+
+Main 启动本地 Crashpad（关闭上传，仅保留本机转储）。`render-process-gone` 后延迟 1 秒重载原 `BrowserWindow`，让仍在运行的 Worker 可以继续完成；一分钟内超过两次崩溃则停止自动重载，避免恢复循环。转储路径随启动身份写入 `app.log`。
+
+### 2.4 InlineCallTraceEntry — 渲染条目
 
 `buildInlineCallTrace`（`src/renderer/components/chat/call-trace-view-model.ts`）把 `blocks` 投影成渲染条目：
 
@@ -202,5 +218,7 @@ UI 的目标是"看到整体运行逻辑"，首行预览已足够；额外模型
 | AssistantMessage 分层渲染 | `src/renderer/components/chat/AssistantMessage.vue` |
 | 流式时间轴组件 | `src/renderer/components/chat/InlineCallTrace.vue` |
 | 流式 Markdown 渲染 | `src/renderer/components/chat/StreamingText.vue` |
+| Worker 流更新合并 | `src/worker/agent/stream-handler.ts` |
+| Main 事件过滤 / Renderer 恢复 | `src/main/ipc-handlers.ts`、`src/main/index.ts` |
 | showThinking 设置 | `src/renderer/components/settings/SettingsPanel.vue`、`src/shared/types.ts` |
 | 设置 store | `src/renderer/stores/settings.ts` |
