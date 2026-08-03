@@ -37,6 +37,15 @@ export function sanitizeStructuredMessageLeak(text: string): string {
 
   const prefix = text.slice(0, leakStart);
   const candidate = text.slice(leakStart).trim();
+  const envelopeEnd = findStructuredMessageEnvelopeEnd(candidate);
+  if (envelopeEnd >= 0) {
+    const envelope = candidate.slice(0, envelopeEnd);
+    const parsedText =
+      parseStructuredMessageText(envelope) ?? extractStructuredMessageText(envelope);
+    if (parsedText !== undefined) {
+      return `${prefix}${parsedText}${candidate.slice(envelopeEnd)}`.trim();
+    }
+  }
   const parsedText =
     parseStructuredMessageText(candidate) ?? extractStructuredMessageText(candidate);
   if (parsedText === undefined) return text;
@@ -67,9 +76,18 @@ export function sanitizeStructuredMessageLeakStreaming(text: string): string {
   const prefix = text.slice(0, leakStart);
   const candidate = text.slice(leakStart).trimStart();
 
-  // Complete (or near-complete) JSON — reuse the strict path.
-  const parsedText = parseStructuredMessageText(candidate);
-  if (parsedText !== undefined) return `${prefix}${parsedText}`.trim();
+  // Complete envelope — unwrap only the envelope and retain any prose emitted
+  // after it. Some models mirror the structured input format before continuing
+  // with their actual Markdown answer.
+  const envelopeEnd = findStructuredMessageEnvelopeEnd(candidate);
+  if (envelopeEnd >= 0) {
+    const envelope = candidate.slice(0, envelopeEnd);
+    const parsedText =
+      parseStructuredMessageText(envelope) ?? extractStructuredMessageText(envelope);
+    if (parsedText !== undefined) {
+      return `${prefix}${parsedText}${candidate.slice(envelopeEnd)}`.trim();
+    }
+  }
 
   // Loose recovery for malformed-but-closed envelopes.
   const recovered = extractStructuredMessageText(candidate);
@@ -87,6 +105,35 @@ function findStructuredMessageStart(text: string): number {
 
   const braceIndex = text.lastIndexOf('{', typeIndex);
   return braceIndex;
+}
+
+function findStructuredMessageEnvelopeEnd(candidate: string): number {
+  if (candidate[0] !== '{') return -1;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < candidate.length; i++) {
+    const char = candidate[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth++;
+    else if (char === '}') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+
+  return -1;
 }
 
 function parseStructuredMessageText(candidate: string): string | undefined {

@@ -61,6 +61,23 @@ describe('agent loop finalization guards', () => {
 
     expect(sanitizeStructuredMessageLeak(leaked)).toBe('完成，输出 hello world。');
   });
+
+  it('retains normal prose emitted after a structured assistant message', () => {
+    const leaked = `${JSON.stringify(
+      {
+        type: 'suncode.message',
+        version: 1,
+        role: 'assistant',
+        content: { text: '整理结论如下。' },
+      },
+      null,
+      2,
+    )}\n\n---\n\n## 结论\n\n完整正文`;
+
+    expect(sanitizeStructuredMessageLeak(leaked)).toBe(
+      '整理结论如下。\n\n---\n\n## 结论\n\n完整正文',
+    );
+  });
 });
 
 describe('sanitizeStructuredMessageLeakStreaming', () => {
@@ -116,6 +133,19 @@ describe('sanitizeStructuredMessageLeakStreaming', () => {
     );
     expect(sanitizeStructuredMessageLeakStreaming(complete)).toBe(
       sanitizeStructuredMessageLeak(complete),
+    );
+  });
+
+  it('retains streamed prose after a complete envelope', () => {
+    const streamed = `${JSON.stringify({
+      type: 'suncode.message',
+      version: 1,
+      role: 'assistant',
+      content: { text: '整理结论如下。' },
+    })}\n\n---\n\n完整正文`;
+
+    expect(sanitizeStructuredMessageLeakStreaming(streamed)).toBe(
+      '整理结论如下。\n\n---\n\n完整正文',
     );
   });
 });
