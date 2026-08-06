@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,6 +11,8 @@ import {
   getMemScenes,
   isMemoryWorthSaving,
   loadMemories,
+  migrateLegacyFlatMemories,
+  migrateLegacyProjectMemories,
   loadSessionSnapshot,
   mergeMemories,
   saveMemory,
@@ -737,4 +740,185 @@ describe('memory storage', () => {
     expect(promoted).toBeDefined();
     expect(promoted?.supersedes).toBeUndefined();
   });
+
+describe('legacy memory migration', () => {
+  afterEach(() => {
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs = [];
+  });
+
+  it('migrates legacy flat memories into the global scope', () => {
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const legacyDir = join(appDataDir, 'memories');
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(
+      join(legacyDir, '2026-06-24-legacy-test.md'),
+      [
+        '---',
+        'date: 2026-06-24',
+        '---',
+        '',
+        '## 记住端口',
+        '',
+        '**工具使用**:',
+        '  (无)',
+        '',
+        '**摘要**:',
+        '开发服务器使用固定端口 5173。',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    // Stale auto-generated index that must be cleaned up after migration.
+    writeFileSync(
+      join(legacyDir, 'MEMORY.md'),
+      '<!-- SunCode memory index - auto-generated -->',
+      'utf-8',
+    );
+    writeFileSync(join(legacyDir, 'MEMORY.json'), '[]', 'utf-8');
+
+    const migrated = migrateLegacyFlatMemories(appDataDir);
+
+    expect(migrated).toBe(1);
+    const globalFile = join(appDataDir, 'global', 'memories', '2026-06-24-legacy-test.md');
+    expect(existsSync(globalFile)).toBe(true);
+    expect(existsSync(join(legacyDir, '2026-06-24-legacy-test.md'))).toBe(false);
+    expect(existsSync(legacyDir)).toBe(false);
+
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+    try {
+      const entries = getAllMemories('some-workspace');
+      const legacy = entries.find((entry) => entry.slug === 'legacy-test');
+      expect(legacy).toBeDefined();
+      expect(legacy?.scope).toBe('global');
+      expect(legacy?.summary).toContain('固定端口 5173');
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
+  it('skips flat memories already present at the destination and stays idempotent', () => {
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const legacyDir = join(appDataDir, 'memories');
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, '2026-06-24-dupe.md'), '---\ndate: 2026-06-24\n---\n\n## x\n', 'utf-8');
+    const globalDir = join(appDataDir, 'global', 'memories');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(
+      join(globalDir, '2026-06-24-dupe.md'),
+      '---\nmeta: {"date":"2026-06-24","slug":"dupe","scope":"global","summary":"newer"}\n---\n',
+      'utf-8',
+    );
+
+    expect(migrateLegacyFlatMemories(appDataDir)).toBe(0);
+    expect(existsSync(join(globalDir, '2026-06-24-dupe.md'))).toBe(true);
+    expect(migrateLegacyFlatMemories(appDataDir)).toBe(0);
+  });
+
+  it('normalizes working directory separators for project memory storage', async () => {
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      const withBackslash = 'D:\\project\\test-dir';
+      const withForward = 'D:/project/test-dir';
+
+      await saveMemory(withBackslash, {
+        date: '2026-07-20',
+        slug: 'sep-backslash',
+        scope: 'project',
+        userRequest: '分隔符测试',
+        toolsUsed: {},
+        summary: 'backslash path memory',
+      });
+      await saveMemory(withForward, {
+        date: '2026-07-20',
+        slug: 'sep-forward',
+        scope: 'project',
+        userRequest: '分隔符测试',
+        toolsUsed: {},
+        summary: 'forward slash path memory',
+      });
+
+      const memories = getAllMemories(withBackslash);
+      const slugs = memories.map((entry) => entry.slug);
+      expect(slugs).toContain('sep-backslash');
+      expect(slugs).toContain('sep-forward');
+      expect(slugs.filter((slug) => slug.startsWith('sep-'))).toHaveLength(2);
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
+  it('migrates project memories from the legacy un-normalized hash location', () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      const legacyHash = createHash('sha256').update(workingDir).digest('hex').slice(0, 16);
+      const legacyDir = join(appDataDir, 'projects', legacyHash, 'memories');
+      mkdirSync(legacyDir, { recursive: true });
+      writeFileSync(
+        join(legacyDir, '2026-08-01-old-location.md'),
+        '---\ndate: 2026-08-01\nscope: project\n---\n\n## 旧位置记忆\n',
+        'utf-8',
+      );
+
+      const moved = migrateLegacyProjectMemories(appDataDir, workingDir);
+
+      expect(moved).toBe(1);
+      expect(existsSync(legacyDir)).toBe(false);
+      const memories = getAllMemories(workingDir);
+      expect(memories.some((entry) => entry.slug === 'old-location')).toBe(true);
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
+  it('reads project memories from the legacy hash location as a fallback', () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      const legacyHash = createHash('sha256').update(workingDir).digest('hex').slice(0, 16);
+      const legacyDir = join(appDataDir, 'projects', legacyHash, 'memories');
+      mkdirSync(legacyDir, { recursive: true });
+      writeFileSync(
+        join(legacyDir, '2026-08-01-fallback.md'),
+        '---\ndate: 2026-08-01\nscope: project\n---\n\n## 兜底记忆\n',
+        'utf-8',
+      );
+
+      const memories = getAllMemories(workingDir);
+      expect(memories.some((entry) => entry.slug === 'fallback')).toBe(true);
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+});
+
 });

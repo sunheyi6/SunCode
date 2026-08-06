@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmdirSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -164,7 +168,7 @@ export async function loadMemoriesWithEntries(
 ): Promise<LoadMemoriesResult> {
   const entries = [
     ...loadScopedMemoryEntries(globalMemoryDir(), 'global'),
-    ...loadScopedMemoryEntries(projectMemoryDir(workingDir), 'project'),
+    ...loadProjectMemoryEntries(workingDir),
     ...(sessionId
       ? loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session')
       : []),
@@ -371,7 +375,7 @@ function findMemoryLocation(
 ): { memDir: string; scope: MemoryScope } | null {
   const candidates: Array<{ memDir: string; scope: MemoryScope }> = [
     { memDir: globalMemoryDir(), scope: 'global' },
-    { memDir: projectMemoryDir(workingDir), scope: 'project' },
+    ...projectMemoryDirs(workingDir).map((memDir) => ({ memDir, scope: 'project' as const })),
     ...(sessionId
       ? [{ memDir: sessionMemoryDir(workingDir, sessionId), scope: 'session' as const }]
       : []),
@@ -398,12 +402,14 @@ export function getAllMemories(
         : scope === 'project'
           ? projectMemoryDir(workingDir)
           : sessionMemoryDir(workingDir, sessionId);
-    return loadScopedMemoryEntries(memDir, scope);
+    return scope === 'project'
+      ? loadProjectMemoryEntries(workingDir)
+      : loadScopedMemoryEntries(memDir, scope);
   }
 
   return [
     ...loadScopedMemoryEntries(globalMemoryDir(), 'global'),
-    ...loadScopedMemoryEntries(projectMemoryDir(workingDir), 'project'),
+    ...loadProjectMemoryEntries(workingDir),
     ...(sessionId
       ? loadScopedMemoryEntries(sessionMemoryDir(workingDir, sessionId), 'session')
       : []),
@@ -411,8 +417,113 @@ export function getAllMemories(
 }
 
 export function getMemScenes(workingDir: string, sessionId?: string): MemoryScene[] {
-  const memDir = sessionId ? sessionMemoryDir(workingDir, sessionId) : projectMemoryDir(workingDir);
-  return loadMemScenes(memDir).scenes;
+  const memDirs = sessionId
+    ? [sessionMemoryDir(workingDir, sessionId)]
+    : projectMemoryDirs(workingDir);
+  for (const memDir of memDirs) {
+    const { scenes } = loadMemScenes(memDir);
+    if (scenes.length > 0) return scenes;
+  }
+  return [];
+}
+
+/**
+ * Migrate legacy flat memory files (appData/memories/{date}-{slug}.md,
+ * written before the scope-directory layout) into the global scope. Legacy
+ * files carry no project/scope attribution, so global is the only faithful
+ * destination. Idempotent: files already present at the destination are
+ * skipped, and the stale auto-generated index is removed once the flat
+ * directory is drained. Returns the number of memories migrated.
+ */
+export function migrateLegacyFlatMemories(appDataDir: string): number {
+  const legacyDir = join(appDataDir, 'memories');
+  if (!existsSync(legacyDir)) return 0;
+
+  const globalDir = join(appDataDir, 'global', 'memories');
+  let migrated = 0;
+  for (const file of listMemoryFiles(legacyDir)) {
+    try {
+      const entry = parseSessionMemory(readFileSync(join(legacyDir, file), 'utf-8'));
+      const name = file.replace('.md', '');
+      const dateMatch = name.match(/^(\d{4}-\d{2}-\d{2})-(.+)$/);
+      entry.date = dateMatch?.[1] ?? entry.date;
+      entry.slug = dateMatch?.[2] ?? name;
+      entry.scope = 'global';
+      if (existsSync(join(globalDir, file))) continue;
+      mkdirSync(globalDir, { recursive: true });
+      writeFileSync(join(globalDir, file), formatSessionMemory(entry), 'utf-8');
+      unlinkSync(join(legacyDir, file));
+      migrated += 1;
+    } catch {
+      // Skip unreadable files.
+    }
+  }
+
+  if (listMemoryFiles(legacyDir).length === 0) {
+    for (const indexName of [MEMORY_INDEX, MEMORY_INDEX_JSON]) {
+      try {
+        unlinkSync(join(legacyDir, indexName));
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    try {
+      rmdirSync(legacyDir);
+    } catch {
+      // Not empty; leave it.
+    }
+  }
+
+  if (migrated > 0) rebuildIndexes(globalDir);
+  return migrated;
+}
+
+/** Recursively merge src into dest; existing files win, then src is removed. */
+function mergeMemoryDirs(src: string, dest: string, onMoved: (entry: string) => void): void {
+  if (!existsSync(dest)) {
+    mkdirSync(dest, { recursive: true });
+  }
+  for (const entry of readdirSync(src)) {
+    const srcPath = join(src, entry);
+    const destPath = join(dest, entry);
+    const st = statSync(srcPath);
+    if (st.isDirectory()) {
+      mergeMemoryDirs(srcPath, destPath, onMoved);
+    } else if (!existsSync(destPath)) {
+      try {
+        // Prefer rename (atomic + fast on the same volume), fall back to copy.
+        renameSync(srcPath, destPath);
+      } catch {
+        copyFileSync(srcPath, destPath);
+        unlinkSync(srcPath);
+      }
+      onMoved(entry);
+    }
+  }
+  try {
+    rmdirSync(src);
+  } catch {
+    // Directory not empty — some entries were skipped; leave it.
+  }
+}
+
+/**
+ * Migrate a project's memory directory from the legacy un-normalized path
+ * hash into the normalized hash layout, so the same project opened with
+ * different separator styles shares one directory. Idempotent; returns the
+ * number of memory files moved.
+ */
+export function migrateLegacyProjectMemories(appDataDir: string, workingDir: string): number {
+  const src = join(appDataDir, 'projects', legacyProjectHash(workingDir), 'memories');
+  const dst = join(appDataDir, 'projects', projectHash(workingDir), 'memories');
+  if (src === dst || !existsSync(src)) return 0;
+
+  let moved = 0;
+  mergeMemoryDirs(src, dst, () => {
+    moved += 1;
+  });
+  rebuildIndexes(dst);
+  return moved;
 }
 
 export function saveSessionSnapshot(workingDir: string, snapshot: SessionSnapshot): void {
@@ -721,13 +832,64 @@ function globalMemoryDir(): string {
   return join(homeDir, '.suncode', 'global', 'memories');
 }
 
+/**
+ * Normalize a working directory before hashing so the same project opened
+ * with different separator styles (Windows \\ vs /) resolves to a single
+ * memory directory instead of splitting memories across two hashes.
+ */
+function normalizeWorkingDir(workingDir: string): string {
+  return workingDir.replace(/\\/g, '/');
+}
+
+function projectHash(workingDir: string): string {
+  return createHash('sha256').update(normalizeWorkingDir(workingDir)).digest('hex').slice(0, 16);
+}
+
+function legacyProjectHash(workingDir: string): string {
+  return createHash('sha256').update(workingDir).digest('hex').slice(0, 16);
+}
+
 function projectMemoryDir(workingDir: string): string {
   const appDataDir = process.env.SUNCODE_APP_DATA;
   if (appDataDir) {
-    const hash = createHash('sha256').update(workingDir).digest('hex').slice(0, 16);
-    return join(appDataDir, 'projects', hash, 'memories');
+    return join(appDataDir, 'projects', projectHash(workingDir), 'memories');
   }
   return join(workingDir, MEMORIES_DIR);
+}
+
+/** Directory used by versions that hashed the working dir without normalizing separators. */
+function legacyProjectMemoryDir(workingDir: string): string {
+  const appDataDir = process.env.SUNCODE_APP_DATA;
+  if (!appDataDir) return projectMemoryDir(workingDir);
+  return join(appDataDir, 'projects', legacyProjectHash(workingDir), 'memories');
+}
+
+/** Project memory dirs in priority order: normalized first, legacy as fallback. */
+function projectMemoryDirs(workingDir: string): string[] {
+  const dirs = [projectMemoryDir(workingDir)];
+  const legacy = legacyProjectMemoryDir(workingDir);
+  if (legacy !== dirs[0]) dirs.push(legacy);
+  return dirs;
+}
+
+/**
+ * Load project-scoped memories from every known project memory location,
+ * de-duplicating by date-slug (the normalized location wins). The legacy
+ * location is only read as a fallback for data written before separator
+ * normalization; migrateLegacyProjectMemories folds it into the new one.
+ */
+function loadProjectMemoryEntries(workingDir: string): MemoryEntry[] {
+  const entries: MemoryEntry[] = [];
+  const seen = new Set<string>();
+  for (const memDir of projectMemoryDirs(workingDir)) {
+    for (const entry of loadScopedMemoryEntries(memDir, 'project')) {
+      const key = `${entry.date}-${entry.slug}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push(entry);
+    }
+  }
+  return entries;
 }
 
 function sessionSnapshotDir(workingDir: string, sessionId: string): string {

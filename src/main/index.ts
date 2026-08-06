@@ -7,7 +7,7 @@ import { APP_RUNTIME_IDENTITY, IS_DEV } from './app-identity';
 import { initAutoUpdater } from './auto-updater';
 import { registerIpcHandlers } from './ipc-handlers';
 import { getLogPath, logger } from './logger';
-import { migrateLegacyDataDir } from './paths';
+import { getAppDataDir, migrateLegacyDataDir } from './paths';
 import { recoverInterruptedSessions } from './recovery';
 import { applyWindowChrome, resolveWindowChromeColors } from './window-chrome';
 import { WindowManager } from './window-manager';
@@ -226,6 +226,25 @@ async function initApp(): Promise<void> {
 
   // Migrate legacy data from install directory to standard user data dir
   migrateLegacyDataDir();
+
+  // Memory IPC handlers run in the main process and must resolve the same
+  // app-data paths as the agent worker (which receives this env explicitly).
+  process.env.SUNCODE_APP_DATA ??= getAppDataDir();
+
+  // One-time migration of pre-scope-layout memories (appData/memories/*.md)
+  // into the global scope so they are visible in the settings panel again.
+  try {
+    const { migrateLegacyFlatMemories } = await import('../worker/agent/memory');
+    const migrated = migrateLegacyFlatMemories(getAppDataDir());
+    if (migrated > 0) {
+      logger.info(`[Memory] Migrated ${migrated} legacy flat memories to global scope`);
+    }
+  } catch (error) {
+    logger.error(
+      '[Memory] Legacy flat memory migration failed',
+      error instanceof Error ? error : String(error),
+    );
+  }
 
   // Create the window manager
   windowManager = new WindowManager();

@@ -1719,8 +1719,13 @@ export function registerIpcHandlers(wm: WindowManager): void {
   // ===== Memory Management =====
   ipcMain.handle('memory:get', async (_event, workingDir?: string, sessionId?: string) => {
     try {
-      const { getAllMemories } = await import('../worker/agent/memory');
+      const { getAllMemories, migrateLegacyProjectMemories } = await import(
+        '../worker/agent/memory'
+      );
       const dir = workingDir || process.cwd();
+      // One-time repair: fold project memories written under the legacy
+      // un-normalized path hash into the normalized location.
+      migrateLegacyProjectMemories(getAppDataDir(), dir);
       return getAllMemories(dir, sessionId);
     } catch (err) {
       console.error('[Main] memory:get failed:', (err as Error).message);
@@ -1732,7 +1737,8 @@ export function registerIpcHandlers(wm: WindowManager): void {
     'memory:save',
     async (_event, workingDir: string, memory: Record<string, unknown>, sessionId?: string) => {
       try {
-        const { saveMemory } = await import('../worker/agent/memory');
+        const { saveMemory, migrateLegacyProjectMemories } = await import('../worker/agent/memory');
+        migrateLegacyProjectMemories(getAppDataDir(), workingDir || process.cwd());
         const entry = memory as {
           date: string;
           slug: string;

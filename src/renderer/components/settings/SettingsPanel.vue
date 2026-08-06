@@ -67,9 +67,15 @@ const filteredMemories = computed(() => {
   });
 });
 
+/** Working directory of the active session; falls back to the app cwd. */
+async function currentWorkingDir(): Promise<string> {
+  const active = sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId);
+  return active?.workingDirectory || (await bridge.getWorkingDir());
+}
+
 async function loadMemories(): Promise<void> {
   try {
-    const workingDir = await bridge.getWorkingDir();
+    const workingDir = await currentWorkingDir();
     const result = await bridge.getMemories(workingDir, sessionsStore.activeSessionId ?? undefined);
     memories.value = result as MemoryEntry[];
   } catch (e) {
@@ -121,7 +127,7 @@ function handleCloseDetail(): void {
 async function handleDeleteMemory(): Promise<void> {
   if (!selectedMemory.value) return;
   try {
-    const workingDir = await bridge.getWorkingDir();
+    const workingDir = await currentWorkingDir();
     const sessionId =
       selectedMemory.value.scope === 'session'
         ? (sessionsStore.activeSessionId ?? undefined)
@@ -144,7 +150,7 @@ async function handleDeleteMemory(): Promise<void> {
 async function handleUpdateMemory(updates: Partial<MemoryEntry>): Promise<void> {
   if (!selectedMemory.value) return;
   try {
-    const workingDir = await bridge.getWorkingDir();
+    const workingDir = await currentWorkingDir();
     await bridge.updateMemory(
       workingDir,
       selectedMemory.value.date,

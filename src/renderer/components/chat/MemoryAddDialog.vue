@@ -3,6 +3,7 @@ import type { MemoryEntry } from '@shared/types';
 import { ref } from 'vue';
 import { bridge } from '../../api/bridge';
 import { useToast } from '../../composables/useToast';
+import { useSessionsStore } from '../../stores/sessions';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
 
@@ -21,6 +22,7 @@ const emit = defineEmits<{
 }>();
 
 const { showToast } = useToast();
+const sessionsStore = useSessionsStore();
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const kindLabels: Record<string, string> = {
@@ -51,7 +53,8 @@ async function handleSubmit(): Promise<void> {
 
   isAddingMemory.value = true;
   try {
-    const workingDir = await bridge.getWorkingDir();
+    const active = sessionsStore.sessions.find((s) => s.id === sessionsStore.activeSessionId);
+    const workingDir = active?.workingDirectory || (await bridge.getWorkingDir());
     const memory: MemoryEntry = {
       date: new Date().toISOString().slice(0, 10),
       slug: `manual-${Date.now()}`,
