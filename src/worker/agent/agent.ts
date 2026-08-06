@@ -993,6 +993,7 @@ export class Agent {
         userRequest: userRequest.slice(0, 200),
         toolsUsed,
         summary: '',
+        origin: 'auto',
         scope: 'session',
       };
 
@@ -1189,6 +1190,7 @@ export async function promoteExplicitDurableFacts(
         kind,
         importance: 4,
         tags: [kind, 'auto-promoted'],
+        origin: 'explicit',
         facts,
         supersedes: supersededSlugs.length > 0 ? supersededSlugs : undefined,
       },

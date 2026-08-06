@@ -1757,9 +1757,16 @@ export function registerIpcHandlers(wm: WindowManager): void {
           tags?: string[];
           expiresAt?: string;
           validFrom?: string;
+          origin?: 'auto' | 'explicit' | 'manual';
           pinned?: boolean;
         };
-        await saveMemory(workingDir, entry, undefined, undefined, sessionId);
+        await saveMemory(
+          workingDir,
+          { ...entry, origin: entry.origin ?? 'manual' },
+          undefined,
+          undefined,
+          sessionId,
+        );
       } catch (err) {
         console.error('[Main] memory:save failed:', (err as Error).message);
         throw err;

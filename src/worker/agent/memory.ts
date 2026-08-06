@@ -46,6 +46,7 @@ export type MemoryKind =
   | 'preference'
   | 'lesson'
   | 'ephemeral';
+export type MemoryOrigin = 'auto' | 'explicit' | 'manual';
 
 export interface StructuredFact {
   type: 'fact' | 'preference' | 'decision';
@@ -64,6 +65,7 @@ export interface MemoryEntry {
   summary: string;
   scope?: MemoryScope;
   kind?: MemoryKind;
+  origin?: MemoryOrigin;
   importance?: number;
   tags?: string[];
   accessCount?: number;
@@ -941,6 +943,7 @@ function formatSessionMemory(entry: MemoryEntry): string {
     `kind: ${entry.kind ?? 'task_summary'}`,
     `importance: ${entry.importance ?? 1}`,
     `accessCount: ${entry.accessCount ?? 0}`,
+    ...(entry.origin ? [`origin: ${entry.origin}`] : []),
     ...(entry.updatedAt ? [`updatedAt: ${entry.updatedAt}`] : []),
     ...(entry.expiresAt ? [`expiresAt: ${entry.expiresAt}`] : []),
     ...(entry.validFrom ? [`validFrom: ${entry.validFrom}`] : []),
@@ -1019,6 +1022,7 @@ function parseSessionMemory(content: string): MemoryEntry {
     summary: summarySection?.[2]?.trim() || '',
     scope: (frontmatter.scope as MemoryScope) || undefined,
     kind: (frontmatter.kind as MemoryKind) || undefined,
+    origin: (frontmatter.origin as MemoryOrigin) || undefined,
     importance: frontmatter.importance ? parseFloat(frontmatter.importance) : 1,
     accessCount: frontmatter.accessCount ? parseInt(frontmatter.accessCount, 10) : 0,
     updatedAt: frontmatter.updatedAt,

@@ -67,6 +67,19 @@ const scopeColors: Record<string, string> = {
   project: 'var(--color-teal)',
   session: 'var(--color-text-muted)',
 };
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const originLabels: Record<string, string> = {
+  auto: '自动',
+  explicit: '主动',
+  manual: '手动',
+};
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const originColors: Record<string, string> = {
+  auto: 'var(--color-text-muted)',
+  explicit: 'var(--color-orange)',
+  manual: 'var(--color-green)',
+};
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const formattedDate = computed(() => {
@@ -273,6 +286,16 @@ function formatFact(fact: StructuredFact): string {
               >
                 {{ scopeLabels[memory.scope] }}
               </span>
+              <span
+                v-if="memory.origin"
+                class="origin-badge"
+                :style="{
+                  borderColor: originColors[memory.origin],
+                  color: originColors[memory.origin],
+                }"
+              >
+                {{ originLabels[memory.origin] }}
+              </span>
             </div>
 
             <h2 id="memory-detail-title" class="memory-title">{{ memory.userRequest }}</h2>
@@ -439,6 +462,13 @@ function formatFact(fact: StructuredFact): string {
   font-weight: 650;
 }
 .scope-badge { border-color: var(--border-color); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+.origin-badge {
+  padding: 4px 9px;
+  border: 1px solid;
+  border-radius: var(--border-radius-pill);
+  font-size: 11px;
+  font-weight: 650;
+}
 .memory-title { margin: 0 0 22px; color: var(--color-text); font-size: 21px; font-weight: 700; line-height: 1.35; }
 .detail-section { margin-top: 20px; }
 .detail-section h3 { margin: 0 0 9px; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; letter-spacing: 0.04em; }

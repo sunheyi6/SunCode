@@ -51,6 +51,19 @@ const scopeColors: Record<string, string> = {
   project: 'var(--color-teal)',
   session: 'var(--color-text-muted)',
 };
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const originLabels: Record<string, string> = {
+  auto: '自动',
+  explicit: '主动',
+  manual: '手动',
+};
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const originColors: Record<string, string> = {
+  auto: 'var(--color-text-muted)',
+  explicit: 'var(--color-orange)',
+  manual: 'var(--color-green)',
+};
 </script>
 
 <template>
@@ -82,6 +95,16 @@ const scopeColors: Record<string, string> = {
       }"
     >
       {{ scopeLabels[memory.scope] }}
+    </span>
+    <span
+      v-if="memory.origin"
+      class="memory-origin"
+      :style="{
+        borderColor: originColors[memory.origin],
+        color: originColors[memory.origin],
+      }"
+    >
+      {{ originLabels[memory.origin] }}
     </span>
     <span class="memory-title">{{ memory.userRequest }}</span>
     <span class="memory-date">{{ memory.date }}</span>
@@ -137,6 +160,16 @@ const scopeColors: Record<string, string> = {
 }
 
 .memory-scope {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid;
+  border-radius: var(--border-radius-pill);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.memory-origin {
   flex: 0 0 auto;
   padding: 2px 7px;
   border: 1px solid;

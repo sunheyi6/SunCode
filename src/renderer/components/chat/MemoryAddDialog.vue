@@ -62,6 +62,7 @@ async function handleSubmit(): Promise<void> {
       toolsUsed: {},
       summary: newMemory.value.summary,
       kind: newMemory.value.kind,
+      origin: 'manual',
       scope: newMemory.value.scope,
       importance: newMemory.value.importance,
       tags: newMemory.value.tags

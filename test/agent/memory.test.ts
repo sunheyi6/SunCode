@@ -293,6 +293,61 @@ describe('memory storage', () => {
     expect(entry?.facts).toEqual(facts);
   });
 
+  it('round-trips the memory origin through storage', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      await saveMemory(
+        workingDir,
+        {
+          date: '2026-07-11',
+          slug: 'auto-entry',
+          scope: 'session',
+          userRequest: 'auto session memory',
+          toolsUsed: { read: 1 },
+          summary: 'auto saved summary',
+          origin: 'auto',
+        },
+        undefined,
+        undefined,
+        'session-1',
+      );
+      await saveMemory(workingDir, {
+        date: '2026-07-11',
+        slug: 'explicit-entry',
+        scope: 'global',
+        kind: 'preference',
+        userRequest: 'remember I like TypeScript',
+        toolsUsed: {},
+        summary: 'explicit durable preference',
+        origin: 'explicit',
+      });
+      await saveMemory(workingDir, {
+        date: '2026-07-11',
+        slug: 'manual-entry',
+        scope: 'project',
+        kind: 'decision',
+        userRequest: 'manually added decision',
+        toolsUsed: {},
+        summary: 'manual entry',
+        origin: 'manual',
+      });
+
+      const all = getAllMemories(workingDir, 'session-1');
+      expect(all.find((m) => m.slug === 'auto-entry')?.origin).toBe('auto');
+      expect(all.find((m) => m.slug === 'explicit-entry')?.origin).toBe('explicit');
+      expect(all.find((m) => m.slug === 'manual-entry')?.origin).toBe('manual');
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
   it('updates and deletes project memories without a session id', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');
 

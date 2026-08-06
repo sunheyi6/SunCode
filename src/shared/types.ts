@@ -1430,6 +1430,8 @@ export type MemoryKind =
   | 'preference'
   | 'lesson'
   | 'ephemeral';
+/** How a memory entry came into existence. */
+export type MemoryOrigin = 'auto' | 'explicit' | 'manual';
 
 export interface StructuredFact {
   type: 'fact' | 'preference' | 'decision';
@@ -1448,6 +1450,7 @@ export interface MemoryEntry {
   summary: string;
   scope?: MemoryScope;
   kind?: MemoryKind;
+  origin?: MemoryOrigin;
   importance?: number;
   tags?: string[];
   accessCount?: number;
