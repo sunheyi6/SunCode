@@ -786,6 +786,7 @@ export const useChatStore = defineStore('chat', () => {
           turnDetails: message.turnDetails,
           uiLanguage: message.uiLanguage ?? inferredUiLanguage,
           taskPlan,
+          memoryReferences: message.memoryReferences,
         };
       });
 
