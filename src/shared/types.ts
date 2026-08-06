@@ -59,6 +59,8 @@ export interface Message {
   turnDetails?: TurnDetail[];
   /** Structured task plan accumulated across turns (persisted for the plan panel). */
   taskPlan?: TaskPlan;
+  /** Memories referenced by this message (persisted for the reference UI). */
+  memoryReferences?: MemoryEntry[];
 }
 
 // ===== Tool Types =====
@@ -1080,6 +1082,8 @@ export interface SubagentResult {
   toolCalls: number;
   tokenUsage: { input: number; output: number; total: number };
   error?: string;
+  /** Absolute path of the archived full output, when the full text was persisted for on-demand reads. */
+  fullOutputPath?: string;
   /** Sub-agent's internal thinking stream (for display in SubagentCard). */
   thinking?: string;
   /** Sub-agent's internal tool calls with results (for display in SubagentCard). */

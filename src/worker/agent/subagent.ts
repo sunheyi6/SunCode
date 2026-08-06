@@ -27,6 +27,7 @@ import type {
 import { createModelRegistry } from '../models/registry';
 import { createToolRegistry } from '../tools/registry';
 import type { Tool } from '../tools/types';
+import { getAgentDataSubdir } from './agent-data-dir';
 import { type AgentLoopResult, runAgentLoop } from './agent-loop';
 import { estimateMessagesTokens } from './context-budget';
 import {
@@ -35,6 +36,7 @@ import {
   SUBAGENT_BUDGET,
 } from './subagent-budget';
 import { buildSystemPrompt } from './system-prompt';
+import { archiveToolResultBody } from './tool-result-archive';
 
 // ===== Types =====
 
@@ -201,6 +203,19 @@ export class SubagentDispatcher {
       this.opts.abortSignal.removeEventListener('abort', onParentAbort);
 
       const text = extractText(result.finalMessage);
+      // Archive the full output so only a summary enters the parent context;
+      // the model can read the archived file for details.
+      const archivedOutput = text
+        ? archiveToolResultBody(
+            getAgentDataSubdir(
+              this.opts.workingDir,
+              '.suncode/tool-result-archive',
+              this.opts.parentSessionId,
+            ),
+            executionId,
+            text,
+          )
+        : undefined;
       const extras = result as AgentLoopResult & {
         thinking?: string;
         internalCalls?: ToolCallContent[];
@@ -218,6 +233,7 @@ export class SubagentDispatcher {
         error: turnBudgetExhausted
           ? `子 Agent 已达到 ${resolveSubagentMaxTurns(def.maxTurns)} 轮预算`
           : undefined,
+        fullOutputPath: archivedOutput?.absolutePath,
       };
 
       this.opts.callbacks.onSubagentEnd(executionId, subResult);

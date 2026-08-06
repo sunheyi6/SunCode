@@ -10,6 +10,28 @@ import type { SubagentCall, ToolDefinition, ToolResult } from '@shared/types';
 import type { SubagentDispatcher } from '../agent/subagent';
 import type { Tool } from './types';
 
+/**
+ * Only a bounded summary of each sub-agent's output enters the parent context.
+ * The full text is archived by the dispatcher; the model reads it on demand.
+ */
+const SUBAGENT_OUTPUT_SUMMARY_CHARS = 600;
+const SUBAGENT_ERROR_SUMMARY_CHARS = 300;
+
+function summarizeSubagentText(
+  text: string,
+  maxChars: number,
+  fullOutputPath: string | undefined,
+): string {
+  if (text.length <= maxChars) {
+    return fullOutputPath ? `${text}\n(完整输出已保存到 ${fullOutputPath})` : text;
+  }
+  const kept = text.slice(0, maxChars);
+  const hint = fullOutputPath
+    ? `...(已截断，共 ${text.length} 字符。完整输出已保存到 ${fullOutputPath}，需要更多细节时用 read 工具读取该文件)`
+    : `...(已截断，共 ${text.length} 字符)`;
+  return `${kept}${hint}`;
+}
+
 export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
   const agentList = dispatcher.listAgents();
 
@@ -161,9 +183,9 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
           const header = `[${i + 1}: ${r.agent}${r.session ? ` session=${r.session}` : ''}]`;
           if (r.success) {
             const usage = `(tokens: ${r.tokenUsage.total}, 工具调用: ${r.toolCalls})`;
-            return `${header} 完成 ${usage}:\n${r.output}`;
+            return `${header} 完成 ${usage}:\n${summarizeSubagentText(r.output, SUBAGENT_OUTPUT_SUMMARY_CHARS, r.fullOutputPath)}`;
           }
-          return `${header} 失败:\n${r.error}`;
+          return `${header} 失败:\n${summarizeSubagentText(r.error ?? '', SUBAGENT_ERROR_SUMMARY_CHARS, r.fullOutputPath)}`;
         }),
       ].join('\n');
 
