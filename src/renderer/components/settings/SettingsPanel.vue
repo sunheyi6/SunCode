@@ -465,6 +465,14 @@ const STYLE_PRESETS: ReadonlyArray<StylePreset> = [
     lightBg: '#fffaef',
     lightAccent: '#ff4f8b',
   },
+  {
+    value: 'brutal',
+    label: 'Brutal',
+    bg: '#171715',
+    accent: '#f35b2a',
+    lightBg: '#f3f0e8',
+    lightAccent: '#f35b2a',
+  },
 ];
 
 /** Preview swatch colors follow the currently resolved light/dark mode. */

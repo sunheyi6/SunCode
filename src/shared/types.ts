@@ -251,7 +251,8 @@ export type AppearanceStyle =
   | 'notion'
   | 'stripe'
   | 'spotify'
-  | 'raft';
+  | 'raft'
+  | 'brutal';
 
 /** Application settings */
 export interface AppSettings {
