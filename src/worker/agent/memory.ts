@@ -23,6 +23,8 @@ const MEMSCENES_DIR = 'scenes';
 const MAX_FILES = 30;
 const MAX_SUMMARY_LENGTH = 500;
 const MAX_RETRIEVED_MEMORIES = 5;
+/** Coarse candidates handed to the semantic judge (kept above the final cap so the judge has room to swap). */
+const JUDGE_CANDIDATE_LIMIT = 8;
 /**
  * Sparse-cosine threshold for scene clustering. Calibrated for key-aligned
  * sparse cosine over CJK n-gram/ASCII-token features, where genuinely related
@@ -32,11 +34,19 @@ const MEMSCENE_SIMILARITY_THRESHOLD = 0.2;
 /**
  * Resident slots for pinned/global/preference memories. Their value does not
  * depend on keyword overlap with the query, so they bypass relevance scoring —
- * bounded so they cannot crowd out query-relevant memories.
+ * bounded so they cannot crowd out query-relevant memories. Pinned memories
+ * bypass scoring unconditionally; unpinned residents still pass a lightweight
+ * topic gate (passesResidentGate) before injecting.
  */
 const MAX_RESIDENT_MEMORIES = 2;
-/** Minimum relevance score threshold — memories scoring below this are excluded. */
-const MIN_RELEVANCE_SCORE = 1.0;
+/**
+ * Minimum relevance score threshold — memories scoring below this are excluded.
+ * 1.0 was too loose: a single shared common word (e.g. the question word
+ * "什么") can push an unrelated memory to ~1.7 and sneak it into every
+ * retrieval. 2.0 requires real topic overlap: one exact term hit (+2) or
+ * several character-level hits, while one accidental bigram stays out.
+ */
+const MIN_RELEVANCE_SCORE = 2.0;
 
 export type MemoryScope = 'session' | 'project' | 'global';
 export type MemoryKind =
@@ -117,12 +127,38 @@ export interface LoadMemoriesResult {
   entries: MemoryEntry[];
 }
 
+export interface RelevanceCandidate {
+  key: string;
+  userRequest: string;
+  summary: string;
+}
+
+/**
+ * Optional semantic relevance judge. Receives the query and the candidate
+ * memories selected by the heuristic pass, and returns the keys
+ * (`${date}-${slug}`) that are actually relevant to the query. Returning
+ * null means "cannot judge" and falls back to the heuristic result.
+ */
+export type RelevanceJudge = (
+  query: string,
+  candidates: RelevanceCandidate[],
+) => Promise<Set<string> | null>;
+
+export interface LoadMemoriesOptions {
+  relevanceJudge?: RelevanceJudge;
+}
+export interface LoadMemoriesResult {
+  content: string;
+  entries: MemoryEntry[];
+}
+
 export async function loadMemories(
   workingDir: string,
   query?: string,
   sessionId?: string,
+  options?: LoadMemoriesOptions,
 ): Promise<string> {
-  const result = await loadMemoriesWithEntries(workingDir, query, sessionId);
+  const result = await loadMemoriesWithEntries(workingDir, query, sessionId, options);
   return result.content;
 }
 
@@ -167,6 +203,7 @@ export async function loadMemoriesWithEntries(
   workingDir: string,
   query?: string,
   sessionId?: string,
+  options?: LoadMemoriesOptions,
 ): Promise<LoadMemoriesResult> {
   const entries = [
     ...loadScopedMemoryEntries(globalMemoryDir(), 'global'),
@@ -182,12 +219,21 @@ export async function loadMemoriesWithEntries(
     return { content: '', entries: [] };
   }
 
-  // Resident channel: pinned / global / preference memories are always injected
-  // (bounded by MAX_RESIDENT_MEMORIES) because their relevance does not depend on
-  // keyword overlap with the query — user preferences especially never match
-  // task-specific queries but should still shape every reply.
+  // Resident channel: pinned / global / preference memories are injected
+  // (bounded by MAX_RESIDENT_MEMORIES) because their value does not depend on
+  // keyword overlap with the query. Pinned memories are explicitly chosen by
+  // the user and always inject; unpinned global/preference memories pass a
+  // lightweight topic gate (same relevance threshold as retrieval) so unrelated
+  // preferences — e.g. casual food likes — no longer crowd every conversation.
+  const trimmedQuery = query?.trim();
+  const queryFeatures = trimmedQuery ? textFeatureMap(trimmedQuery) : undefined;
   const residents = entries
-    .filter((entry) => isResidentMemory(entry) && isCurrentlyValid(entry))
+    .filter(
+      (entry) =>
+        isResidentMemory(entry) &&
+        isCurrentlyValid(entry) &&
+        passesResidentGate(entry, trimmedQuery, queryFeatures),
+    )
     .sort(
       (a, b) =>
         (b.importance ?? 1) - (a.importance ?? 1) ||
@@ -201,7 +247,45 @@ export async function loadMemoriesWithEntries(
     ? await searchMemories(rest, query)
     : rest.slice(0, Math.min(rest.length, MAX_RETRIEVED_MEMORIES));
 
-  const selectedEntries = [...residents, ...retrieved].slice(0, MAX_RETRIEVED_MEMORIES);
+  // Semantic refinement: let the judge drop heuristically-selected memories
+  // that are actually unrelated (e.g. sharing only a common question word),
+  // and pick up relevant ones that were ranked just below the cutoff. Pinned
+  // memories are explicitly user-chosen and always survive. A null return
+  // (judge failure) falls back to the heuristic result.
+  let selectedEntries = [...residents, ...retrieved].slice(0, MAX_RETRIEVED_MEMORIES);
+  const judge = options?.relevanceJudge;
+  if (judge && trimmedQuery && [...residents, ...retrieved].length > 0) {
+    const coarse = [...residents, ...retrieved].slice(0, JUDGE_CANDIDATE_LIMIT);
+    const pinned = coarse.filter((entry) => entry.pinned);
+    const unpinned = coarse.filter((entry) => !entry.pinned);
+    if (unpinned.length > 0) {
+      try {
+        const relevant = await judge(
+          trimmedQuery,
+          unpinned.map((entry) => ({
+            key: `${entry.date}-${entry.slug}`,
+            userRequest: entry.userRequest.slice(0, 100),
+            summary: (entry.summary || '').slice(0, 150),
+          })),
+        );
+        if (relevant) {
+          const kept = new Set(relevant);
+          selectedEntries = [
+            ...pinned,
+            ...unpinned.filter((entry) => kept.has(`${entry.date}-${entry.slug}`)),
+          ].slice(0, MAX_RETRIEVED_MEMORIES);
+        }
+      } catch (e) {
+        // Judge failure — keep the heuristic result.
+        console.warn('Memory relevance judge failed:', e);
+      }
+    }
+  }
+
+  // Display/context hygiene: collapse entries that came from the exact same
+  // user request into one (facts merged), so one request never surfaces as
+  // several near-identical referenced memories.
+  selectedEntries = mergeSameSourceEntries(selectedEntries);
 
   recordMemoryAccess(workingDir, selectedEntries, sessionId);
 
@@ -212,6 +296,23 @@ export async function loadMemoriesWithEntries(
 /** Memories whose injection must not depend on query keyword overlap. */
 function isResidentMemory(entry: MemoryEntry): boolean {
   return Boolean(entry.pinned) || entry.scope === 'global' || entry.kind === 'preference';
+}
+
+/**
+ * Lightweight topic gate for unpinned resident memories (global/preference).
+ * Pinned memories are explicitly user-chosen and always inject; the rest only
+ * inject when the query actually overlaps their content (same relevance
+ * threshold as retrieval), so unrelated preferences — e.g. casual food likes —
+ * don't leak into every conversation. Without a query there is no topic to
+ * judge, so residents keep their previous behavior.
+ */
+function passesResidentGate(
+  entry: MemoryEntry,
+  query: string | undefined,
+  queryFeatures: Map<string, number> | undefined,
+): boolean {
+  if (entry.pinned || !query || !queryFeatures) return true;
+  return hybridScore(entry, query, queryFeatures) >= MIN_RELEVANCE_SCORE;
 }
 
 function isCurrentlyValid(entry: MemoryEntry, now = Date.now()): boolean {
@@ -629,6 +730,76 @@ export function mergeMemories(
     'utf-8',
   );
   rebuildIndexes(memDir);
+}
+
+/**
+ * Collapse entries that come from the exact same user request into one,
+ * merging facts/tags and keeping the strongest entry (highest importance,
+ * then most recently updated) as the shell. Pinned status and the primary
+ * entry's scope/kind/slug survive, so reference keys stay stable.
+ */
+function mergeSameSourceEntries(entries: MemoryEntry[]): MemoryEntry[] {
+  const bySource = new Map<string, MemoryEntry[]>();
+  const singles: MemoryEntry[] = [];
+  for (const entry of entries) {
+    const source = entry.userRequest.trim();
+    if (!source) {
+      singles.push(entry);
+      continue;
+    }
+    const group = bySource.get(source) ?? [];
+    group.push(entry);
+    bySource.set(source, group);
+  }
+
+  const merged: MemoryEntry[] = [...singles];
+  for (const group of bySource.values()) {
+    if (group.length > 1) {
+      merged.push(mergeEntryGroup(group));
+    } else {
+      const [single] = group;
+      if (single) merged.push(single);
+    }
+  }
+  return merged;
+}
+
+/** Kind priority when picking the merge shell: preferences are the most durable. */
+const MERGE_KIND_RANK: Record<string, number> = {
+  preference: 4,
+  decision: 3,
+  project_fact: 2,
+  task_summary: 1,
+};
+
+function mergeEntryGroup(group: MemoryEntry[]): MemoryEntry {
+  // Strongest entry becomes the shell: importance first, then kind rank
+  // (preferences are the most durable), then most recently updated.
+  const primary = group.reduce((best, entry) => {
+    const rank = (value: MemoryEntry) =>
+      (value.importance ?? 1) * 10 + (MERGE_KIND_RANK[value.kind ?? ''] ?? 0);
+    const bestRank = rank(best);
+    const entryRank = rank(entry);
+    if (entryRank > bestRank) return entry;
+    if (entryRank < bestRank) return best;
+    return (entry.updatedAt ?? '') > (best.updatedAt ?? '') ? entry : best;
+  });
+
+  const factKey = (fact: StructuredFact) =>
+    `${fact.type}|${fact.subject}|${fact.predicate}|${fact.object}`;
+  const facts = [
+    ...new Map(
+      group.flatMap((entry) => entry.facts ?? []).map((fact) => [factKey(fact), fact]),
+    ).values(),
+  ];
+
+  return {
+    ...primary,
+    facts: facts.length > 0 ? facts : primary.facts,
+    tags: [...new Set(group.flatMap((entry) => entry.tags ?? []))],
+    accessCount: group.reduce((sum, entry) => sum + (entry.accessCount ?? 0), 0),
+    summary: primary.summary || group.map((entry) => entry.summary).find(Boolean) || '',
+  };
 }
 
 function entryFeatures(entry: MemoryEntry): Map<string, number> {
@@ -1524,6 +1695,87 @@ const CJK_STOP_UNIGRAMS = new Set(
  * cosine similarity in search and scene clustering: features keep their
  * identity (the key), so similarity is only nonzero when features overlap.
  */
+/**
+ * Build a semantic relevance judge backed by the configured model. The judge
+ * returns null (falling back to heuristic retrieval) when the model is
+ * unavailable, the call fails, or the response cannot be parsed.
+ */
+export function createLLMRelevanceJudge(provider: string, modelId: string): RelevanceJudge {
+  return async (query, candidates) => {
+    try {
+      const pi = await import('@earendil-works/pi-ai');
+      const getModel = pi.getModel as unknown as (provider: string, modelId: string) => unknown;
+      const complete = pi.complete as unknown as (
+        model: unknown,
+        context: Record<string, unknown>,
+        options: Record<string, unknown>,
+      ) => Promise<{ content?: Array<{ type: string; text?: string }> } | undefined>;
+      const model = getModel(provider, modelId);
+      if (!model) {
+        console.warn('Model not available for memory relevance judging');
+        return null;
+      }
+
+      const prompt = `你是记忆相关性判断器。判断以下记忆条目中哪些与用户查询的主题相关。
+
+用户查询：${query}
+
+记忆条目：
+${candidates
+  .map(
+    (cand, i) => `${i + 1}. ${cand.userRequest}${cand.summary ? `（摘要：${cand.summary}）` : ''}`,
+  )
+  .join('\n')}
+
+只返回相关条目的编号 JSON 数组，例如 [1,3]。若都不相关返回 []。只输出 JSON，不要其他内容。`;
+
+      const structuredPrompt = buildStructuredTaskPrompt('memory_relevance', {
+        instruction: prompt,
+        query,
+        candidates: candidates.map((cand, i) => ({
+          index: i + 1,
+          userRequest: cand.userRequest,
+          summary: cand.summary,
+        })),
+      });
+
+      const context = {
+        systemPrompt: prompt,
+        messages: [{ role: 'user', content: structuredPrompt, timestamp: Date.now() }],
+      };
+
+      const result = await complete(model, context, {
+        maxTokens: 200,
+        temperature: 0,
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      const text = result?.content
+        ?.filter(
+          (content): content is { type: string; text: string } =>
+            content.type === 'text' && typeof content.text === 'string',
+        )
+        .map((content) => content.text)
+        .join('')
+        .trim();
+      if (!text) return null;
+
+      const match = text.match(/\[[\d\s,]*\]/);
+      if (!match) return null;
+      const indexes = JSON.parse(match[0]) as number[];
+      const keys = new Set<string>();
+      for (const index of indexes) {
+        const candidate = candidates[index - 1];
+        if (candidate) keys.add(candidate.key);
+      }
+      return keys;
+    } catch (e) {
+      console.warn('Memory relevance judge failed:', e);
+      return null;
+    }
+  };
+}
+
 function textFeatureMap(text: string): Map<string, number> {
   const normalized = text.toLowerCase();
   const features: string[] = [];

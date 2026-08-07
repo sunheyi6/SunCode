@@ -11,6 +11,7 @@ import {
   getMemScenes,
   isMemoryWorthSaving,
   loadMemories,
+  loadMemoriesWithEntries,
   migrateLegacyFlatMemories,
   migrateLegacyProjectMemories,
   loadSessionSnapshot,
@@ -19,6 +20,7 @@ import {
   saveSessionSnapshot,
   updateMemory,
   type MemoryEntry,
+  type RelevanceCandidate,
   type StructuredFact,
 } from '../../src/worker/agent/memory';
 import { promoteExplicitDurableFacts } from '../../src/worker/agent/agent';
@@ -514,6 +516,246 @@ describe('memory storage', () => {
     }
   });
 
+  it('only injects unpinned global preferences whose topic matches the query', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      // An unpinned global preference about food, unrelated to dev tasks — the
+      // exact pattern that used to crowd every conversation via the resident channel.
+      await saveMemory(workingDir, {
+        date: '2026-07-16',
+        slug: 'durable-preference-likes-pear',
+        scope: 'global',
+        kind: 'preference',
+        userRequest: '我说过我喜欢吃梨吧',
+        toolsUsed: {},
+        summary: '用户确认自己喜欢吃梨，系统记录该偏好信息。',
+        importance: 4,
+        tags: ['preference', 'auto-promoted'],
+        facts: [
+          {
+            type: 'preference',
+            subject: '用户',
+            predicate: '喜欢',
+            object: '梨',
+            validity: { start: '2026-07-11' },
+            confidence: 0.9,
+          },
+        ],
+      });
+
+      // Unrelated query: the global preference must NOT be injected anymore.
+      await expect(loadMemories(workingDir, '以后GitHub相关操作都使用GitHub cli gh 提交issue和PR', 'session-1'))
+        .resolves.not.toContain('梨');
+
+      // Related query: the preference is still injected as before.
+      await expect(loadMemories(workingDir, '我想吃梨', 'session-1')).resolves.toContain('梨');
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
+  it('does not inject memories that only share a common question word', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      // Unrelated global task summary that shares only the word "什么" with
+      // the query below — the pattern that used to leak in at ~1.7 relevance.
+      await saveMemory(workingDir, {
+        date: '2026-07-01',
+        slug: 'streaming-output-format',
+        scope: 'global',
+        kind: 'task_summary',
+        userRequest: '当前项目是流式输出的格式是什么',
+        toolsUsed: {},
+        summary: '(无)',
+      });
+
+      // The GitHub question shares only "什么": must NOT be injected.
+      await expect(loadMemories(workingDir, '和GitHub相关的记忆有什么呀', 'session-1'))
+        .resolves.not.toContain('流式输出');
+
+      // A genuinely related query still retrieves it.
+      await expect(loadMemories(workingDir, '流式输出的格式', 'session-1')).resolves.toContain('流式输出');
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
+  it('lets the relevance judge drop heuristically-retrieved unrelated memories', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+
+    await saveMemory(workingDir, {
+      date: '2026-07-13',
+      slug: 'vue-router',
+      scope: 'project',
+      kind: 'project_fact',
+      userRequest: '配置 Vue Router',
+      toolsUsed: {},
+      summary: '设置了 Vue Router 路由配置',
+    });
+    await saveMemory(workingDir, {
+      date: '2026-07-14',
+      slug: 'react-router',
+      scope: 'project',
+      kind: 'project_fact',
+      userRequest: '配置 React Router',
+      toolsUsed: {},
+      summary: '设置了 React Router 路由配置',
+    });
+
+    // Both memories clear the heuristic threshold; the judge keeps only Vue.
+    const judge = async (_query: string, candidates: RelevanceCandidate[]) =>
+      new Set(candidates.filter((cand) => cand.userRequest.includes('Vue')).map((cand) => cand.key));
+    const content = await loadMemories(workingDir, '配置路由', 'session-1', { relevanceJudge: judge });
+    expect(content).toContain('Vue Router');
+    expect(content).not.toContain('React Router');
+  });
+
+  it('keeps pinned memories even when the judge drops everything else', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+
+    await saveMemory(workingDir, {
+      date: '2026-07-12',
+      slug: 'pinned-note',
+      scope: 'global',
+      kind: 'project_fact',
+      userRequest: '置顶的全局事项',
+      toolsUsed: {},
+      summary: '置顶的全局事项',
+      pinned: true,
+    });
+    await saveMemory(workingDir, {
+      date: '2026-07-13',
+      slug: 'port-note',
+      scope: 'project',
+      kind: 'project_fact',
+      userRequest: '项目端口配置',
+      toolsUsed: {},
+      summary: '开发服务端口固定为 5173',
+    });
+
+    const judge = async () => new Set<string>();
+    const content = await loadMemories(workingDir, '端口 5173', 'session-1', { relevanceJudge: judge });
+    expect(content).toContain('置顶的全局事项');
+    expect(content).not.toContain('5173');
+  });
+
+  it('falls back to heuristic results when the judge cannot decide', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+
+    await saveMemory(workingDir, {
+      date: '2026-07-13',
+      slug: 'vue-router',
+      scope: 'project',
+      kind: 'project_fact',
+      userRequest: '配置 Vue Router',
+      toolsUsed: {},
+      summary: '设置了 Vue Router 路由配置',
+    });
+    await saveMemory(workingDir, {
+      date: '2026-07-14',
+      slug: 'react-router',
+      scope: 'project',
+      kind: 'project_fact',
+      userRequest: '配置 React Router',
+      toolsUsed: {},
+      summary: '设置了 React Router 路由配置',
+    });
+
+    // A judge that cannot decide (null) keeps the heuristic result untouched.
+    const judge = async () => null;
+    const content = await loadMemories(workingDir, '配置路由', 'session-1', { relevanceJudge: judge });
+    expect(content).toContain('Vue Router');
+    expect(content).toContain('React Router');
+  });
+
+  it('merges same-source memories when returning them for display', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      // Two entries promoted from the very same request (preference + decision),
+      // as written before the promote-merge change.
+      const source = '以后GitHub相关操作都使用GitHub cli gh 提交issue 提交pr 都是正文是英文 中文在底部折叠';
+      await saveMemory(workingDir, {
+        date: '2026-08-07',
+        slug: 'durable-preference',
+        scope: 'global',
+        kind: 'preference',
+        userRequest: source,
+        toolsUsed: {},
+        summary: '用户偏好正文英文、中文折叠。',
+        importance: 4,
+        facts: [
+          {
+            type: 'preference',
+            subject: '用户',
+            predicate: '偏好',
+            object: '正文使用英文，中文放在底部折叠',
+            validity: { start: '2026-08-07' },
+            confidence: 1,
+          },
+        ],
+      });
+      await saveMemory(workingDir, {
+        date: '2026-08-07',
+        slug: 'durable-decision',
+        scope: 'project',
+        kind: 'decision',
+        userRequest: source,
+        toolsUsed: {},
+        summary: '用户决定使用 gh CLI。',
+        importance: 4,
+        facts: [
+          {
+            type: 'decision',
+            subject: '用户',
+            predicate: '决定使用',
+            object: 'GitHub CLI (gh)',
+            validity: { start: '2026-08-07' },
+            confidence: 1,
+          },
+        ],
+      });
+
+      const judge = async (_query: string, candidates: RelevanceCandidate[]) =>
+        new Set(candidates.map((cand) => cand.key));
+      const result = await loadMemoriesWithEntries(workingDir, '和GitHub相关的记忆有什么呀', 'session-1', {
+        relevanceJudge: judge,
+      });
+
+      // Both entries collapse into one with facts merged.
+      expect(result.entries.length).toBe(1);
+      expect(result.entries[0]?.facts?.length).toBe(2);
+      expect(result.entries[0]?.kind).toBe('preference');
+      expect(result.content).toContain('GitHub CLI (gh)');
+      expect(result.content).toContain('中文放在底部折叠');
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
   it('bounds the resident channel so unpinned project memories still dominate', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');
     const appDataDir = createTempDir('suncode-memory-appdata-');
@@ -726,6 +968,77 @@ describe('memory storage', () => {
     expect(isMemoryWorthSaving('改一下样式', 2)).toBe(true);
     // Longer requests are worth recording even without tool calls.
     expect(isMemoryWorthSaving('帮我分析一下这个项目的记忆系统是怎么实现的', 0)).toBe(true);
+  });
+
+  it('promotes all durable facts of one request into a single memory', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+
+    await promoteExplicitDurableFacts(workingDir, 'session-1', '以后GitHub相关操作都使用GitHub cli gh，正文用英文', {
+      date: '2026-08-07',
+      slug: 'session-entry',
+      userRequest: '以后GitHub相关操作都使用GitHub cli gh，正文用英文',
+      toolsUsed: {},
+      summary: '会话摘要',
+      scope: 'session',
+      facts: [
+        {
+          type: 'preference',
+          subject: '用户',
+          predicate: '偏好',
+          object: '正文使用英文',
+          validity: { start: '2026-08-07' },
+          confidence: 1,
+        },
+        {
+          type: 'decision',
+          subject: '用户',
+          predicate: '决定使用',
+          object: 'GitHub CLI (gh)',
+          validity: { start: '2026-08-07' },
+          confidence: 1,
+        },
+      ],
+    }, 'provider', 'model');
+
+    const all = getAllMemories(workingDir, 'session-1');
+    const durable = all.filter((m) => m.slug.startsWith('durable-'));
+    // One request must produce exactly one durable memory, not one per type.
+    expect(durable.length).toBe(1);
+    expect(durable[0]?.scope).toBe('global');
+    expect(durable[0]?.kind).toBe('preference');
+    expect(durable[0]?.facts?.length).toBe(2);
+
+    // Re-running the same request stays idempotent (no duplicate).
+    await promoteExplicitDurableFacts(workingDir, 'session-1', '以后GitHub相关操作都使用GitHub cli gh，正文用英文', {
+      date: '2026-08-07',
+      slug: 'session-entry-2',
+      userRequest: '以后GitHub相关操作都使用GitHub cli gh，正文用英文',
+      toolsUsed: {},
+      summary: '会话摘要',
+      scope: 'session',
+      facts: [
+        {
+          type: 'preference',
+          subject: '用户',
+          predicate: '偏好',
+          object: '正文使用英文',
+          validity: { start: '2026-08-07' },
+          confidence: 1,
+        },
+        {
+          type: 'decision',
+          subject: '用户',
+          predicate: '决定使用',
+          object: 'GitHub CLI (gh)',
+          validity: { start: '2026-08-07' },
+          confidence: 1,
+        },
+      ],
+    }, 'provider', 'model');
+    const durableAfter = getAllMemories(workingDir, 'session-1').filter((m) =>
+      m.slug.startsWith('durable-'),
+    );
+    expect(durableAfter.length).toBe(1);
   });
 
   it('preserves co-stored facts when superseding only the contradicting one', async () => {

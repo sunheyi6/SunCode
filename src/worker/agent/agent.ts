@@ -31,6 +31,7 @@ import { parseInitCommand } from './init-handler';
 import { buildExtractionContexts, extractAndSaveLessons, loadRelevantLessons } from './lessons';
 import {
   buildSessionSnapshot,
+  createLLMRelevanceJudge,
   deleteMemory,
   flushMemoryAccessCounts,
   getAllMemories,
@@ -552,6 +553,12 @@ export class Agent {
       this.workingDir,
       recentUserText(this.messages),
       this.sessionId,
+      {
+        relevanceJudge: createLLMRelevanceJudge(
+          this.settings.activeProvider,
+          this.settings.activeModel,
+        ),
+      },
     );
     const memoryContent = memoryResult.content;
     const memoryEntries = memoryResult.entries;
@@ -762,7 +769,12 @@ export class Agent {
     );
     const skillsContent = await skillsLoader.loadAll();
     const agentsMdContent = await loadAgentsMd(this.workingDir);
-    const memoryContent = await loadMemories(this.workingDir, goalDef.description, this.sessionId);
+    const memoryContent = await loadMemories(this.workingDir, goalDef.description, this.sessionId, {
+      relevanceJudge: createLLMRelevanceJudge(
+        this.settings.activeProvider,
+        this.settings.activeModel,
+      ),
+    });
     const relevantLessonsContent = loadRelevantLessons(
       this.workingDir,
       goalDef.description,
@@ -1128,84 +1140,93 @@ export async function promoteExplicitDurableFacts(
   );
   if (durableFacts.length === 0) return;
 
-  const grouped = new Map<StructuredFact['type'], StructuredFact[]>();
-  for (const fact of durableFacts) {
-    const facts = grouped.get(fact.type) ?? [];
-    facts.push(fact);
-    grouped.set(fact.type, facts);
+  // One request produces ONE durable memory: facts of all types (preference /
+  // fact / decision) are stored together instead of fanning out into one entry
+  // per type, so e.g. "用 gh CLI 且正文用英文" doesn't become two near-identical
+  // memories. Preference facts keep the memory global; otherwise it lands in
+  // the project scope.
+  const hasPreference = durableFacts.some((fact) => fact.type === 'preference');
+  const scope = hasPreference ? 'global' : 'project';
+  const kind = hasPreference
+    ? 'preference'
+    : durableFacts.some((fact) => fact.type === 'decision')
+      ? 'decision'
+      : 'project_fact';
+
+  // Idempotency: if every fact is already stored somewhere (possibly spread
+  // across older entries from before the merge), skip — don't create a duplicate.
+  const existingAll = [
+    ...getAllMemories(workingDir, sessionId, 'global'),
+    ...getAllMemories(workingDir, sessionId, 'project'),
+  ];
+  const allFactsAlreadyStored = durableFacts.every((fact) =>
+    existingAll.some((entry) => (entry.facts ?? []).some((stored) => sameFact(stored, fact))),
+  );
+  if (allFactsAlreadyStored) return;
+
+  // A durable fact with the same type/subject/predicate but a different
+  // object contradicts the stored one (e.g. "项目 使用 Vue" → "项目 使用
+  // React"). Remove only the contradicting facts from the stored entry so
+  // retrieval never surfaces both sides of a contradiction; any co-stored
+  // facts that are still valid are preserved. The whole entry is deleted
+  // only once every fact in it has been superseded.
+  const supersededSlugs: string[] = [];
+  for (const entry of existingAll) {
+    const storedFacts = entry.facts ?? [];
+    if (storedFacts.length === 0) continue;
+    const kept = storedFacts.filter(
+      (stored) =>
+        !durableFacts.some((fact) => sameFactStem(stored, fact) && stored.object !== fact.object),
+    );
+    if (kept.length === storedFacts.length) continue;
+    if (kept.length === 0) {
+      supersededSlugs.push(entry.slug);
+    } else {
+      updateMemory(workingDir, entry.date, entry.slug, { facts: kept }, sessionId);
+    }
   }
 
-  for (const [factType, facts] of grouped) {
-    const scope = factType === 'preference' ? 'global' : 'project';
-    const existing = getAllMemories(workingDir, sessionId, scope);
-    const hasSameFacts = existing.some((entry) =>
-      facts.some((fact) => (entry.facts ?? []).some((stored) => sameFact(stored, fact))),
-    );
-    if (hasSameFacts) continue;
+  // Sort facts so the same set always produces the same slug (stable
+  // idempotent writes on repeated runs).
+  const stableFacts = [...durableFacts].sort((a, b) =>
+    `${a.type}|${a.subject}|${a.predicate}|${a.object}`.localeCompare(
+      `${b.type}|${b.subject}|${b.predicate}|${b.object}`,
+    ),
+  );
+  const stableSlug = `durable-${kind}-${stableFacts
+    .map((fact) => `${fact.subject}-${fact.predicate}-${fact.object}`)
+    .join('-')
+    .replace(/[^a-zA-Z0-9一-鿿]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 100)}`;
 
-    // A durable fact with the same type/subject/predicate but a different
-    // object contradicts the stored one (e.g. "项目 使用 Vue" → "项目 使用
-    // React"). Remove only the contradicting facts from the stored entry so
-    // retrieval never surfaces both sides of a contradiction; any co-stored
-    // facts that are still valid are preserved. The whole entry is deleted
-    // only once every fact in it has been superseded.
-    const supersededSlugs: string[] = [];
-    for (const entry of existing) {
-      const storedFacts = entry.facts ?? [];
-      if (storedFacts.length === 0) continue;
-      const kept = storedFacts.filter(
-        (stored) =>
-          !facts.some((fact) => sameFactStem(stored, fact) && stored.object !== fact.object),
-      );
-      if (kept.length === storedFacts.length) continue;
-      if (kept.length === 0) {
-        supersededSlugs.push(entry.slug);
-      } else {
-        updateMemory(workingDir, entry.date, entry.slug, { facts: kept }, sessionId);
-      }
-    }
+  await saveMemory(
+    workingDir,
+    {
+      date: new Date().toISOString().slice(0, 10),
+      slug: stableSlug || `durable-${kind}`,
+      userRequest: userRequest.slice(0, 200),
+      toolsUsed: {},
+      summary: sessionEntry.summary,
+      scope,
+      kind,
+      importance: 4,
+      tags: [kind, 'auto-promoted'],
+      origin: 'explicit',
+      facts: stableFacts,
+      supersedes: supersededSlugs.length > 0 ? supersededSlugs : undefined,
+    },
+    provider,
+    modelId,
+    sessionId,
+  );
 
-    const kind =
-      factType === 'preference'
-        ? 'preference'
-        : factType === 'decision'
-          ? 'decision'
-          : 'project_fact';
-    const stableSlug = `durable-${kind}-${facts
-      .map((fact) => `${fact.subject}-${fact.predicate}-${fact.object}`)
-      .join('-')
-      .replace(/[^a-zA-Z0-9一-鿿]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 100)}`;
-
-    await saveMemory(
-      workingDir,
-      {
-        date: new Date().toISOString().slice(0, 10),
-        slug: stableSlug || `durable-${kind}`,
-        userRequest: userRequest.slice(0, 200),
-        toolsUsed: {},
-        summary: sessionEntry.summary,
-        scope,
-        kind,
-        importance: 4,
-        tags: [kind, 'auto-promoted'],
-        origin: 'explicit',
-        facts,
-        supersedes: supersededSlugs.length > 0 ? supersededSlugs : undefined,
-      },
-      provider,
-      modelId,
-      sessionId,
-    );
-
-    for (const slug of supersededSlugs) {
-      try {
-        const match = existing.find((entry) => entry.slug === slug);
-        if (match) deleteMemory(workingDir, match.date, match.slug, sessionId);
-      } catch {
-        // Best-effort cleanup of fully-superseded memories.
-      }
+  for (const slug of supersededSlugs) {
+    try {
+      const match = existingAll.find((entry) => entry.slug === slug);
+      if (match) deleteMemory(workingDir, match.date, match.slug, sessionId);
+    } catch {
+      // Best-effort cleanup of fully-superseded memories.
     }
   }
 }
