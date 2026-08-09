@@ -25,6 +25,16 @@ const MAX_SUMMARY_LENGTH = 500;
 const MAX_RETRIEVED_MEMORIES = 5;
 /** Coarse candidates handed to the semantic judge (kept above the final cap so the judge has room to swap). */
 const JUDGE_CANDIDATE_LIMIT = 8;
+
+/**
+ * Near-miss recall floor for the semantic judge: memories scoring at or above
+ * this (but below MIN_RELEVANCE_SCORE) are still sent to the LLM judge, which
+ * can rescue genuinely relevant ones the keyword/embedding pass mis-ranked
+ * (e.g. a URL query whose only overlap with a tagged memory is a domain
+ * token). Low enough to catch weak URL/CJK overlaps (the GitHub-URL vs
+ * GitHub-CLI case scores ~0.3), high enough to keep unrelated noise out of the judge prompt.
+ */
+const JUDGE_RECALL_FLOOR = 0.3;
 /**
  * Sparse-cosine threshold for scene clustering. Calibrated for key-aligned
  * sparse cosine over CJK n-gram/ASCII-token features, where genuinely related
@@ -255,8 +265,22 @@ export async function loadMemoriesWithEntries(
   // failure) falls back to the heuristic result.
   let selectedEntries = [...residents, ...retrieved].slice(0, MAX_RETRIEVED_MEMORIES);
   const judge = options?.relevanceJudge;
-  if (judge && trimmedQuery && [...residents, ...retrieved].length > 0) {
-    const coarse = [...residents, ...retrieved].slice(0, JUDGE_CANDIDATE_LIMIT);
+  if (judge && trimmedQuery) {
+    // Candidate pool for the semantic judge: heuristic hits plus near-misses
+    // that scored below the relevance cutoff, so the judge can rescue memories
+    // the heuristic pass mis-ranked (e.g. a URL query sharing only a domain
+    // token with a tagged memory). The judge may still drop any of them.
+    const coarse = [...residents, ...retrieved];
+    if (coarse.length < JUDGE_CANDIDATE_LIMIT && queryFeatures) {
+      const nearMisses = rest
+        .map((entry) => ({ entry, score: hybridScore(entry, trimmedQuery, queryFeatures) }))
+        .filter((result) => result.score >= JUDGE_RECALL_FLOOR)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, JUDGE_CANDIDATE_LIMIT - coarse.length)
+        .map((result) => result.entry);
+      coarse.push(...nearMisses);
+      coarse.length = Math.min(coarse.length, JUDGE_CANDIDATE_LIMIT);
+    }
     if (coarse.length > 0) {
       try {
         const relevant = await judge(
@@ -1409,6 +1433,14 @@ function hybridScore(
     }
   }
 
+  // Reverse tag match: tags are semantic labels attached at save time, so a
+  // tag (or one of its alphanumeric tokens) surfacing inside the query is
+  // strong relevance evidence - e.g. tag github-cli matching the github
+  // token of a URL, which the whitespace-tokenized terms above would miss
+  // entirely.
+  if (tagHitsQuery(entry, query)) {
+    relevanceScore += 3;
+  }
   // Semantic similarity via sparse cosine over shared feature keys. Unlike the
   // positional number[] cosine (which compares unrelated dimensions and can
   // report high similarity for disjoint texts), this is 0 when query and entry
@@ -1435,6 +1467,31 @@ function hybridScore(
   }
 
   return score;
+}
+
+/**
+ * Reverse tag match: does any of the memory's tags surface inside the query?
+ * Whole tags of 3+ chars match as substrings (a URL containing github
+ * matches tag github); otherwise a tag's alphanumeric tokens must appear as
+ * query tokens (tag github-cli -> tokens github/cli; short tags like
+ * gh need an exact token). Tags are semantic labels, so a hit is treated as
+ * strong relevance evidence even when the query's own terms miss the memory
+ * text - the classic case is a GitHub URL query against a memory tagged
+ * github-cli whose text otherwise shares only a domain token.
+ */
+function tagHitsQuery(entry: MemoryEntry, query: string): boolean {
+  const normalizedQuery = query.toLowerCase();
+  const queryTokens: string[] = normalizedQuery.match(/[a-z][a-z0-9]*/g) ?? [];
+  for (const tag of entry.tags ?? []) {
+    const normalizedTag = tag.toLowerCase();
+    if (!normalizedTag) continue;
+    if (normalizedTag.length >= 3 && normalizedQuery.includes(normalizedTag)) return true;
+    if (queryTokens.includes(normalizedTag)) return true;
+    for (const token of normalizedTag.split(/[^a-z0-9]+/)) {
+      if (token.length >= 3 && queryTokens.includes(token)) return true;
+    }
+  }
+  return false;
 }
 
 function formatFacts(facts?: StructuredFact[]): string {

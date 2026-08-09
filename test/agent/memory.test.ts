@@ -516,6 +516,80 @@ describe('memory storage', () => {
     }
   });
 
+  it('injects a pinned global memory when its tags match a URL-shaped query', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      // Same GitHub-CLI decision memory as the unrelated-query test above, but
+      // queried with a bare PR URL: whitespace tokenization yields only the
+      // URL and a Chinese phrase, neither of which appears in the memory text.
+      // The tags (github-cli -> token github) must carry the match.
+      await saveMemory(workingDir, {
+        date: '2026-07-12',
+        slug: 'github-cli-available',
+        scope: 'global',
+        kind: 'decision',
+        userRequest: '关于使用GitHub CLI',
+        toolsUsed: {},
+        summary: '用户告知已安装 GitHub CLI（gh），以后所有与 GitHub 相关的操作统一使用 gh 执行。',
+        tags: ['gh', 'github-cli', 'tooling', 'decision'],
+        importance: 4,
+        pinned: true,
+      });
+
+      const content = await loadMemories(
+        workingDir,
+        'https://github.com/maka-agent/maka-agent/pull/2222 解决冲突',
+        'session-1',
+      );
+      expect(content).toContain('GitHub CLI');
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
+  it('lets the relevance judge rescue near-miss memories below the heuristic cutoff', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+
+    // A memory whose only overlap with the URL query is the shared `github`
+    // token: it scores below MIN_RELEVANCE_SCORE (so plain retrieval skips it)
+    // but above the recall floor, so the judge still gets to see it.
+    await saveMemory(workingDir, {
+      date: '2026-07-12',
+      slug: 'github-cli-untagged',
+      scope: 'project',
+      kind: 'decision',
+      userRequest: 'GitHub operations',
+      toolsUsed: {},
+      summary: 'Use the GitHub CLI (gh) for all GitHub operations.',
+    });
+
+    // Without a judge the near-miss stays below the cutoff and is not injected.
+    const plain = await loadMemories(
+      workingDir,
+      'https://github.com/maka-agent/maka-agent/pull/2222 解决冲突',
+      'session-1',
+    );
+    expect(plain).not.toContain('GitHub CLI');
+
+    // With a judge that deems it relevant, the near-miss is rescued.
+    const judge = async (_query: string, candidates: RelevanceCandidate[]) =>
+      new Set(candidates.map((cand) => cand.key));
+    const content = await loadMemories(
+      workingDir,
+      'https://github.com/maka-agent/maka-agent/pull/2222 解决冲突',
+      'session-1',
+      { relevanceJudge: judge },
+    );
+    expect(content).toContain('GitHub CLI');
+  });
   it('only injects unpinned global preferences whose topic matches the query', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');
     const appDataDir = createTempDir('suncode-memory-appdata-');
