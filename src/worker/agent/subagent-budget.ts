@@ -4,7 +4,7 @@ export const SUBAGENT_BUDGET = {
   maxTurns: 8,
   maxWallTimeMs: 60_000,
   maxInputTokens: 100_000,
-  maxToolCalls: 20,
+  maxToolCalls: 200,
 } as const;
 
 export function resolveSubagentMaxTurns(definitionMaxTurns?: number): number {

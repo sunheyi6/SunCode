@@ -100,4 +100,27 @@ describe('subagent tool result summary', () => {
     expect(res.output).toContain('A 的结论');
     expect(res.output).toContain('B 失败了');
   });
+
+  test('partial subagent reports completed progress and a take-over hint', async () => {
+    const tool = createSubagentTool(
+      makeDispatcher([
+        result({
+          status: 'partial',
+          success: false,
+          output: '',
+          toolCalls: 3,
+          partialProgress: '已完成 3 次工具调用（read×2、grep×1），涉及文件：a.ts',
+          error: '子 Agent 已超过 20 次工具调用预算',
+        }),
+      ]),
+    );
+    const res = await tool.execute({ agent: 'explore', prompt: '任务' });
+
+    // Partial counts as usable progress, not as a plain failure.
+    expect(res.success).toBe(true);
+    expect(res.output).toContain('1/1 子 Agent 成功完成');
+    expect(res.output).toContain('部分完成');
+    expect(res.output).toContain('a.ts');
+    expect(res.output).toContain('重新派发');
+  });
 });

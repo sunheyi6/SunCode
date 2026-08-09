@@ -174,13 +174,20 @@ export function createSubagentTool(dispatcher: SubagentDispatcher): Tool {
             `${r.agent}: ${r.success ? 'OK' : r.error} think=${r.thinking?.length ?? 0} calls=${r.internalCalls?.length ?? 0}`,
         ),
       );
-      const succeeded = results.filter((r) => r.success).length;
+      // 'partial' results carry usable progress (budget abort with completed
+      // tool calls) — count them as usable so the parent takes over instead of
+      // restarting from scratch, and surface the take-over hint in the output.
+      const succeeded = results.filter((r) => r.success || r.status === 'partial').length;
 
       const output = [
         `${succeeded}/${results.length} 子 Agent 成功完成`,
         '',
         ...results.map((r, i) => {
           const header = `[${i + 1}: ${r.agent}${r.session ? ` session=${r.session}` : ''}]`;
+          if (r.status === 'partial') {
+            const usage = `(tokens: ${r.tokenUsage.total}, 工具调用: ${r.toolCalls})`;
+            return `${header} 部分完成 ${usage}:\n${r.partialProgress ?? ''}\n⚠️ 子 Agent 未完成全部任务（${r.error ?? '被预算中止'}），请基于以上部分成果继续，或重新派发子 Agent 补齐。`;
+          }
           if (r.success) {
             const usage = `(tokens: ${r.tokenUsage.total}, 工具调用: ${r.toolCalls})`;
             return `${header} 完成 ${usage}:\n${summarizeSubagentText(r.output, SUBAGENT_OUTPUT_SUMMARY_CHARS, r.fullOutputPath)}`;

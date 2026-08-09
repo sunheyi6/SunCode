@@ -1074,15 +1074,23 @@ export interface SubagentCall {
   model?: string;
 }
 
+/** Completion state of a sub-agent run: budget aborts with usable progress are
+ *  'partial' (the parent must take over), not plain failures. */
+export type SubagentResultStatus = 'completed' | 'partial' | 'failed';
+
 /** Result from a sub-agent execution */
 export interface SubagentResult {
   agent: string;
   session?: string;
+  /** Completion state; defaults to success ? 'completed' : 'failed' when absent. */
+  status?: SubagentResultStatus;
   success: boolean;
   output: string;
   toolCalls: number;
   tokenUsage: { input: number; output: number; total: number };
   error?: string;
+  /** Summary of tool calls completed before an abort (present on 'partial'), so the parent can take over. */
+  partialProgress?: string;
   /** Absolute path of the archived full output, when the full text was persisted for on-demand reads. */
   fullOutputPath?: string;
   /** Sub-agent's internal thinking stream (for display in SubagentCard). */

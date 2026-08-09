@@ -193,12 +193,23 @@ export class SubagentDispatcher {
     };
 
     const timeout = setTimeout(
-      () => exceedBudget(`子 Agent 已达到 ${SUBAGENT_BUDGET.maxWallTimeMs / 1000} 秒时间预算`),
+      () => exceedBudget(`子 Agent 已超过 ${SUBAGENT_BUDGET.maxWallTimeMs / 1000} 秒时间预算`),
       SUBAGENT_BUDGET.maxWallTimeMs,
     );
 
+    // Tool calls completed so far; kept at dispatch level so an aborted run can
+    // report its partial progress to the parent instead of failing silently.
+    const subToolCalls: ToolCallContent[] = [];
+
     try {
-      const result = await this.runSubagent(def, call, executionId, subAbort.signal, exceedBudget);
+      const result = await this.runSubagent(
+        def,
+        call,
+        executionId,
+        subAbort.signal,
+        exceedBudget,
+        subToolCalls,
+      );
       clearTimeout(timeout);
       this.opts.abortSignal.removeEventListener('abort', onParentAbort);
 
@@ -221,17 +232,20 @@ export class SubagentDispatcher {
         internalCalls?: ToolCallContent[];
       };
       const turnBudgetExhausted = result.decision.reason === 'max_turns';
+      const partial = turnBudgetExhausted;
       const subResult: SubagentResult = {
         agent: call.agent,
         session: call.session,
-        success: !turnBudgetExhausted,
+        status: partial ? 'partial' : 'completed',
+        success: !partial,
         output: text,
         toolCalls: extras.internalCalls?.length ?? 0,
         tokenUsage: result.tokenUsage,
         thinking: extras.thinking,
         internalCalls: extras.internalCalls,
-        error: turnBudgetExhausted
-          ? `子 Agent 已达到 ${resolveSubagentMaxTurns(def.maxTurns)} 轮预算`
+        partialProgress: partial ? summarizeSubagentProgress(subToolCalls) : undefined,
+        error: partial
+          ? `子 Agent 已超过 ${resolveSubagentMaxTurns(def.maxTurns)} 轮预算`
           : undefined,
         fullOutputPath: archivedOutput?.absolutePath,
       };
@@ -243,13 +257,18 @@ export class SubagentDispatcher {
       this.opts.abortSignal.removeEventListener('abort', onParentAbort);
 
       const isAbort = (err as Error).name === 'AbortError';
+      // Budget aborts (and cancellations with completed tool work) carry usable
+      // partial progress; only true failures report 'failed'.
+      const partial = Boolean(budgetExceededReason) || (isAbort && subToolCalls.length > 0);
       const subResult: SubagentResult = {
         agent: call.agent,
         session: call.session,
+        status: partial ? 'partial' : 'failed',
         success: false,
         output: '',
-        toolCalls: 0,
+        toolCalls: subToolCalls.length,
         tokenUsage: { input: 0, output: 0, total: 0 },
+        partialProgress: partial ? summarizeSubagentProgress(subToolCalls) : undefined,
         error: budgetExceededReason ?? (isAbort ? '子 Agent 执行被取消' : (err as Error).message),
       };
 
@@ -264,6 +283,7 @@ export class SubagentDispatcher {
     executionId: string,
     signal: AbortSignal,
     exceedBudget: (reason: string) => void,
+    subToolCalls: ToolCallContent[],
   ) {
     // Build isolated messages
     const messages: Message[] = [];
@@ -340,7 +360,6 @@ export class SubagentDispatcher {
 
     // Track sub-agent internal state for display in SubagentCard
     let subThinking = '';
-    const subToolCalls: ToolCallContent[] = [];
 
     const result = await runAgentLoop({
       model,
@@ -378,8 +397,8 @@ export class SubagentDispatcher {
       },
       onToolStart: (toolCall: ToolCallContent) => {
         subToolCalls.push({ ...toolCall, status: 'running' });
-        if (subToolCalls.length >= SUBAGENT_BUDGET.maxToolCalls) {
-          exceedBudget(`子 Agent 已达到 ${SUBAGENT_BUDGET.maxToolCalls} 次工具调用预算`);
+        if (subToolCalls.length > SUBAGENT_BUDGET.maxToolCalls) {
+          exceedBudget(`子 Agent 已超过 ${SUBAGENT_BUDGET.maxToolCalls} 次工具调用预算`);
         }
         this.opts.callbacks.onSubagentProgress(executionId, call.agent, {
           type: 'tool_start',
@@ -408,7 +427,7 @@ export class SubagentDispatcher {
       },
       onTurnStart: (_turnCount, _maxTurns, tokens) => {
         if (tokens.input >= SUBAGENT_BUDGET.maxInputTokens) {
-          exceedBudget(`子 Agent 已达到 ${SUBAGENT_BUDGET.maxInputTokens} 输入 token 预算`);
+          exceedBudget(`子 Agent 已超过 ${SUBAGENT_BUDGET.maxInputTokens} 输入 token 预算`);
         }
       },
       initialTurnCount: 0,
@@ -467,4 +486,31 @@ function extractText(message: Message): string {
     .filter((b) => b.type === 'text')
     .map((b) => ('text' in b ? b.text : ''))
     .join('\n');
+}
+
+/** Summarize tool calls completed before an abort, so the parent can take over. */
+function summarizeSubagentProgress(subToolCalls: ToolCallContent[]): string {
+  const done = subToolCalls.filter((tc) => tc.status === 'done' || tc.status === 'error');
+  if (done.length === 0) return '';
+  const counts = new Map<string, number>();
+  const files: string[] = [];
+  for (const tc of done) {
+    counts.set(tc.name, (counts.get(tc.name) ?? 0) + 1);
+    const path = toolCallFileArg(tc.arguments);
+    if (path && !files.includes(path)) files.push(path);
+  }
+  const countsText = [...counts.entries()].map(([name, n]) => `${name}×${n}`).join('、');
+  const filesText = files.slice(0, 5).join('、');
+  return `已完成 ${done.length} 次工具调用（${countsText}）${filesText ? `，涉及文件：${filesText}` : ''}`;
+}
+
+/** Best-effort extraction of the file path / pattern from a tool call's JSON arguments. */
+function toolCallFileArg(argumentsJson: string): string | undefined {
+  try {
+    const parsed = JSON.parse(argumentsJson) as Record<string, unknown>;
+    const value = parsed.file_path ?? parsed.path ?? parsed.pattern;
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
