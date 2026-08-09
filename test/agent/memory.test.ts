@@ -477,7 +477,7 @@ describe('memory storage', () => {
     expect(reactScene?.entries).toContain('react-components');
   });
 
-  it('keeps pinned global memories resident even when the query is unrelated', async () => {
+  it('does not inject pinned global memories when the query is unrelated', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');
     const appDataDir = createTempDir('suncode-memory-appdata-');
     const previousAppData = process.env.SUNCODE_APP_DATA;
@@ -498,10 +498,10 @@ describe('memory storage', () => {
         pinned: true,
       });
 
-      // Pinned/global memories bypass relevance scoring through the bounded
-      // resident channel, so they are injected even for unrelated queries.
+      // Pinned/global memories must still pass the topic gate: an unrelated
+      // query must NOT inject them.
       await expect(loadMemories(workingDir, '帮我修一下这个 Vue 组件的样式 bug', 'session-1'))
-        .resolves.toContain('GitHub CLI');
+        .resolves.not.toContain('GitHub CLI');
 
       // Related query: the global memory should still be injected.
       await expect(loadMemories(workingDir, '用 gh 命令创建一个 GitHub PR', 'session-1')).resolves.toContain(
@@ -626,7 +626,7 @@ describe('memory storage', () => {
     expect(content).not.toContain('React Router');
   });
 
-  it('keeps pinned memories even when the judge drops everything else', async () => {
+  it('drops pinned memories the judge deems unrelated', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');
 
     await saveMemory(workingDir, {
@@ -636,7 +636,9 @@ describe('memory storage', () => {
       kind: 'project_fact',
       userRequest: '置顶的全局事项',
       toolsUsed: {},
-      summary: '置顶的全局事项',
+      // The summary overlaps the query (端口) so it passes the topic gate;
+      // only the judge can reject it — which is exactly what this test checks.
+      summary: '置顶的全局事项，端口配置相关',
       pinned: true,
     });
     await saveMemory(workingDir, {
@@ -651,7 +653,9 @@ describe('memory storage', () => {
 
     const judge = async () => new Set<string>();
     const content = await loadMemories(workingDir, '端口 5173', 'session-1', { relevanceJudge: judge });
-    expect(content).toContain('置顶的全局事项');
+    // The pinned memory cleared the heuristic gate but the judge rejects it,
+    // so it must NOT survive — pinned memories are judged like everything else.
+    expect(content).not.toContain('置顶的全局事项');
     expect(content).not.toContain('5173');
   });
 
@@ -771,7 +775,9 @@ describe('memory storage', () => {
           kind: 'project_fact',
           userRequest: `全局事项 ${i}`,
           toolsUsed: {},
-          summary: `全局 pinned 记忆 ${i}`,
+          // Only the two highest-importance pinned memories overlap the query
+          // (端口); the other two must fail the topic gate and stay out.
+          summary: i < 2 ? `全局 pinned 记忆 ${i}，端口相关` : `全局 pinned 记忆 ${i}`,
           importance: i + 1,
           pinned: true,
         });

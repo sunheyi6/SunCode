@@ -32,9 +32,9 @@ const JUDGE_CANDIDATE_LIMIT = 8;
  */
 const MEMSCENE_SIMILARITY_THRESHOLD = 0.2;
 /**
- * Resident slots for pinned/global/preference memories. Their value does not
- * depend on keyword overlap with the query, so they bypass relevance scoring —
- * bounded so they cannot crowd out query-relevant memories. Pinned memories
+ * Resident slots for pinned/global/preference memories: they get injection
+ * priority but still must pass the same topic relevance gate as retrieval, so
+ * unrelated residents cannot crowd out query-relevant memories. Pinned memories
  * bypass scoring unconditionally; unpinned residents still pass a lightweight
  * topic gate (passesResidentGate) before injecting.
  */
@@ -219,12 +219,12 @@ export async function loadMemoriesWithEntries(
     return { content: '', entries: [] };
   }
 
-  // Resident channel: pinned / global / preference memories are injected
-  // (bounded by MAX_RESIDENT_MEMORIES) because their value does not depend on
-  // keyword overlap with the query. Pinned memories are explicitly chosen by
-  // the user and always inject; unpinned global/preference memories pass a
-  // lightweight topic gate (same relevance threshold as retrieval) so unrelated
-  // preferences — e.g. casual food likes — no longer crowd every conversation.
+  // Resident channel: pinned / global / preference memories get priority as
+  // injection candidates (bounded by MAX_RESIDENT_MEMORIES) because their
+  // value does not depend on keyword overlap with the query. Every candidate
+  // — pinned included — must still pass the same topic relevance gate, so
+  // unrelated memories (e.g. a pinned GitHub-CLI preference during a test
+  // review) never crowd a conversation.
   const trimmedQuery = query?.trim();
   const queryFeatures = trimmedQuery ? textFeatureMap(trimmedQuery) : undefined;
   const residents = entries
@@ -250,19 +250,18 @@ export async function loadMemoriesWithEntries(
   // Semantic refinement: let the judge drop heuristically-selected memories
   // that are actually unrelated (e.g. sharing only a common question word),
   // and pick up relevant ones that were ranked just below the cutoff. Pinned
-  // memories are explicitly user-chosen and always survive. A null return
-  // (judge failure) falls back to the heuristic result.
+  // memories are judged on the same topic relevance as everything else — a
+  // pinned memory the judge deems unrelated is dropped. A null return (judge
+  // failure) falls back to the heuristic result.
   let selectedEntries = [...residents, ...retrieved].slice(0, MAX_RETRIEVED_MEMORIES);
   const judge = options?.relevanceJudge;
   if (judge && trimmedQuery && [...residents, ...retrieved].length > 0) {
     const coarse = [...residents, ...retrieved].slice(0, JUDGE_CANDIDATE_LIMIT);
-    const pinned = coarse.filter((entry) => entry.pinned);
-    const unpinned = coarse.filter((entry) => !entry.pinned);
-    if (unpinned.length > 0) {
+    if (coarse.length > 0) {
       try {
         const relevant = await judge(
           trimmedQuery,
-          unpinned.map((entry) => ({
+          coarse.map((entry) => ({
             key: `${entry.date}-${entry.slug}`,
             userRequest: entry.userRequest.slice(0, 100),
             summary: (entry.summary || '').slice(0, 150),
@@ -270,10 +269,9 @@ export async function loadMemoriesWithEntries(
         );
         if (relevant) {
           const kept = new Set(relevant);
-          selectedEntries = [
-            ...pinned,
-            ...unpinned.filter((entry) => kept.has(`${entry.date}-${entry.slug}`)),
-          ].slice(0, MAX_RETRIEVED_MEMORIES);
+          selectedEntries = coarse
+            .filter((entry) => kept.has(`${entry.date}-${entry.slug}`))
+            .slice(0, MAX_RETRIEVED_MEMORIES);
         }
       } catch (e) {
         // Judge failure — keep the heuristic result.
@@ -293,25 +291,27 @@ export async function loadMemoriesWithEntries(
   return { content: content.slice(0, 4000), entries: selectedEntries };
 }
 
-/** Memories whose injection must not depend on query keyword overlap. */
+/**
+ * Resident candidates: pinned / global / preference memories are considered
+ * for injection ahead of plain retrieval, but still must pass the topic gate.
+ */
 function isResidentMemory(entry: MemoryEntry): boolean {
   return Boolean(entry.pinned) || entry.scope === 'global' || entry.kind === 'preference';
 }
 
 /**
- * Lightweight topic gate for unpinned resident memories (global/preference).
- * Pinned memories are explicitly user-chosen and always inject; the rest only
- * inject when the query actually overlaps their content (same relevance
- * threshold as retrieval), so unrelated preferences — e.g. casual food likes —
- * don't leak into every conversation. Without a query there is no topic to
- * judge, so residents keep their previous behavior.
+ * Lightweight topic gate for all resident memories (pinned / global /
+ * preference): every candidate — pinned included — only injects when the query actually
+ * overlaps its content (same relevance threshold as retrieval), so unrelated
+ * memories don't leak into every conversation. Without a query there is no
+ * topic to judge, so residents keep their previous behavior.
  */
 function passesResidentGate(
   entry: MemoryEntry,
   query: string | undefined,
   queryFeatures: Map<string, number> | undefined,
 ): boolean {
-  if (entry.pinned || !query || !queryFeatures) return true;
+  if (!query || !queryFeatures) return true;
   return hybridScore(entry, query, queryFeatures) >= MIN_RELEVANCE_SCORE;
 }
 
