@@ -135,6 +135,51 @@ const thinkingSummary = computed(() => {
   return parts.join('  ');
 });
 
+// -- response meta (model / thinking effort / duration) --
+function estimateThinkingTokens(text: string): number {
+  if (!text) return 0;
+  const cjkChars = (text.match(/[\u3000-\u9fff\uff00-\uffef]/g) ?? []).length;
+  const otherChars = text.length - cjkChars;
+  return Math.ceil(cjkChars + otherChars / 4);
+}
+
+function formatMetaTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function formatMetaDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const responseMeta = computed(() => {
+  const turns = props.message.turnDetails ?? [];
+  let modelLabel = '';
+  for (const turn of turns) {
+    if (turn.model) {
+      modelLabel =
+        turn.provider && turn.provider !== turn.model
+          ? `${turn.provider}/${turn.model}`
+          : turn.model;
+    }
+  }
+  const thinkingText =
+    turns.map((turn) => turn.response.thinking ?? '').join('') || props.message.thinking || '';
+  const thinkingTokens = estimateThinkingTokens(thinkingText);
+  const durationMs = turns.reduce((sum, turn) => sum + (turn.response.durationMs ?? 0), 0);
+
+  const parts: string[] = [];
+  if (modelLabel) parts.push(modelLabel);
+  if (thinkingTokens > 0) {
+    const label = uiLanguage.value === 'en' ? 'thinking' : '思考';
+    parts.push(`${label} ${formatMetaTokens(thinkingTokens)} tokens`);
+  }
+  if (durationMs > 0) parts.push(formatMetaDuration(durationMs));
+  return parts.join(' · ');
+});
+
 async function copyContent() {
   try {
     await navigator.clipboard.writeText(fullTextForCopy.value);
@@ -228,6 +273,7 @@ async function copyContent() {
     </div>
     <div v-if="!message.isStreaming" class="message-footer">
       <span class="message-time">{{ timeLabel }}</span>
+      <span v-if="responseMeta" class="message-meta">{{ responseMeta }}</span>
       <button class="copy-btn" :class="{ copied }" title="复制回复" @click="copyContent">
         {{ copied ? '已复制' : '复制' }}
       </button>
@@ -353,6 +399,12 @@ details[open] > .thinking-summary-done::before {
 /* -- footer -- */
 .message-footer { display: flex; align-items: center; gap: 4px; margin-top: 2px; padding-left: 4px; }
 .message-time { font-size: 11px; color: var(--color-text-muted); }
+
+.message-meta {
+  font-size: 11px; color: var(--color-text-muted); opacity: 0.85;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 320px;
+}
 
 .copy-btn {
   padding: 1px 4px; background: none; border: none; cursor: pointer;

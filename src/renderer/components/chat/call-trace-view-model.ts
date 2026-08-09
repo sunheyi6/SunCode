@@ -172,9 +172,8 @@ function buildTurnEntry(
   turnCount: number,
 ): CallTraceTurnEntry {
   const executedToolCalls = matchExecutedToolCalls(turn.response.toolCalls, msg.toolCalls ?? []);
-  const raw = turn as unknown as Record<string, unknown>;
-  const provider = typeof raw.provider === 'string' ? raw.provider : '';
-  const model = typeof raw.model === 'string' ? raw.model : '';
+  const provider = turn.provider ?? '';
+  const model = turn.model ?? '';
   const toolCount = executedToolCalls.length;
   const failedToolCount = executedToolCalls.filter(
     (toolCall) => toolCall.status === 'error' || toolCall.result?.success === false,

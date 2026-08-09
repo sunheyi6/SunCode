@@ -726,6 +726,10 @@ export interface TurnDetail {
     totalTokens?: number;
     durationMs?: number;
   };
+  /** Provider used for this turn's model request (e.g. 'openai'). */
+  provider?: string;
+  /** Model used for this turn's model request (e.g. 'gpt-5.1-codex'). */
+  model?: string;
 }
 
 /** Unique identifier for an agent run. */

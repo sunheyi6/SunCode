@@ -70,6 +70,8 @@ export function projectSessionRuntime(events: RuntimeEvent[]): SessionRuntimePro
           const state = runState(runs, runId);
           const detail: TurnDetail = {
             turnNumber: event.fact.stepIndex,
+            provider: event.fact.provider,
+            model: event.fact.model,
             systemTokens: event.fact.systemTokens,
             requestMessages: event.fact.requestMessages,
             response: {

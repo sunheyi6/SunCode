@@ -658,6 +658,8 @@ export const useChatStore = defineStore('chat', () => {
   ): TurnDetail {
     return {
       turnNumber: event.turnNumber,
+      provider: event.provider,
+      model: event.model,
       systemTokens: event.systemTokens ?? 0,
       requestMessages: event.requestMessages ?? [],
       response: {
