@@ -8,6 +8,7 @@
 | [系统提示词设计](system-prompt-design.md) | System Prompt 构建：角色定义、Tool Discipline 反循环规则、一行式工具摘要、XML 结构化上下文、Token 优化 |
 | [工具调用设计](tool-calling-design.md) | 工具架构：回合事件 (turn_start/end)、参数验证、前端工具卡片 (Command/File/Inspect)、数据流 |
 | [上下文压缩设计](context-compaction-design.md) | 容量保护 pipeline + 缓存友好的主动语义 projection：A/B/C 请求结构、失败保护、配置与 Terminal-Bench 验证 |
+| [工具结果裁剪设计](tool-result-prune-design.md) | 工具裁剪（无损层）：Archive-before-omit 归档、占位符协议、step 级处理时机、设计演进记录 |
 | [任务规划系统](task-planning-system.md) | 强制执行规划：三道防线、Plan Gate、Plan Parser、右侧面板统一、断路器机制 |
 | [任务结束判断机制](task-completion-mechanism.md) | `needs_follow_up` 决策、Goal 自主循环、Stop Hooks、双字段输出模型 |
 | [运行事件日志](run-event-logging-design.md) | JSONL 持久化：run_started/run_completed/model_request/turn_detail、CallTracePanel 回溯、Token 用量统计 |

@@ -176,8 +176,8 @@ export async function withRecovery<T>(
 
 /**
  * Perform emergency compression — a more aggressive compact triggered
- * when context overflow is detected. Uses snip + collapse + compact
- * sequentially without the normal threshold checks.
+ * when context overflow is detected. Keeps system messages plus the last
+ * two user-assistant turns and truncates everything older.
  */
 export function emergencyCompact(
   messages: import('@shared/types').Message[],

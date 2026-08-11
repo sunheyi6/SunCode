@@ -933,12 +933,9 @@ export type RunEvent =
       type: 'context_budget_applied';
       runId: RunId;
       turnNumber: number;
-      activePrunedToolResults?: number;
-      activeEstimatedTokensSaved?: number;
-      activeArchiveFailures?: number;
       prunedToolResults?: number;
-      prunedTokensSaved?: number;
-      staleArchiveFailures?: number;
+      estimatedTokensSaved?: number;
+      archiveFailures?: number;
       beforeTokens: number;
       afterTokens: number;
       timestamp: string;
@@ -1214,9 +1211,8 @@ export interface TurnEvidenceEnvelope {
 // ===== Context Budget Types =====
 
 export type ToolResultPruneReason =
-  | 'active_current_turn_tool_result_pruned_before_next_step'
-  | 'stale_tool_result_pruned'
-  /** @deprecated Prefer stale_tool_result_pruned; kept for older placeholders. */
+  | 'tool_result_pruned'
+  /** @deprecated Prefer tool_result_pruned; kept for older placeholders. */
   | 'pruned_exceeds_budget';
 
 /**
@@ -1266,24 +1262,11 @@ export interface ContextBudgetOptions {
   runId?: string;
 }
 
-/** Policy for pruning large tool results in the current (most recent) turn before the next step. */
-export interface ActiveToolResultPrunePolicy {
-  enabled: boolean;
-  /** Tool results above this estimated token count are eligible. Default 2048. */
-  maxResultTokens?: number;
-  /**
-   * Only apply when agent turnCount >= this (1-based). Default 1 = from first tool step.
-   */
-  minTurnNumber?: number;
-}
-
-/** Policy for pruning stale tool results from conversation context. */
-export interface StaleToolResultPrunePolicy {
+/** Policy for pruning oversized tool results from conversation context. */
+export interface ToolResultPrunePolicy {
   enabled: boolean;
   /** Tool results above this estimated token count are replaced with placeholders. Default 2048. */
   maxResultTokens?: number;
-  /** Keep this many newest turns' tool results intact (stale path only). Default 1. */
-  minRecentTurnsFull?: number;
 }
 
 /** Policy for history compaction (turn-level summarization). */
@@ -1293,24 +1276,6 @@ export interface HistoryCompactPolicy {
   highWaterRatio?: number;
   /** Turns to keep intact after compaction. Default 3. */
   keepRecentTurns?: number;
-}
-
-/** Policy for snipping unreferenced tool results (zero-cost compression). */
-export interface SnipPolicy {
-  enabled: boolean;
-  /** Tool result text longer than this (chars) is eligible for snipping. Default 500. */
-  minResultChars?: number;
-  /** Tool results older than this many turns are eligible for snipping. Default 3. */
-  maxAgeTurns?: number;
-}
-
-/** Policy for context collapse (read-time projection, reversible). */
-export interface ContextCollapsePolicy {
-  enabled: boolean;
-  /** Trigger collapse when estimated tokens exceed this ratio of context window. Default 0.7. */
-  collapseThreshold?: number;
-  /** Maximum tokens to collapse into a single summary group. Default 4096. */
-  maxGroupTokens?: number;
 }
 
 /** Top-level context budget policy. */
@@ -1323,18 +1288,11 @@ export interface ContextBudgetPolicy {
   minRecentTurns?: number;
   /** Token estimation ratio. Default 4 chars/token. */
   charsPerToken?: number;
-  /** Same-turn (most recent iteration) large tool-result prune before next model step. */
-  activeToolResultPrune?: ActiveToolResultPrunePolicy;
-  /** Stale tool result pruning configuration. */
-  staleToolResultPrune?: StaleToolResultPrunePolicy;
+  /** Archive-backed rewrite of oversized tool results before the next model step. */
+  toolResultPrune?: ToolResultPrunePolicy;
   /** History compaction configuration. */
   historyCompact?: HistoryCompactPolicy;
-  /** Unreferenced tool result snipping (zero-cost). */
-  snip?: SnipPolicy;
-  /** Context collapse (read-time projection). */
-  contextCollapse?: ContextCollapsePolicy;
 }
-
 /** Diagnostic info emitted after context budget is applied. */
 export interface ContextBudgetDiagnostic {
   changed: boolean;
@@ -1342,18 +1300,10 @@ export interface ContextBudgetDiagnostic {
   afterTokens: number;
   beforeMessages: number;
   afterMessages: number;
-  /** Active (current-turn) prune successes. */
-  activePrunedToolResults?: number;
-  activeEstimatedTokensSaved?: number;
-  activeArchiveFailures?: number;
-  /** Stale prune successes (legacy field name kept for logs/tests). */
+  /** Archive-backed tool-result prune successes. */
   prunedToolResults?: number;
-  prunedTokensSaved?: number;
-  staleArchiveFailures?: number;
-  snippedResults?: number;
-  snippedTokensSaved?: number;
-  collapsedGroups?: number;
-  collapsedTokensSaved?: number;
+  estimatedTokensSaved?: number;
+  archiveFailures?: number;
   droppedTurns?: number;
   compactedTurns?: number;
 }

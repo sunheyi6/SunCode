@@ -224,7 +224,7 @@ describe('collectArchiveLinksFromMessages', () => {
       originalTokens: 5000,
       originalBytes: 20000,
       originalChars: 20000,
-      reason: 'active_current_turn_tool_result_pruned_before_next_step',
+      reason: 'tool_result_pruned',
       rewriteVersion: 1,
     });
     const msgs: Message[] = [{ role: 'tool', content: placeholder, toolCallId: 'tc_x' }];

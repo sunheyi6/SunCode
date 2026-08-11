@@ -166,9 +166,6 @@ export const DEFAULT_MAX_LESSONS = 200;
 /** Default max estimated tokens for a single tool result before pruning. */
 export const DEFAULT_MAX_TOOL_RESULT_TOKENS = 2048;
 
-/** Default number of recent turns whose tool results are kept intact. */
-export const DEFAULT_MIN_RECENT_TURNS_FULL = 1;
-
 /** Default minimum recent turns to always retain. */
 export const DEFAULT_MIN_RECENT_TURNS = 2;
 
@@ -180,30 +177,14 @@ export const DEFAULT_KEEP_RECENT_TURNS = 3;
 
 /** Default context budget policy (used when autoCompact is enabled). */
 export const DEFAULT_CONTEXT_BUDGET_POLICY = {
-  activeToolResultPrune: {
+  toolResultPrune: {
     enabled: true,
     maxResultTokens: DEFAULT_MAX_TOOL_RESULT_TOKENS,
-    minTurnNumber: 1,
-  },
-  staleToolResultPrune: {
-    enabled: true,
-    maxResultTokens: DEFAULT_MAX_TOOL_RESULT_TOKENS,
-    minRecentTurnsFull: DEFAULT_MIN_RECENT_TURNS_FULL,
   },
   historyCompact: {
     enabled: true,
     highWaterRatio: DEFAULT_HIGH_WATER_RATIO,
     keepRecentTurns: DEFAULT_KEEP_RECENT_TURNS,
-  },
-  snip: {
-    enabled: true,
-    minResultChars: 500,
-    maxAgeTurns: 3,
-  },
-  contextCollapse: {
-    enabled: true,
-    collapseThreshold: 0.7,
-    maxGroupTokens: 4096,
   },
   minRecentTurns: DEFAULT_MIN_RECENT_TURNS,
   charsPerToken: CHARS_PER_TOKEN,

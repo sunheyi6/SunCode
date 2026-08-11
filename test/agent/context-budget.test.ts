@@ -2,10 +2,9 @@
  * Context Budget — comprehensive test suite.
  *
  * Tests the multi-layer context budget pipeline:
- *   0.5 Active tool result pruning (archive-before-omit)
- *   1. Stale tool result pruning (archive-before-omit)
- *   2. Token budget turn cap
- *   3. History compaction (high-water trigger)
+ *   0. Tool result pruning (archive-before-omit)
+ *   1. Token budget turn cap
+ *   2. History compaction (high-water trigger)
  */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,8 +14,7 @@ import type { Message, ContextBudgetPolicy } from '@shared/types';
 import { CHARS_PER_TOKEN } from '@shared/constants';
 import {
   applyContextBudget,
-  pruneActiveToolResults,
-  pruneStaleToolResults,
+  pruneToolResults,
   groupMessagesByTurn,
   selectTurnsByBudget,
 } from '../../src/worker/agent/context-budget';
@@ -60,15 +58,9 @@ function defaultPolicy(overrides?: Partial<ContextBudgetPolicy>): ContextBudgetP
   return {
     minRecentTurns: 2,
     charsPerToken: CHARS_PER_TOKEN,
-    activeToolResultPrune: {
-      enabled: false,
-      maxResultTokens: 2048,
-      minTurnNumber: 1,
-    },
-    staleToolResultPrune: {
+    toolResultPrune: {
       enabled: true,
       maxResultTokens: 2048,
-      minRecentTurnsFull: 1,
     },
     historyCompact: {
       enabled: false, // disabled by default in tests
@@ -78,10 +70,10 @@ function defaultPolicy(overrides?: Partial<ContextBudgetPolicy>): ContextBudgetP
 }
 
 // ═══════════════════════════════════════════════════
-// pruneStaleToolResults
+// pruneToolResults
 // ═══════════════════════════════════════════════════
 
-describe('pruneStaleToolResults', () => {
+describe('pruneToolResults', () => {
   it('does not prune small tool results', () => {
     const msgs: Message[] = [
       system('System prompt'),
@@ -89,10 +81,7 @@ describe('pruneStaleToolResults', () => {
       assistant('Let me read it'),
       toolResult('tc1', 'Short output'),
     ];
-    const { messages, prunedCount, tokensSaved } = pruneStaleToolResults(
-      msgs,
-      defaultPolicy(),
-    );
+    const { messages, prunedCount, tokensSaved } = pruneToolResults(msgs, defaultPolicy());
     expect(prunedCount).toBe(0);
     expect(tokensSaved).toBe(0);
     // Content should be unchanged
@@ -112,9 +101,9 @@ describe('pruneStaleToolResults', () => {
       ...Array.from({ length: 5 }, (_, i) => toolResult(`tc${i}`, bigOutput)),
     ];
 
-    const { messages, prunedCount, tokensSaved, archiveFailures } = pruneStaleToolResults(
+    const { messages, prunedCount, tokensSaved, archiveFailures } = pruneToolResults(
       msgs,
-      defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 0 } }),
+      defaultPolicy({ toolResultPrune: { enabled: true, maxResultTokens: 2048 } }),
       4,
       { archiveDir },
     );
@@ -135,7 +124,7 @@ describe('pruneStaleToolResults', () => {
     expect(placeholder.bodySha256).toHaveLength(64);
     expect(placeholder.originalTokens).toBeGreaterThan(0);
     expect(placeholder.originalChars).toBe(bigOutput.length);
-    expect(placeholder.reason).toBe('stale_tool_result_pruned');
+    expect(placeholder.reason).toBe('tool_result_pruned');
     expect(typeof placeholder.recoveryHint).toBe('string');
   });
 
@@ -148,10 +137,10 @@ describe('pruneStaleToolResults', () => {
       toolResult('tc1', bigOutput),
     ];
 
-    const { messages, prunedCount, archiveFailures } = pruneStaleToolResults(
+    const { messages, prunedCount, archiveFailures } = pruneToolResults(
       msgs,
       defaultPolicy({
-        staleToolResultPrune: { enabled: true, maxResultTokens: 100, minRecentTurnsFull: 0 },
+        toolResultPrune: { enabled: true, maxResultTokens: 100 },
       }),
       // no archiveDir
     );
@@ -182,10 +171,10 @@ describe('pruneStaleToolResults', () => {
       assistant('ok'),
     ];
 
-    const { messages, prunedCount } = pruneStaleToolResults(
+    const { messages, prunedCount } = pruneToolResults(
       msgs,
       defaultPolicy({
-        staleToolResultPrune: { enabled: true, maxResultTokens: 100, minRecentTurnsFull: 0 },
+        toolResultPrune: { enabled: true, maxResultTokens: 100 },
       }),
       4,
       { archiveDir },
@@ -202,66 +191,45 @@ describe('pruneStaleToolResults', () => {
     );
   });
 
-  it('protects recent turn tool results from stale pruning', () => {
+  it('prunes oversized results in every turn, including the most recent', () => {
     const archiveDir = makeArchiveDir();
     const bigOutput = 'x'.repeat(10_000);
     const msgs: Message[] = [
       system('System prompt'),
-      // Old turn (should be pruned)
+      // Old turn
       user('First question'),
       assistant('First response'),
       toolResult('tc_old', bigOutput),
-      // Recent turn (should be protected — minRecentTurnsFull=1)
+      // Recent turn
       user('Second question'),
       assistant('Second response'),
       toolResult('tc_recent', bigOutput),
     ];
 
-    const { messages, prunedCount } = pruneStaleToolResults(msgs, defaultPolicy(), 4, {
-      archiveDir,
-    });
-    expect(prunedCount).toBeGreaterThan(0);
-
-    // Recent tool result should still be intact
-    const recentTool = messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_recent')!;
-    expect(typeof recentTool.content).toBe('string');
-    expect((recentTool.content as string).length).toBe(bigOutput.length);
-
-    // Old tool result should be replaced
-    const oldTool = messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_old')!;
-    expect((oldTool.content as string).includes('suncode.archived_tool_result')).toBe(true);
-  });
-
-  it('actively prunes oversized results in the most recent turn', () => {
-    const archiveDir = makeArchiveDir();
-    const bigOutput = 'x'.repeat(10_000);
-    const msgs: Message[] = [
-      system('System prompt'),
-      user('Run tests'),
-      assistant('Running', [{ type: 'tool_call', id: 'tc_bash', name: 'bash', arguments: '{}' }]),
-      toolResult('tc_bash', bigOutput),
-    ];
-
-    const { messages, prunedCount, archiveFailures } = pruneActiveToolResults(
+    const { messages, prunedCount, archiveFailures } = pruneToolResults(
       msgs,
-      defaultPolicy({
-        activeToolResultPrune: { enabled: true, maxResultTokens: 100 },
-      }),
+      defaultPolicy({ toolResultPrune: { enabled: true, maxResultTokens: 100 } }),
       4,
       { archiveDir },
     );
     expect(archiveFailures).toBe(0);
-    expect(prunedCount).toBe(1);
-    const placeholder = JSON.parse(
-      messages.find((m) => m.toolCallId === 'tc_bash')!.content as string,
-    );
-    expect(placeholder.reason).toBe('active_current_turn_tool_result_pruned_before_next_step');
+    expect(prunedCount).toBe(2);
+
+    // Both old and recent oversized results are replaced with placeholders
+    const oldTool = messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_old')!;
+    expect((oldTool.content as string).includes('suncode.archived_tool_result')).toBe(true);
+    const recentTool = messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_recent')!;
+    expect((recentTool.content as string).includes('suncode.archived_tool_result')).toBe(true);
+
+    // Placeholder carries the turn id and an artifact link
+    const placeholder = JSON.parse(recentTool.content as string);
+    expect(placeholder.reason).toBe('tool_result_pruned');
     expect(placeholder.artifactId).toBeTruthy();
     expect(placeholder.turnId).toBeTruthy();
     expect(readFileSync(placeholder.artifactPath as string, 'utf8')).toBe(bigOutput);
   });
 
-  it('does not re-prune a recovery read of an archived artifact (active prune)', () => {
+  it('does not re-prune a recovery read of an archived artifact', () => {
     const archiveDir = makeArchiveDir();
     // read tool call whose file_path points inside the archive directory;
     // arguments are JSON, so the path arrives with escaped backslashes.
@@ -277,9 +245,9 @@ describe('pruneStaleToolResults', () => {
       toolResult('tc_read', readOutput),
     ];
 
-    const { messages, prunedCount } = pruneActiveToolResults(
+    const { messages, prunedCount } = pruneToolResults(
       msgs,
-      defaultPolicy({ activeToolResultPrune: { enabled: true, maxResultTokens: 100 } }),
+      defaultPolicy({ toolResultPrune: { enabled: true, maxResultTokens: 100 } }),
       4,
       { archiveDir },
     );
@@ -291,7 +259,7 @@ describe('pruneStaleToolResults', () => {
     expect(toolMsg.content).toBe(readOutput);
   });
 
-  it('does not re-prune a recovery read via bash cat (stale prune)', () => {
+  it('does not re-prune a recovery read via bash cat', () => {
     const archiveDir = makeArchiveDir();
     const artifactPath = join(archiveDir, 'call_00_abcdef.txt');
     const catArgs = JSON.stringify({ command: `cat \"${artifactPath}\"` });
@@ -307,9 +275,9 @@ describe('pruneStaleToolResults', () => {
       assistant('ok'),
     ];
 
-    const { messages, prunedCount } = pruneStaleToolResults(
+    const { messages, prunedCount } = pruneToolResults(
       msgs,
-      defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 100 } }),
+      defaultPolicy({ toolResultPrune: { enabled: true, maxResultTokens: 100 } }),
       4,
       { archiveDir },
     );
@@ -332,9 +300,9 @@ describe('pruneStaleToolResults', () => {
       toolResult('tc_other', readOutput),
     ];
 
-    const { messages, prunedCount } = pruneActiveToolResults(
+    const { messages, prunedCount } = pruneToolResults(
       msgs,
-      defaultPolicy({ activeToolResultPrune: { enabled: true, maxResultTokens: 100 } }),
+      defaultPolicy({ toolResultPrune: { enabled: true, maxResultTokens: 100 } }),
       4,
       { archiveDir },
     );
@@ -362,9 +330,9 @@ describe('pruneStaleToolResults', () => {
       toolResult('tc1', placeholder),
     ];
 
-    const { prunedCount } = pruneStaleToolResults(
+    const { prunedCount } = pruneToolResults(
       msgs,
-      defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 0 } }),
+      defaultPolicy({ toolResultPrune: { enabled: true, maxResultTokens: 2048 } }),
     );
     expect(prunedCount).toBe(0); // Already pruned, shouldn't double-count
   });
@@ -377,9 +345,9 @@ describe('pruneStaleToolResults', () => {
       toolResult('tc1', bigOutput),
     ];
 
-    const { messages, prunedCount } = pruneStaleToolResults(
+    const { messages, prunedCount } = pruneToolResults(
       msgs,
-      defaultPolicy({ staleToolResultPrune: { enabled: false } }),
+      defaultPolicy({ toolResultPrune: { enabled: false } }),
     );
     expect(prunedCount).toBe(0);
     expect(messages).toEqual(msgs);
@@ -395,22 +363,18 @@ describe('pruneStaleToolResults', () => {
     ];
 
     // maxResultTokens=2048, 750 < 2048 → not pruned
-    const { prunedCount } = pruneStaleToolResults(
+    const { prunedCount } = pruneToolResults(
       msgs,
       defaultPolicy({
         minRecentTurns: 0,
-        minRecentTurnsFull: 0,
-        staleToolResultPrune: { enabled: true, maxResultTokens: 2048 },
+        toolResultPrune: { enabled: true, maxResultTokens: 2048 },
       }),
     );
     expect(prunedCount).toBe(0);
   });
 
   it('handles empty messages array', () => {
-    const { messages, prunedCount } = pruneStaleToolResults(
-      [],
-      defaultPolicy(),
-    );
+    const { messages, prunedCount } = pruneToolResults([], defaultPolicy());
     expect(prunedCount).toBe(0);
     expect(messages).toEqual([]);
   });
@@ -421,9 +385,9 @@ describe('pruneStaleToolResults', () => {
       user('Question'),
       { role: 'tool', content: [{ type: 'text', text: 'array content' }], toolCallId: 'tc1' },
     ];
-    const { prunedCount } = pruneStaleToolResults(
+    const { prunedCount } = pruneToolResults(
       msgs,
-      defaultPolicy({ staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 0 } }),
+      defaultPolicy({ toolResultPrune: { enabled: true, maxResultTokens: 2048 } }),
     );
     // Non-string content is skipped (pruning only applies to string content)
     expect(prunedCount).toBe(0);
@@ -636,6 +600,7 @@ describe('applyContextBudget', () => {
   });
 
   it('applies all layers correctly', () => {
+    const archiveDir = makeArchiveDir();
     const bigOutput = 'x'.repeat(10_000);
     const msgs: Message[] = [
       system('System prompt'),
@@ -645,7 +610,7 @@ describe('applyContextBudget', () => {
         assistant(`Answer ${i}`),
         toolResult(`tc${i}`, bigOutput),
       ]).flat(),
-      // Recent turn (protected)
+      // Recent turn
       user('Recent question'),
       assistant('Recent answer'),
       toolResult('tc_recent', 'Small output'),
@@ -655,17 +620,24 @@ describe('applyContextBudget', () => {
       msgs,
       defaultPolicy({
         maxHistoryTokens: 500, // very tight budget
-        staleToolResultPrune: {
+        toolResultPrune: {
           enabled: true,
           maxResultTokens: 2048,
-          minRecentTurnsFull: 1,
         },
       }),
+      { archiveDir },
     );
 
     expect(diagnostic.changed).toBe(true);
 
-    // Recent tool result should still be intact
+    // No oversized tool result may survive verbatim: old turns are either
+    // archive-placeholder'd (prune) or dropped entirely (turn cap).
+    const survivingBig = messages.find(
+      (m) => m.role === 'tool' && typeof m.content === 'string' && m.content.length > 5000,
+    );
+    expect(survivingBig).toBeUndefined();
+
+    // Small recent tool result survives untouched
     const recentTool = messages.find((m) => m.role === 'tool' && m.toolCallId === 'tc_recent');
     expect(recentTool).toBeDefined();
     expect(recentTool!.content).toBe('Small output');
@@ -725,7 +697,7 @@ describe('applyContextBudget', () => {
     const { diagnostic } = applyContextBudget(
       msgs,
       defaultPolicy({
-        staleToolResultPrune: { enabled: true, maxResultTokens: 2048, minRecentTurnsFull: 1 },
+        toolResultPrune: { enabled: true, maxResultTokens: 2048 },
       }),
       { archiveDir },
     );
@@ -734,10 +706,10 @@ describe('applyContextBudget', () => {
     expect(diagnostic.beforeTokens).toBeGreaterThan(0);
     expect(diagnostic.afterTokens).toBeGreaterThan(0);
     expect(diagnostic.prunedToolResults).toBeGreaterThan(0);
-    expect(diagnostic.prunedTokensSaved).toBeGreaterThan(0);
+    expect(diagnostic.estimatedTokensSaved).toBeGreaterThan(0);
   });
 
-  it('active prune runs on the current turn before the next step', () => {
+  it('prunes oversized tool results before the next step', () => {
     const archiveDir = makeArchiveDir();
     const bigOutput = 'x'.repeat(10_000);
     const msgs: Message[] = [
@@ -750,16 +722,14 @@ describe('applyContextBudget', () => {
     const { messages, diagnostic } = applyContextBudget(
       msgs,
       defaultPolicy({
-        activeToolResultPrune: { enabled: true, maxResultTokens: 100 },
-        staleToolResultPrune: { enabled: false },
+        toolResultPrune: { enabled: true, maxResultTokens: 100 },
       }),
       { archiveDir },
-      { turnCount: 1 },
     );
 
-    expect(diagnostic.activePrunedToolResults).toBe(1);
-    expect(diagnostic.activeArchiveFailures ?? 0).toBe(0);
+    expect(diagnostic.prunedToolResults).toBe(1);
+    expect(diagnostic.archiveFailures ?? 0).toBe(0);
     const body = messages.find((m) => m.toolCallId === 'tc_big')!.content as string;
-    expect(body).toContain('active_current_turn_tool_result_pruned_before_next_step');
+    expect(body).toContain('suncode.archived_tool_result');
   });
 });

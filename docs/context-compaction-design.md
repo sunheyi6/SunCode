@@ -1,7 +1,12 @@
 # 上下文压缩设计
 
-> 状态：已实现；主动语义压缩仍为实验功能，默认关闭。本文以运行时代码为准，最近更新涵盖 Active Tool Result Prune、Archive-before-omit 不变量和 TurnEvidence 集成。
+> 状态：已实现；主动语义压缩仍为实验功能，默认关闭。本文以运行时代码为准，最近更新涵盖 Tool Result Prune、Archive-before-omit 不变量和 TurnEvidence 集成。
 
+## 0. 设计演进记录
+
+容量保护 pipeline 从"六层"收敛到"三层"：v1 引入 Snip / Active / Stale / Context Collapse / Turn Cap / Compact；v2 移除 Snip 与 Context Collapse（前者违反 Archive-before-omit、后者伪造 system 指令，均未接线启用）；v3 合并 Active + Stale 为统一工具裁剪入口（同一机制的两个时间切片，行为等价）。
+
+完整演进理由见 [tool-result-prune-design.md](tool-result-prune-design.md) 的"设计演进记录"章节。演进原则：**移除功能重叠或违反系统不变量的层，行为零变化；只删从未使用的灵活性，不删能力。**
 ## 1. 目标与边界
 
 长任务的上下文问题不只是在接近 context window 时避免请求失败，还包括：
@@ -44,29 +49,23 @@ maxHistoryTokens = model.contextWindow × compactThreshold
 
 ### 3.2 Pipeline
 
-`applyContextBudget()` 支持六层由低到高的处理：
+`applyContextBudget()` 按成本递增顺序处理三层：
 
 ```text
 原始 contextMessages
-  → Layer 0   Snip：移除不再被引用的旧工具结果
-  → Layer 0.5 Active Tool Result Prune：当前轮大工具结果先归档再替换为占位符
-  → Layer 1   Stale Tool Result Prune：旧轮次超长工具结果先归档再替换为占位符
-  → Layer 2   Context Collapse：对工具密集的旧 turn 做读取时投影
-  → Layer 3   Token Budget Turn Cap：从新到旧按 token 预算保留完整 turn
-  → Layer 4   History Compact：高水位时用规则式摘要折叠旧 turn
+  → Layer 0   Tool Result Prune：所有轮次超长工具结果先归档再替换为占位符
+  → Layer 1   Token Budget Turn Cap：从新到旧按 token 预算保留完整 turn
+  → Layer 2   History Compact：高水位时用规则式摘要折叠旧 turn
 ```
 
-当前 `buildContextBudgetPolicy()` 实际启用的是 Active Tool Result Prune、Stale Tool Result Prune、Token Budget Turn Cap 和 History Compact。Snip 与 Context Collapse 的实现及默认策略已经存在，但尚未从当前设置构建函数传入，因此不应把它们当作线上已启用能力。
+三层全部通过 `buildContextBudgetPolicy()` 组装启用，无默认关闭的中间层。
 
-Active 与 Stale 两条裁剪路径共享同一个核心函数 `rewriteEligibleToolResults`，区别仅在于 eligibility 判断：Active 路径只作用于最近 1 个轮次，Stale 路径排除最近 `minRecentTurnsFull`（默认 1）个轮次。
+**Layer 0（工具裁剪）的完整设计**——处理时机、判定规则、归档机制（Archive-before-omit）、占位符协议、模型恢复与演进记录——见 [tool-result-prune-design.md](tool-result-prune-design.md)。
 
 ### 3.3 保留与摘要
 
 - system message 永远保留；
 - 最近至少 2 个 turn 保留（Token Budget Turn Cap 和 History Compact 各自独立配置 `minRecentTurns` / `keepRecentTurns`）；
-- Active Tool Result Prune 只作用于最近 1 个轮次，且要求 `turnCount >= minTurnNumber`（默认 1）；
-- Stale Tool Result Prune 保护最近 `minRecentTurnsFull`（默认 1）个轮次的工具结果不被裁剪；
-- 单个工具结果超过 `maxResultTokens`（默认 2048）时触发裁剪；
 - History Compact 保留最近 3 个 turn；
 - 规则式摘要使用 `role=user`、`contextKind=capacity_summary`，避免伪造新的 system 指令。
 
@@ -74,60 +73,11 @@ Active 与 Stale 两条裁剪路径共享同一个核心函数 `rewriteEligibleT
 
 ### 3.4 Archive-before-omit 不变量
 
-Active 和 Stale 两条裁剪路径都遵守同一个不变量：**先归档，再裁剪；归档失败则保留原文**。
-
-归档由独立模块 `tool-result-archive.ts` 执行：
-
-1. 计算工具结果全文的 SHA-256（`bodySha256`）；
-2. 生成 content-addressed 的 `artifactId = safeToolCallId_bodySha256[:32]`；
-3. 写入 `${archiveDir}/${artifactId}.txt`；
-4. 如果同名文件已存在，校验 hash 和字节数是否一致——一致则幂等返回，不一致则拒绝覆写并返回 `undefined`；
-5. 返回 `ToolResultArchiveRecord { artifactId, bodySha256, originalBytes, absolutePath }`。
-
-当 `archiveDir` 未设置或归档失败时，`rewriteEligibleToolResults` 走 **fail-open** 路径：
-
-```typescript
-if (!archived?.artifactId?.trim()) {
-  archiveFailures += 1;
-  return msg; // 保留原始 provider-visible body
-}
-```
-
-这意味着没有配置归档目录或磁盘写入失败时，工具结果不会被裁剪，模型仍能看到完整内容。诊断输出中会分别统计 `activeArchiveFailures` 和 `staleArchiveFailures`。
+工具裁剪路径遵守 **先归档，再裁剪；归档失败则保留原文**（fail-open）不变量。机制细节（SHA-256 content-addressed 归档、幂等、冲突拒绝）见 [tool-result-prune-design.md](tool-result-prune-design.md) 的"归档机制"章节。
 
 ### 3.5 占位符格式（Schema v1）
 
-裁剪后的工具结果被替换为 JSON 字符串，结构如下：
-
-```typescript
-interface ArchivedToolResultPlaceholder {
-  kind: 'suncode.archived_tool_result';
-  schemaVersion: 1;
-  toolCallId: string;
-  toolName: string;
-  artifactId: string;       // content-addressed ID
-  bodySha256: string;        // 全长 SHA-256
-  bodyHash: string;          // bodySha256 前 16 位（兼容旧读取者）
-  originalTokens: number;
-  originalBytes: number;
-  originalChars: string;    // @deprecated，保留兼容
-  reason: ToolResultPruneReason;
-  rewriteVersion: 1;
-  turnId?: string;
-  artifactPath: string;      // 磁盘归档绝对路径
-  recoveryHint: string;      // 指导模型用 read 工具恢复
-}
-```
-
-`reason` 取值区分两条路径：
-
-| reason | 来源 |
-|---|---|
-| `active_current_turn_tool_result_pruned_before_next_step` | Active Prune（Layer 0.5） |
-| `stale_tool_result_pruned` | Stale Prune（Layer 1） |
-| `pruned_exceeds_budget` | @deprecated，旧占位符兼容 |
-
-占位符约 80 tokens，替换后 token 节省量 = `max(0, originalTokens - 80)`。已经是占位符的消息不会被重复裁剪（通过 `isPlaceholderString` 检测）。
+裁剪后的工具结果被替换为约 80 token 的 JSON 占位符（`ArchivedToolResultPlaceholder`，含 kind/schemaVersion/artifactId/bodySha256/originalTokens/reason/artifactPath/recoveryHint 等字段）。完整协议、字段分组与 reason 取值见 [tool-result-prune-design.md](tool-result-prune-design.md) 的"占位符协议"章节。已经是占位符的消息不会被重复裁剪（`isPlaceholderString` 检测）。
 
 ### 3.6 TurnEvidence 集成
 
@@ -337,7 +287,7 @@ Ollama 的 OpenAI-compatible usage 在两组中都报告 `cacheReadTokens=0`，�
 - `semantic_compact_started`；
 - `semantic_compact_completed`；
 - `semantic_compact_rejected`；
-- `context_budget_applied`：每次容量保护压缩实际修改消息时发射，包含 `activePrunedToolResults / activeEstimatedTokensSaved / activeArchiveFailures / prunedToolResults / prunedTokensSaved / staleArchiveFailures / beforeTokens / afterTokens`；
+- `context_budget_applied`：每次容量保护压缩实际修改消息时发射，包含 `prunedToolResults / estimatedTokensSaved / archiveFailures / beforeTokens / afterTokens`；
 - `turn_evidence_recorded`：每轮工具结果投影为 TurnEvidence 后发射，包含 `turnId / count / evidenceIds`。
 
 Harbor 结果 metadata 汇总：
@@ -363,7 +313,7 @@ Verifier 下载依赖的时间属于基础设施噪声，不应混入模型性�
 |---|---|
 | 主动语义候选、协议、projection 验证 | `src/worker/agent/semantic-compact.ts` |
 | A/B/C 请求编排与事件 | `src/worker/agent/agent-loop.ts` |
-| 容量保护 pipeline（六层） | `src/worker/agent/context-budget.ts` |
+| 容量保护 pipeline（三层） | `src/worker/agent/context-budget.ts` |
 | 工具结果归档（content-addressed，archive-before-omit） | `src/worker/agent/tool-result-archive.ts` |
 | TurnEvidence 投影、buffer 与归档链接 | `src/worker/agent/turn-evidence.ts` |
 | TurnEvidence 持久化路径解析 | `src/worker/agent/turn-evidence-store.ts` |
