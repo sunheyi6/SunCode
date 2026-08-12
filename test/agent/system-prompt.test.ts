@@ -28,6 +28,7 @@ interface StructuredPromptForTest {
     relevantLessons?: string;
     projectInstructions?: string;
     skills?: string;
+    projectKnowledge?: { entryPath: string; instruction: string };
   };
   environment: { currentDate: string; workingDirectory: string };
 }
@@ -123,6 +124,10 @@ describe('buildSystemPrompt', () => {
       relevantLessonsContent: 'Use the known fix first',
       agentsMdContent: '# Project Rules',
       skillsContent: 'SKILL: test',
+      projectKnowledge: {
+        entryPath: '/runtime/project-info.md',
+        instruction: 'Read it first.',
+      },
     });
 
     expect(prompt.context).toEqual({
@@ -130,6 +135,10 @@ describe('buildSystemPrompt', () => {
       relevantLessons: 'Use the known fix first',
       projectInstructions: '# Project Rules',
       skills: 'SKILL: test',
+      projectKnowledge: {
+        entryPath: '/runtime/project-info.md',
+        instruction: 'Read it first.',
+      },
     });
   });
 

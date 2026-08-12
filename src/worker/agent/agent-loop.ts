@@ -35,6 +35,7 @@ import {
 import { quickMatchLesson } from './lessons';
 import { buildStructuredTaskPrompt, buildStructuredTextMessage } from './model-structured-content';
 import { createProgressGuardState, updateSimpleTaskProgressGuard } from './progress-guard';
+import { prepareProjectKnowledge } from './project-knowledge';
 import {
   applySemanticProjection,
   buildSemanticCompactRequest,
@@ -228,6 +229,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     storePath: turnEvidencePath,
     seedFromStore: true,
   });
+  const projectKnowledge = prepareProjectKnowledge({ workingDir, sessionId, settings });
 
   // Diagnostic logger: persists to .suncode/diagnostics/<runId>.log
   const diag = new DiagLogger(workingDir, runId);
@@ -296,6 +298,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         relevantLessonsContent,
         turnEvidenceContent: turnEvidenceContent || undefined,
         responseLanguage,
+        projectKnowledge,
       });
       if (systemPrompt !== lastSystemPrompt) {
         if (contextMessages[0]?.role === 'system') {

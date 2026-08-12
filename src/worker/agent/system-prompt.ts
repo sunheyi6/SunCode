@@ -2,6 +2,7 @@ import { DEFAULT_SYSTEM_PROMPT } from '@shared/constants';
 import type { AppSettings, ToolDefinition, UiLanguage } from '@shared/types';
 import { VISION_OBSERVATION_GUIDELINE } from '../models/vision-routing';
 import { buildStructuredSystemPrompt } from './model-structured-content';
+import type { ProjectKnowledgeReference } from './project-knowledge';
 
 export interface SystemPromptInput {
   workingDir: string;
@@ -24,6 +25,8 @@ export interface SystemPromptInput {
   turnEvidenceContent?: string;
   /** User-facing language derived from the current user prompt. */
   responseLanguage?: UiLanguage;
+  /** Local authoritative entry point for questions about SunCode itself. */
+  projectKnowledge?: ProjectKnowledgeReference;
 }
 
 /**
@@ -42,6 +45,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     relevantLessonsContent,
     turnEvidenceContent,
     responseLanguage,
+    projectKnowledge,
   } = input;
 
   const now = new Date();
@@ -58,6 +62,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     memoryContent,
     agentsMdContent,
     skillsContent,
+    projectKnowledge,
     relevantLessonsContent,
     turnEvidenceContent: turnEvidenceContent || undefined,
     responseLanguage: responseLanguage

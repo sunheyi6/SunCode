@@ -14,6 +14,10 @@ export interface StructuredSystemPromptInput {
   turnEvidenceContent?: string;
   agentsMdContent?: string;
   skillsContent?: string;
+  projectKnowledge?: {
+    entryPath: string;
+    instruction: string;
+  };
   responseLanguage?: {
     language: UiLanguage;
     instruction: string;
@@ -54,6 +58,7 @@ export function buildStructuredSystemPrompt(input: StructuredSystemPromptInput):
       turnEvidence: input.turnEvidenceContent,
       projectInstructions: input.agentsMdContent,
       skills: input.skillsContent,
+      projectKnowledge: input.projectKnowledge,
     },
     responseLanguage: input.responseLanguage,
     environment: {

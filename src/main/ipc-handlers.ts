@@ -528,6 +528,9 @@ function getAgentWorker(): Worker {
         ...runtimeIdentityEnvironment(APP_RUNTIME_IDENTITY),
         SUNCODE_APP_DATA: getAppDataDir(),
         SUNCODE_IS_DEV: IS_DEV ? '1' : '0',
+        SUNCODE_DOCS_DIR: IS_DEV
+          ? join(app.getAppPath(), 'docs')
+          : join(process.resourcesPath, 'docs'),
       },
     });
     agentWorker = worker;
