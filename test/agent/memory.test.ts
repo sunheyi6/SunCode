@@ -557,38 +557,94 @@ describe('memory storage', () => {
 
   it('lets the relevance judge rescue near-miss memories below the heuristic cutoff', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
 
-    // A memory whose only overlap with the URL query is the shared `github`
-    // token: it scores below MIN_RELEVANCE_SCORE (so plain retrieval skips it)
-    // but above the recall floor, so the judge still gets to see it.
-    await saveMemory(workingDir, {
-      date: '2026-07-12',
-      slug: 'github-cli-untagged',
-      scope: 'project',
-      kind: 'decision',
-      userRequest: 'GitHub operations',
-      toolsUsed: {},
-      summary: 'Use the GitHub CLI (gh) for all GitHub operations.',
-    });
+    try {
+      // Fill the normal retrieval cap. Near-miss expansion must not add these
+      // entries a second time and crowd out the candidate it is meant to rescue.
+      for (let i = 0; i < 5; i++) {
+        await saveMemory(workingDir, {
+          date: `2026-07-${12 + i}`,
+          slug: `github-hit-${i}`,
+          scope: 'project',
+          kind: 'decision',
+          userRequest: `Tagged repository operation ${i}`,
+          toolsUsed: {},
+          summary: `Heuristic GitHub hit ${i}.`,
+          tags: ['github'],
+        });
+      }
 
-    // Without a judge the near-miss stays below the cutoff and is not injected.
-    const plain = await loadMemories(
-      workingDir,
-      'https://github.com/maka-agent/maka-agent/pull/2222 解决冲突',
-      'session-1',
-    );
-    expect(plain).not.toContain('GitHub CLI');
+      // `maka-agent` overlaps a URL feature weakly enough to stay below
+      // MIN_RELEVANCE_SCORE but above the judge recall floor.
+      const nearMissKey = '2026-07-20-github-cli-untagged';
+      await saveMemory(workingDir, {
+        date: '2026-07-20',
+        slug: 'github-cli-untagged',
+        scope: 'project',
+        kind: 'decision',
+        userRequest: 'maka-agent',
+        toolsUsed: {},
+        summary: 'Use the GitHub CLI (gh) for related repository work.',
+      });
 
-    // With a judge that deems it relevant, the near-miss is rescued.
-    const judge = async (_query: string, candidates: RelevanceCandidate[]) =>
-      new Set(candidates.map((cand) => cand.key));
-    const content = await loadMemories(
-      workingDir,
-      'https://github.com/maka-agent/maka-agent/pull/2222 解决冲突',
-      'session-1',
-      { relevanceJudge: judge },
-    );
-    expect(content).toContain('GitHub CLI');
+      const query = 'https://github.com/maka-agent/maka-agent/pull/2222 解决冲突';
+      const plain = await loadMemories(workingDir, query, 'session-1');
+      expect(plain).not.toContain('GitHub CLI');
+
+      let judgedKeys: string[] = [];
+      const judge = async (_query: string, candidates: RelevanceCandidate[]) => {
+        judgedKeys = candidates.map((candidate) => candidate.key);
+        return new Set([nearMissKey]);
+      };
+      const content = await loadMemories(workingDir, query, 'session-1', {
+        relevanceJudge: judge,
+      });
+
+      expect(judgedKeys).toContain(nearMissKey);
+      expect(new Set(judgedKeys).size).toBe(judgedKeys.length);
+      expect(content).toContain('GitHub CLI');
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
+  });
+
+  it('requires alphanumeric boundaries for reverse tag matches', async () => {
+    const workingDir = createTempDir('suncode-memory-workspace-');
+    const appDataDir = createTempDir('suncode-memory-appdata-');
+    const previousAppData = process.env.SUNCODE_APP_DATA;
+    process.env.SUNCODE_APP_DATA = appDataDir;
+
+    try {
+      await saveMemory(workingDir, {
+        date: '2026-07-20',
+        slug: 'test-conventions',
+        scope: 'project',
+        kind: 'decision',
+        userRequest: 'Unit test conventions',
+        toolsUsed: {},
+        summary: 'Use unit tests for the project.',
+        tags: ['test'],
+      });
+
+      await expect(loadMemories(workingDir, 'latest release notes', 'session-1'))
+        .resolves.not.toContain('Unit test conventions');
+      await expect(loadMemories(workingDir, 'test release notes', 'session-1')).resolves.toContain(
+        'Unit test conventions',
+      );
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.SUNCODE_APP_DATA;
+      } else {
+        process.env.SUNCODE_APP_DATA = previousAppData;
+      }
+    }
   });
   it('only injects unpinned global preferences whose topic matches the query', async () => {
     const workingDir = createTempDir('suncode-memory-workspace-');

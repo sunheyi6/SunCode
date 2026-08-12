@@ -272,9 +272,13 @@ export async function loadMemoriesWithEntries(
     // token with a tagged memory). The judge may still drop any of them.
     const coarse = [...residents, ...retrieved];
     if (coarse.length < JUDGE_CANDIDATE_LIMIT && queryFeatures) {
+      const coarseKeys = new Set(coarse.map((entry) => `${entry.date}-${entry.slug}`));
       const nearMisses = rest
+        .filter((entry) => !coarseKeys.has(`${entry.date}-${entry.slug}`))
         .map((entry) => ({ entry, score: hybridScore(entry, trimmedQuery, queryFeatures) }))
-        .filter((result) => result.score >= JUDGE_RECALL_FLOOR)
+        .filter(
+          (result) => result.score >= JUDGE_RECALL_FLOOR && result.score < MIN_RELEVANCE_SCORE,
+        )
         .sort((a, b) => b.score - a.score)
         .slice(0, JUDGE_CANDIDATE_LIMIT - coarse.length)
         .map((result) => result.entry);
@@ -1471,13 +1475,14 @@ function hybridScore(
 
 /**
  * Reverse tag match: does any of the memory's tags surface inside the query?
- * Whole tags of 3+ chars match as substrings (a URL containing github
- * matches tag github); otherwise a tag's alphanumeric tokens must appear as
- * query tokens (tag github-cli -> tokens github/cli; short tags like
- * gh need an exact token). Tags are semantic labels, so a hit is treated as
- * strong relevance evidence even when the query's own terms miss the memory
- * text - the classic case is a GitHub URL query against a memory tagged
- * github-cli whose text otherwise shares only a domain token.
+ * Whole tags of 3+ chars match at alphanumeric boundaries (a URL containing
+ * github matches tag github without letting tag test match latest); otherwise
+ * a tag's alphanumeric tokens must appear as query tokens (tag github-cli ->
+ * tokens github/cli; short tags like gh need an exact token). Tags are semantic
+ * labels, so a hit is treated as strong relevance evidence even when the
+ * query's own terms miss the memory text - the classic case is a GitHub URL
+ * query against a memory tagged github-cli whose text otherwise shares only a
+ * domain token.
  */
 function tagHitsQuery(entry: MemoryEntry, query: string): boolean {
   const normalizedQuery = query.toLowerCase();
@@ -1485,11 +1490,30 @@ function tagHitsQuery(entry: MemoryEntry, query: string): boolean {
   for (const tag of entry.tags ?? []) {
     const normalizedTag = tag.toLowerCase();
     if (!normalizedTag) continue;
-    if (normalizedTag.length >= 3 && normalizedQuery.includes(normalizedTag)) return true;
+    if (
+      normalizedTag.length >= 3 &&
+      containsAtAlphanumericBoundary(normalizedQuery, normalizedTag)
+    ) {
+      return true;
+    }
     if (queryTokens.includes(normalizedTag)) return true;
     for (const token of normalizedTag.split(/[^a-z0-9]+/)) {
       if (token.length >= 3 && queryTokens.includes(token)) return true;
     }
+  }
+  return false;
+}
+
+function containsAtAlphanumericBoundary(text: string, value: string): boolean {
+  let index = text.indexOf(value);
+  while (index >= 0) {
+    const before = index > 0 ? text[index - 1] : undefined;
+    const afterIndex = index + value.length;
+    const after = afterIndex < text.length ? text[afterIndex] : undefined;
+    const startsAtBoundary = before === undefined || !/[a-z0-9]/.test(before);
+    const endsAtBoundary = after === undefined || !/[a-z0-9]/.test(after);
+    if (startsAtBoundary && endsAtBoundary) return true;
+    index = text.indexOf(value, index + 1);
   }
   return false;
 }
