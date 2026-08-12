@@ -2,7 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, test, vi } from 'vitest';
-import { projectSessionRuntime } from '../../src/main/runtime-projector';
+import {
+  createSessionRuntimeProjector,
+  projectSessionRuntime,
+} from '../../src/main/runtime-projector';
 import type { Message } from '../../src/shared/types';
 
 const appDataDir = await mkdtemp(join(tmpdir(), 'suncode-runtime-events-'));
@@ -69,6 +72,10 @@ describe('Runtime Event Log', () => {
       'new question',
       'new answer',
     ]);
+
+    const incremental = createSessionRuntimeProjector();
+    incremental.append(events.slice(0, 2));
+    expect(incremental.append(events.slice(2))).toEqual(projectSessionRuntime(events));
   });
 
   test('coalesces duplicate terminal facts and rejects conflicting outcomes', async () => {

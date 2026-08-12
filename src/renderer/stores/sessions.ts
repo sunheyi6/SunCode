@@ -7,6 +7,7 @@ import { useChatStore } from './chat';
 export const useSessionsStore = defineStore('sessions', () => {
   const SESSION_SNAPSHOT_SIZE = 10;
   const PREWARM_CONCURRENCY = 4;
+  const PREWARM_SESSION_LIMIT = 8;
   const sessions = ref<SessionMeta[]>([]);
   const activeSessionId = ref<string | null>(null);
   const isLoaded = ref(false);
@@ -51,7 +52,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       (cached ? tailMessages(cached, snapshotSize) : undefined) ??
       (fullCached
         ? tailMessages(fullCached, snapshotSize)
-        : await bridge.loadSession(id, snapshotSize));
+        : await bridge.loadSessionSnapshot(id, snapshotSize));
     if (requestId !== selectionRequestId) return;
 
     console.log(`[Sessions] selectSession loaded snapshot ${messages.length} messages`);
@@ -109,22 +110,22 @@ export const useSessionsStore = defineStore('sessions', () => {
     } else {
       // On startup, only load last 10 messages of the most recent session for quick display.
       await selectSession(sortedSessions.value[0].id, 10);
-      // Pre-warm all remaining sessions in background (no await).
+      // Pre-warm a small recent working set in background (no await).
       prewarmRemaining(SESSION_SNAPSHOT_SIZE);
     }
     isLoaded.value = true;
   }
 
-  /** Load message snapshots for all remaining sessions in background. */
+  /** Load message snapshots for a bounded recent working set in background. */
   function prewarmRemaining(maxMessages: number): void {
-    const remaining = sortedSessions.value.slice(1);
+    const remaining = sortedSessions.value.slice(1, PREWARM_SESSION_LIMIT + 1);
     let nextIndex = 0;
     const worker = async (): Promise<void> => {
       while (nextIndex < remaining.length) {
         const session = remaining[nextIndex];
         nextIndex += 1;
         try {
-          const messages = await bridge.loadSession(session.id, maxMessages);
+          const messages = await bridge.loadSessionSnapshot(session.id, maxMessages);
           sessionMessagesCache.set(session.id, messages);
           console.log(
             `[Sessions] Prewarmed session id=${session.id.slice(-8)} msgs=${messages.length}`,

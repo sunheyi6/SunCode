@@ -62,11 +62,7 @@ import {
   readRuntimeEvents,
   scheduleRuntimePartial,
 } from './runtime-event-store';
-import {
-  projectionCursorMatches,
-  projectModelHistory,
-  projectSessionRuntime,
-} from './runtime-projector';
+import { createSessionRuntimeProjector, projectionCursorMatches } from './runtime-projector';
 import {
   deleteSession,
   deleteSessions,
@@ -132,6 +128,7 @@ for (const [provider, key] of Object.entries(currentSettings.envApiKeys)) {
 process.env.SUNCODE_IS_DEV = IS_DEV ? '1' : '0';
 const sessions: Map<string, SessionMeta> = new Map();
 const sessionMessages: Map<string, Message[]> = new Map();
+const runtimeProjectors = new Map<string, ReturnType<typeof createSessionRuntimeProjector>>();
 let currentSessionId: string | null = null;
 /** The session that originated the current agent prompt (may differ from
  *  currentSessionId if the user switched sessions mid-run). Used by
@@ -209,6 +206,23 @@ async function commitWorkerRuntimeFact(
   }
 }
 
+function projectRuntimeSession(
+  sessionId: string,
+  events: Awaited<ReturnType<typeof readRuntimeEvents>>,
+) {
+  let projector = runtimeProjectors.get(sessionId);
+  const projectedTail = projector?.lastSequence ? events[projector.lastSequence - 1] : undefined;
+  if (
+    !projector ||
+    projector.lastSequence > events.length ||
+    projector.lastEventId !== projectedTail?.eventId
+  ) {
+    projector = createSessionRuntimeProjector();
+    runtimeProjectors.set(sessionId, projector);
+  }
+  return projector.append(events.slice(projector.lastSequence));
+}
+
 /** Stable non-crypto hash for deterministic guidance event IDs within a run. */
 function stableTextToken(text: string): string {
   let hash = 2166136261;
@@ -237,7 +251,7 @@ async function persistRuntimeProjection(sessionId: string): Promise<Message[]> {
   }
   if (!meta) throw new Error(`Session not found: ${sessionId}`);
 
-  const projection = projectSessionRuntime(await readRuntimeEvents(sessionId));
+  const projection = projectRuntimeSession(sessionId, await readRuntimeEvents(sessionId));
   const cursorUnchanged = projectionCursorMatches(meta.runtimeProjection, projection.cursor);
   const countUnchanged = meta.messageCount === projection.messages.length;
 
@@ -886,8 +900,13 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // Session management
   ipcMain.handle('session:list', async () => {
+    const startedAt = performance.now();
     try {
       const diskSessions = await loadAllSessions();
+      logger.debug('[SessionStore] Listed sessions', {
+        sessionCount: diskSessions.length,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
       if (diskSessions.length > 0) {
         for (const meta of diskSessions) {
           sessions.set(meta.id, meta);
@@ -948,6 +967,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
   });
 
   ipcMain.handle('session:load', async (_event, id: string, maxMessages?: number) => {
+    const startedAt = performance.now();
     try {
       currentSessionId = id;
       // DO NOT clear promptSessionId here — a running agent may still need it
@@ -990,9 +1010,9 @@ export function registerIpcHandlers(wm: WindowManager): void {
       const runtimeEvents = await initializeRuntimeLedger(id, messages);
       let modelHistory = messages;
       if (runtimeEvents.length > 0 && meta) {
-        const projection = projectSessionRuntime(runtimeEvents);
+        const projection = projectRuntimeSession(id, runtimeEvents);
         messages = projection.messages;
-        modelHistory = projectModelHistory(runtimeEvents);
+        modelHistory = projection.messages;
         const cursorUnchanged = projectionCursorMatches(meta.runtimeProjection, projection.cursor);
         const countUnchanged = meta.messageCount === messages.length;
         meta.runtimeProjection = projection.cursor;
@@ -1011,6 +1031,13 @@ export function registerIpcHandlers(wm: WindowManager): void {
       console.log(
         `[Main] session:load id=${id.slice(-8)} mem=${memCount} disk=${diskCount} result=${resultCount} diskExists=${!!disk}`,
       );
+      logger.debug('[SessionStore] Activated session', {
+        sessionId: id,
+        diskMessageCount: diskCount,
+        resultMessageCount: resultCount,
+        runtimeEventCount: runtimeEvents.length,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
       sendToWorker({ type: 'setMessages', sessionId: id, messages: modelHistory });
       if (meta) {
         sendToWorker({ type: 'setWorkingDir', sessionId: id, path: meta.workingDirectory });
@@ -1018,6 +1045,25 @@ export function registerIpcHandlers(wm: WindowManager): void {
       return rendererMessages;
     } catch (err) {
       console.error('[Main] session:load failed:', (err as Error).message);
+      return [];
+    }
+  });
+
+  // Read-only fast path for first paint and background prewarming. It does not
+  // switch the active session, hydrate Worker history, or replay the ledger.
+  ipcMain.handle('session:loadSnapshot', async (_event, id: string, maxMessages = 10) => {
+    const startedAt = performance.now();
+    try {
+      const disk = await loadSession(id, maxMessages);
+      const messages = disk?.messages ?? [];
+      logger.debug('[SessionStore] Loaded message snapshot', {
+        sessionId: id,
+        messageCount: messages.length,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      return messages;
+    } catch (err) {
+      console.error('[Main] session:loadSnapshot failed:', (err as Error).message);
       return [];
     }
   });
@@ -1089,6 +1135,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       }
       sessions.delete(id);
       sessionMessages.delete(id);
+      runtimeProjectors.delete(id);
       forgetSessionInvocations(id);
       invalidateRuntimeEventCache(id);
       await deleteSession(id);
@@ -1116,6 +1163,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
         }
         sessions.delete(id);
         sessionMessages.delete(id);
+        runtimeProjectors.delete(id);
         forgetSessionInvocations(id);
         invalidateRuntimeEventCache(id);
       }

@@ -123,6 +123,7 @@ declare global {
       getSessions(): Promise<SessionMeta[]>;
       createSession(name: string, workingDirectory?: string): Promise<SessionMeta>;
       loadSession(id: string, maxMessages?: number): Promise<Message[]>;
+      loadSessionSnapshot(id: string, maxMessages?: number): Promise<Message[]>;
       saveMessage(message: Message, targetSessionId?: string): Promise<void>;
       exportSession(id: string): Promise<string>;
       deleteSession(id: string): Promise<{ remaining: SessionMeta[]; wasActive: boolean }>;

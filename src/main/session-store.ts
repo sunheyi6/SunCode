@@ -21,6 +21,8 @@ interface SessionFile {
 const SESSION_META_READ_CHUNK = 4096;
 const SESSION_META_MAX_PREFIX = 64 * 1024;
 const SESSION_META_READ_CONCURRENCY = 24;
+const SESSION_TAIL_READ_CHUNK = 64 * 1024;
+const sessionWriteQueues = new Map<string, Promise<void>>();
 
 /** Ensure the sessions directory exists. Call once on startup. */
 export function initSessionStore(): void {
@@ -197,7 +199,7 @@ export async function loadSession(id: string, maxMessages?: number): Promise<Ses
     // For large files with maxMessages, extract only the tail of the messages
     // array using the predictable pretty-print format.
     if (maxMessages !== undefined) {
-      return await loadSessionTail(path, id, maxMessages);
+      return await loadSessionTailFromFile(path, maxMessages);
     }
 
     // Full load — parse everything
@@ -218,9 +220,8 @@ const FULL_PARSE_SIZE_LIMIT = 50 * 1024;
  * (JSON.stringify with 2-space indent) start with `    {` on their own
  * line after a comma, making them easy to find by scanning backwards.
  */
-async function loadSessionTail(
+export async function loadSessionTailFromFile(
   path: string,
-  id: string,
   maxMessages: number,
 ): Promise<SessionFile | null> {
   try {
@@ -237,72 +238,49 @@ async function loadSessionTail(
       return data;
     }
 
-    // Large file: read all, then parse tail-only
-    const raw = await readFile(path, 'utf-8');
+    const meta = await readSessionMetaFile(path);
+    if (!meta) return null;
+    if (maxMessages <= 0) return { meta, messages: [] };
 
-    // Find the messages array boundaries
-    const msgKeyIdx = raw.indexOf('"messages"');
-    if (msgKeyIdx < 0) {
-      // No messages key — fallback to full parse
-      const data = JSON.parse(raw) as SessionFile;
-      if (data.messages.length > maxMessages) {
-        data.messages = data.messages.slice(-maxMessages);
-      }
-      return data;
-    }
-
-    const arrStart = raw.indexOf('[', msgKeyIdx);
-    const arrEnd = raw.lastIndexOf(']');
-    if (arrStart < 0 || arrEnd <= arrStart) {
-      // Malformed array — fallback
-      const data = JSON.parse(raw) as SessionFile;
-      if (data.messages.length > maxMessages) {
-        data.messages = data.messages.slice(-maxMessages);
-      }
-      return data;
-    }
-
-    // Extract meta: everything before the messages array, re-close as JSON
-    const metaText = raw.slice(0, arrStart).replace(/,\s*$/, '');
-    let meta: SessionMeta;
+    const file = await open(path, 'r');
     try {
-      meta = (JSON.parse(`${metaText}}`) as { meta: SessionMeta }).meta;
-    } catch {
-      // Meta parse failed — fallback
-      const data = JSON.parse(raw) as SessionFile;
-      if (data.messages.length > maxMessages) {
-        data.messages = data.messages.slice(-maxMessages);
+      let readSize = Math.min(fileStat.size, SESSION_TAIL_READ_CHUNK);
+      while (readSize <= fileStat.size) {
+        const position = fileStat.size - readSize;
+        const buffer = Buffer.allocUnsafe(readSize);
+        const { bytesRead } = await file.read(buffer, 0, readSize, position);
+        const suffix = buffer.subarray(0, bytesRead).toString('utf-8');
+        const arrayEnd = suffix.lastIndexOf(']');
+        if (arrayEnd >= 0) {
+          let arrayContent = suffix.slice(0, arrayEnd);
+          // Once the read reaches the file prefix, exclude metadata from the
+          // reverse object scan. Partial suffixes intentionally start in the
+          // middle of the messages array and need no opening boundary.
+          if (position === 0) {
+            const messagesKey = arrayContent.indexOf('"messages"');
+            const arrayStart = messagesKey >= 0 ? arrayContent.indexOf('[', messagesKey) : -1;
+            if (arrayStart >= 0) arrayContent = arrayContent.slice(arrayStart + 1);
+          }
+          const messages = extractTailMessages(arrayContent, maxMessages);
+          if (messages.length >= maxMessages || position === 0) {
+            return { meta, messages: messages.slice(-maxMessages) };
+          }
+        }
+
+        if (position === 0) break;
+        readSize = Math.min(fileStat.size, readSize * 2);
       }
-      return data;
+    } finally {
+      await file.close();
     }
 
-    // Extract messages: use split-by-boundary for pretty-printed JSON
-    // Pretty-print format: each message object ends with "  }," or "  }"
-    // and the next message starts a new line:
-    //   {
-    //     "id": ...
-    //   },
-    //   {
-    //     "id": ...
-    //   }
-    const arrayContent = raw.slice(arrStart + 1, arrEnd).trim();
-
-    // Try: count brace-depth to find individual objects
-    const messages = extractTailMessages(arrayContent, maxMessages);
-
-    // If extraction fails or returns wrong count, fall back
-    if (messages.length === 0 && maxMessages > 0) {
-      // Fallback
-      const data = JSON.parse(raw) as SessionFile;
-      if (data.messages.length > maxMessages) {
-        data.messages = data.messages.slice(-maxMessages);
-      }
-      return { meta, messages: data.messages };
-    }
-
-    return { meta, messages: messages.slice(-maxMessages) };
+    // Unexpected formatting stays compatible with older session files.
+    const raw = await readFile(path, 'utf-8');
+    const data = JSON.parse(raw) as SessionFile;
+    data.messages = data.messages.slice(-maxMessages);
+    return data;
   } catch {
-    console.warn(`[SessionStore] Failed to load tail for session: ${id}`);
+    console.warn(`[SessionStore] Failed to load session tail: ${path}`);
     return null;
   }
 }
@@ -317,22 +295,15 @@ function extractTailMessages(arrayContent: string, count: number): Message[] {
   let pos = arrayContent.length - 1;
   let depth = 0;
   let inString = false;
-  let escaped = false;
   let objEnd = -1;
 
   while (pos >= 0 && messages.length < count) {
     const ch = arrayContent[pos];
 
-    if (escaped) {
-      escaped = false;
+    if (ch === '"' && !isEscapedQuote(arrayContent, pos)) {
+      inString = !inString;
     } else if (inString) {
-      if (ch === '\\') {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-    } else if (ch === '"') {
-      inString = true;
+      // Structural characters inside JSON strings are ignored.
     } else if (ch === '}' || ch === ']') {
       if (depth === 0) objEnd = pos;
       depth++;
@@ -356,6 +327,14 @@ function extractTailMessages(arrayContent: string, count: number): Message[] {
   return messages;
 }
 
+function isEscapedQuote(text: string, quoteIndex: number): boolean {
+  let backslashes = 0;
+  for (let index = quoteIndex - 1; index >= 0 && text[index] === '\\'; index--) {
+    backslashes++;
+  }
+  return backslashes % 2 === 1;
+}
+
 /** Return a bounded tail without changing the source message array. */
 export function limitMessages(messages: Message[], maxMessages?: number): Message[] {
   if (maxMessages === undefined || messages.length <= maxMessages) return messages;
@@ -367,18 +346,29 @@ export function limitMessages(messages: Message[], maxMessages?: number): Messag
 export async function saveSession(meta: SessionMeta, messages: Message[]): Promise<void> {
   const data: SessionFile = { meta, messages };
   const json = JSON.stringify(data, null, 2);
-
-  const tmp = tempPath(meta.id);
-  const dest = sessionPath(meta.id);
-
-  await writeFile(tmp, json, 'utf-8');
-  await rename(tmp, dest);
+  const previous = sessionWriteQueues.get(meta.id) ?? Promise.resolve();
+  const write = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const tmp = tempPath(meta.id);
+      const dest = sessionPath(meta.id);
+      await writeFile(tmp, json, 'utf-8');
+      await rename(tmp, dest);
+    });
+  sessionWriteQueues.set(meta.id, write);
+  try {
+    await write;
+  } finally {
+    if (sessionWriteQueues.get(meta.id) === write) sessionWriteQueues.delete(meta.id);
+  }
 }
 
 /** Delete a session file. */
 export async function deleteSession(id: string): Promise<void> {
   const path = sessionPath(id);
   try {
+    await sessionWriteQueues.get(id)?.catch(() => undefined);
+    sessionWriteQueues.delete(id);
     if (existsSync(path)) {
       await unlink(path);
     }
@@ -398,6 +388,8 @@ export async function deleteSession(id: string): Promise<void> {
 export async function deleteSessions(ids: string[]): Promise<void> {
   const results = await Promise.allSettled(
     ids.map(async (id) => {
+      await sessionWriteQueues.get(id)?.catch(() => undefined);
+      sessionWriteQueues.delete(id);
       const path = sessionPath(id);
       if (existsSync(path)) {
         await unlink(path);

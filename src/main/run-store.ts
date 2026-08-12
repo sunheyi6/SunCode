@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { appendFile, readdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppRuntimeIdentity, DayStats, ModelStats, RunEvent, RunId } from '@shared/types';
 import { WIRE_PROTOCOL_VERSION } from '@shared/types';
@@ -27,6 +27,7 @@ interface UsageAggregate {
 
 /** In-memory cache of the model name for each active run (run_started -> run_completed). */
 const runModelNames = new Map<string, string>();
+let usageAggregateQueue: Promise<void> = Promise.resolve();
 
 function getRunKey(sessionId: string, runId: RunId): string {
   return `${sessionId}::${runId}`;
@@ -42,7 +43,10 @@ async function readUsageAggregate(): Promise<UsageAggregate> {
 }
 
 async function writeUsageAggregate(aggregate: UsageAggregate): Promise<void> {
-  await writeFile(usageAggregatePath(), JSON.stringify(aggregate, null, 2), 'utf-8');
+  const destination = usageAggregatePath();
+  const temporary = `${destination}.tmp`;
+  await writeFile(temporary, JSON.stringify(aggregate, null, 2), 'utf-8');
+  await rename(temporary, destination);
 }
 
 async function incrementUsageAggregate(
@@ -50,48 +54,58 @@ async function incrementUsageAggregate(
   runId: RunId,
   event: Extract<RunEvent, { type: 'run_completed' }>,
 ): Promise<void> {
-  const date = event.timestamp.split('T')[0] ?? 'unknown';
-  const modelName = runModelNames.get(getRunKey(sessionId, runId)) ?? 'unknown';
+  const previous = usageAggregateQueue;
+  let release: (() => void) | undefined;
+  usageAggregateQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    const date = event.timestamp.split('T')[0] ?? 'unknown';
+    const modelName = runModelNames.get(getRunKey(sessionId, runId)) ?? 'unknown';
 
-  const aggregate = await readUsageAggregate();
+    const aggregate = await readUsageAggregate();
 
-  const usage = event.tokenUsage ?? { input: 0, output: 0, total: 0 };
+    const usage = event.tokenUsage ?? { input: 0, output: 0, total: 0 };
 
-  // Daily aggregation
-  const day = aggregate.daily[date] ?? {
-    date,
-    input: 0,
-    output: 0,
-    total: 0,
-    runs: 0,
-  };
-  day.input += usage.input;
-  day.output += usage.output;
-  day.total += usage.total;
-  day.runs += 1;
-  aggregate.daily[date] = day;
+    // Daily aggregation
+    const day = aggregate.daily[date] ?? {
+      date,
+      input: 0,
+      output: 0,
+      total: 0,
+      runs: 0,
+    };
+    day.input += usage.input;
+    day.output += usage.output;
+    day.total += usage.total;
+    day.runs += 1;
+    aggregate.daily[date] = day;
 
-  // Per-model aggregation
-  const model = aggregate.byModel[modelName] ?? {
-    modelName,
-    input: 0,
-    output: 0,
-    total: 0,
-    runs: 0,
-  };
-  model.input += usage.input;
-  model.output += usage.output;
-  model.total += usage.total;
-  model.runs += 1;
-  aggregate.byModel[modelName] = model;
+    // Per-model aggregation
+    const model = aggregate.byModel[modelName] ?? {
+      modelName,
+      input: 0,
+      output: 0,
+      total: 0,
+      runs: 0,
+    };
+    model.input += usage.input;
+    model.output += usage.output;
+    model.total += usage.total;
+    model.runs += 1;
+    aggregate.byModel[modelName] = model;
 
-  // Totals
-  aggregate.totals.input += usage.input;
-  aggregate.totals.output += usage.output;
-  aggregate.totals.total += usage.total;
-  aggregate.totals.runs += 1;
+    // Totals
+    aggregate.totals.input += usage.input;
+    aggregate.totals.output += usage.output;
+    aggregate.totals.total += usage.total;
+    aggregate.totals.runs += 1;
 
-  await writeUsageAggregate(aggregate);
+    await writeUsageAggregate(aggregate);
+  } finally {
+    release?.();
+  }
 }
 
 /** Return the current usage aggregate (daily sorted by date ascending). */

@@ -178,6 +178,11 @@ const suncodeAPI = {
     return ipcRenderer.invoke('session:load', id, maxMessages);
   },
 
+  /** Load a bounded message snapshot without activating or replaying the session. */
+  async loadSessionSnapshot(id: string, maxMessages = 10): Promise<Message[]> {
+    return ipcRenderer.invoke('session:loadSnapshot', id, maxMessages);
+  },
+
   /** Save a message to the current session */
   async saveMessage(message: Message, targetSessionId?: string): Promise<void> {
     return ipcRenderer.invoke('session:saveMessage', message, targetSessionId);

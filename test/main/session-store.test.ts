@@ -2,8 +2,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, test } from 'vitest';
-import { limitMessages, loadSessionMetasFromDir } from '../../src/main/session-store';
-import type { SessionMeta } from '../../src/shared/types';
+import {
+  limitMessages,
+  loadSessionMetasFromDir,
+  loadSessionTailFromFile,
+} from '../../src/main/session-store';
+import type { Message, SessionMeta } from '../../src/shared/types';
 
 function meta(id: string, updated: string): SessionMeta {
   return {
@@ -56,5 +60,35 @@ describe('limitMessages', () => {
     expect(limited[0]?.content).toEqual([{ type: 'text', text: '2' }]);
     expect(source).toHaveLength(12);
     expect(limitMessages(source, 0)).toEqual([]);
+  });
+});
+
+describe('loadSessionTailFromFile', () => {
+  test('reads a valid tail without parsing an unrelated malformed prefix', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'suncode-session-tail-'));
+    const path = join(dir, 'large.json');
+    try {
+      const sessionMeta = meta('large', '2026-08-12T12:00:00.000Z');
+      const tail: Message[] = Array.from({ length: 12 }, (_, index) => ({
+        role: 'user',
+        content: [{ type: 'text', text: `message ${index}: quote \\" and brace }` }],
+      }));
+      const prefix = `${JSON.stringify({ meta: sessionMeta }, null, 2).slice(0, -2)},\n  "messages": [\n    ${'x'.repeat(70 * 1024)},\n`;
+      const validTail = tail.map((message) => JSON.stringify(message, null, 4)).join(',\n');
+      await writeFile(path, `${prefix}${validTail}\n  ]\n}\n`, 'utf-8');
+
+      const snapshot = await loadSessionTailFromFile(path, 10);
+
+      expect(snapshot?.meta).toEqual(sessionMeta);
+      expect(snapshot?.messages).toHaveLength(10);
+      expect(snapshot?.messages[0]?.content).toEqual([
+        { type: 'text', text: 'message 2: quote \\" and brace }' },
+      ]);
+      expect(snapshot?.messages.at(-1)?.content).toEqual([
+        { type: 'text', text: 'message 11: quote \\" and brace }' },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -120,6 +120,10 @@ export const bridge = {
     return api().loadSession(id, maxMessages);
   },
 
+  async loadSessionSnapshot(id: string, maxMessages = 10): Promise<Message[]> {
+    return api().loadSessionSnapshot(id, maxMessages);
+  },
+
   async saveMessage(message: Message, targetSessionId?: string): Promise<void> {
     return api().saveMessage(message, targetSessionId);
   },
