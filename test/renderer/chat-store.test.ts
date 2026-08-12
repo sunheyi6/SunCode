@@ -342,6 +342,26 @@ describe('chat store stream blocks', () => {
     expect(store.messages[1]?.uiLanguage).toBe('zh');
   });
 
+  test('restores persisted user images for preview', () => {
+    const store = useChatStore();
+    const messages: Message[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '看看这张图' },
+          { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+        ],
+      },
+    ];
+
+    store.loadMessages('session-with-image', messages);
+
+    expect(store.messages[0]).toMatchObject({
+      content: '看看这张图',
+      images: [{ data: 'aGVsbG8=', mimeType: 'image/png' }],
+    });
+  });
+
   test('keeps subagent progress as ordered internal trace blocks', () => {
     const store = useChatStore();
     store.setActiveSessionId('session-1');

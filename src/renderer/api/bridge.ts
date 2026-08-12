@@ -9,6 +9,7 @@ import type {
   GitBranch,
   GitCheckoutResult,
   GitInfo,
+  ImageAttachment,
   Message,
   SessionMeta,
   TokenUsageSummary,
@@ -40,8 +41,13 @@ const api = (): NonNullable<Window['suncode']> => {
 
 export const bridge = {
   // ===== Agent =====
-  async prompt(text: string, uiLanguage?: UiLanguage, sessionId?: string): Promise<void> {
-    return api().prompt(text, uiLanguage, sessionId);
+  async prompt(
+    text: string,
+    uiLanguage?: UiLanguage,
+    sessionId?: string,
+    attachments?: ImageAttachment[],
+  ): Promise<void> {
+    return api().prompt(text, uiLanguage, sessionId, attachments);
   },
 
   abort(): void {

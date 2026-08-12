@@ -8,6 +8,7 @@ import type {
   GitCheckoutResult,
   GitInfo,
   GoalEvent,
+  ImageAttachment,
   Message,
   RunEvent,
   SessionMeta,
@@ -29,8 +30,13 @@ const suncodeAPI = {
   // ===== Agent Control =====
 
   /** Send a prompt to the agent for the session that initiated it. */
-  async prompt(text: string, uiLanguage?: UiLanguage, sessionId?: string): Promise<void> {
-    return ipcRenderer.invoke('agent:prompt', text, uiLanguage, sessionId);
+  async prompt(
+    text: string,
+    uiLanguage?: UiLanguage,
+    sessionId?: string,
+    attachments?: ImageAttachment[],
+  ): Promise<void> {
+    return ipcRenderer.invoke('agent:prompt', text, uiLanguage, sessionId, attachments);
   },
 
   /** Abort the current agent run (hard stop). */

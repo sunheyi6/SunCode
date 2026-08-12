@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ImageAttachment } from '@shared/types';
 import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useAgent } from '../../composables/useAgent';
 import { useBackgroundProcesses } from '../../composables/useBackgroundProcesses';
@@ -50,8 +51,8 @@ watch(
 );
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-function handleSend(text: string): void {
-  send(text);
+function handleSend(text: string, attachments: ImageAttachment[]): void {
+  send(text, attachments);
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.

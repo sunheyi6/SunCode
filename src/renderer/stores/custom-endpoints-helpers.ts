@@ -9,6 +9,7 @@ export function buildCustomModelOptions(endpoint: CustomEndpoint): ModelOption[]
       provider: endpoint.id,
       model: m.id,
       label: `${m.name || m.id} (${(ctx / 1000).toFixed(0)}k)`,
+      supportsImages: m.supportsImages,
     };
   });
 }

@@ -12,6 +12,7 @@ import type {
   GitCheckoutResult,
   GitInfo,
   GoalEvent,
+  ImageAttachment,
   Message,
   RunEvent,
   SessionMeta,
@@ -94,7 +95,12 @@ declare global {
   interface Window {
     suncode: {
       // Agent
-      prompt(text: string, uiLanguage?: UiLanguage, sessionId?: string): Promise<void>;
+      prompt(
+        text: string,
+        uiLanguage?: UiLanguage,
+        sessionId?: string,
+        attachments?: ImageAttachment[],
+      ): Promise<void>;
       abort(): void;
       injectGuidance(text: string, uiLanguage?: UiLanguage): void;
       stop(): void;

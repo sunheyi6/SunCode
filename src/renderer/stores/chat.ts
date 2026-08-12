@@ -1,5 +1,6 @@
 import { sanitizeStructuredMessageLeak } from '@shared/finalization';
 import type {
+  ImageAttachment,
   MemoryEntry,
   Message,
   RunEvent,
@@ -31,6 +32,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  images?: ImageAttachment[];
   thinking?: string;
   toolCalls?: ToolCallContent[];
   blocks?: ChatMessageBlock[];
@@ -129,6 +131,18 @@ function thinkingFromMessageContent(content: Message['content']): string {
     .join('');
 }
 
+function imagesFromMessageContent(content: Message['content']): ImageAttachment[] {
+  if (typeof content === 'string') return [];
+  return content
+    .filter((block) => block.type === 'image')
+    .map((block, index) => ({
+      id: nextId(),
+      data: block.data,
+      mimeType: block.mimeType,
+      name: `image-${index + 1}.${block.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png'}`,
+    }));
+}
+
 function applyFinalMessageToUi(target: ChatMessage, finalMessage: Message): void {
   const content = textFromMessageContent(finalMessage.content);
   const parsedPlan = parseTaskPlan(content, false);
@@ -213,12 +227,13 @@ export const useChatStore = defineStore('chat', () => {
   /** In-progress assistant messages for sessions the user left mid-stream. */
   const pendingAssistantMessages = new Map<string, ChatMessage>();
 
-  function addUserMessage(text: string): void {
-    latestUiLanguage = detectUiLanguage(text);
+  function addUserMessage(text: string, images: ImageAttachment[] = []): void {
+    latestUiLanguage = detectUiLanguage(text || '请查看图片');
     messages.value.push({
       id: nextId(),
       role: 'user',
       content: text,
+      images,
       timestamp: Date.now(),
       isStreaming: false,
       uiLanguage: latestUiLanguage,
@@ -780,6 +795,7 @@ export const useChatStore = defineStore('chat', () => {
           id: nextId(),
           role: message.role as 'user' | 'assistant',
           content: displayContent,
+          images: imagesFromMessageContent(message.content),
           thinking: thinking || undefined,
           toolCalls: message.toolCalls,
           timestamp: Date.now(),

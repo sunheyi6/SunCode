@@ -13,6 +13,7 @@ export interface ModelOption {
   provider: string;
   model: string;
   label: string;
+  supportsImages?: boolean;
 }
 
 const BUILTIN_RECOMMENDED: ModelOption[] = [
@@ -220,6 +221,7 @@ export const useModelsStore = defineStore('models', () => {
             provider: m.provider || provider,
             model: m.id,
             label: `${m.name || m.id} (${((m.contextWindow || 128000) / 1000).toFixed(0)}k)`,
+            supportsImages: m.supportsImages,
           })),
         );
       }

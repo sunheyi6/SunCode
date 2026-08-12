@@ -1,5 +1,12 @@
 // @ts-expect-error Bun provides this module at test runtime; the repo has no Bun type package.
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import {
+  base64ByteLength,
+  imageAttachmentDataUrl,
+  MAX_IMAGE_ATTACHMENTS,
+  validateImageAttachments,
+} from '@shared/image-attachments';
 import {
   createSessionDrafts,
   getChatInputClasses,
@@ -95,10 +102,53 @@ describe('createSessionDrafts', () => {
   test('keeps unsent input isolated per session while switching conversations', () => {
     const drafts = createSessionDrafts();
 
-    drafts.save('new-session', '还没发送的内容');
-    drafts.save('other-session', '另一个对话的草稿');
+    drafts.save('new-session', { text: '还没发送的内容', attachments: [] });
+    drafts.save('other-session', { text: '另一个对话的草稿', attachments: [] });
 
-    expect(drafts.load('new-session')).toBe('还没发送的内容');
-    expect(drafts.load('other-session')).toBe('另一个对话的草稿');
+    expect(drafts.load('new-session').text).toBe('还没发送的内容');
+    expect(drafts.load('other-session').text).toBe('另一个对话的草稿');
+  });
+
+  test('keeps pasted images with the session draft', () => {
+    const drafts = createSessionDrafts();
+    const attachment = {
+      id: 'image-1',
+      data: 'aGVsbG8=',
+      mimeType: 'image/png',
+      name: 'clipboard.png',
+    };
+
+    drafts.save('session-with-image', { text: '', attachments: [attachment] });
+
+    expect(drafts.load('session-with-image').attachments).toEqual([attachment]);
+  });
+});
+
+describe('image attachment validation', () => {
+  test('allows pasted data URL images in the renderer content security policy', () => {
+    const indexHtml = readFileSync(new URL('../../../../index.html', import.meta.url), 'utf8');
+
+    expect(indexHtml).toMatch(/img-src[^;]*\bdata:/);
+  });
+
+  test('computes decoded byte length without decoding image data', () => {
+    expect(base64ByteLength('aGVsbG8=')).toBe(5);
+  });
+
+  test('uses the pasted bytes as the exact thumbnail and viewer source', () => {
+    expect(imageAttachmentDataUrl({ data: 'iVBORw0KGgo=', mimeType: 'image/png' })).toBe(
+      'data:image/png;base64,iVBORw0KGgo=',
+    );
+  });
+
+  test('rejects more images than the composer limit', () => {
+    const attachments = Array.from({ length: MAX_IMAGE_ATTACHMENTS + 1 }, (_, index) => ({
+      id: `image-${index}`,
+      data: 'aGVsbG8=',
+      mimeType: 'image/png',
+      name: `image-${index}.png`,
+    }));
+
+    expect(validateImageAttachments(attachments)).toContain(String(MAX_IMAGE_ATTACHMENTS));
   });
 });

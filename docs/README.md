@@ -7,6 +7,7 @@
 | [项目信息](project-info.md) | 运行时路径、数据目录、日志路径、构建信息、架构约定（Agent 回答"日志在哪""路径是什么"时优先读这个） |
 | [系统提示词设计](system-prompt-design.md) | System Prompt 构建：角色定义、Tool Discipline 反循环规则、一行式工具摘要、XML 结构化上下文、Token 优化 |
 | [工具调用设计](tool-calling-design.md) | 工具架构：回合事件 (turn_start/end)、参数验证、前端工具卡片 (Command/File/Inspect)、数据流 |
+| [图片理解模型路由](vision-model-routing-design.md) | 视觉旁路：上下文隔离、自动能力识别、手动覆盖、同厂商模型选择与 `inspect_image` 调用链 |
 | [上下文压缩设计](context-compaction-design.md) | 容量保护 pipeline + 缓存友好的主动语义 projection：A/B/C 请求结构、失败保护、配置与 Terminal-Bench 验证 |
 | [工具结果裁剪设计](tool-result-prune-design.md) | 工具裁剪（无损层）：Archive-before-omit 归档、占位符协议、step 级处理时机、设计演进记录 |
 | [任务规划系统](task-planning-system.md) | 强制执行规划：三道防线、Plan Gate、Plan Parser、右侧面板统一、断路器机制 |

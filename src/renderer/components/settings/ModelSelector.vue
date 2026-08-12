@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { CustomEndpoint } from '@shared/types';
+import type { CustomEndpoint, VisionRoutingSettings } from '@shared/types';
 import { computed, onMounted, ref } from 'vue';
-import { useModelsStore } from '../../stores/models';
+import { type ModelOption, useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
@@ -28,7 +28,7 @@ onMounted(() => {
 
 const displayModels = computed(() => {
   const q = searchQuery.value.toLowerCase();
-  let source: Array<{ provider: string; model: string; label: string }>;
+  let source: ModelOption[];
 
   if (selectedProvider.value) {
     source = modelsStore.providerModels.get(selectedProvider.value) || [];
@@ -58,6 +58,76 @@ const currentModel = computed(() => ({
   model: modelsStore.activeModel,
   label: modelsStore.getCurrentLabel(),
 }));
+
+const currentProviderModels = computed(
+  () => modelsStore.providerModels.get(modelsStore.activeProvider) || [],
+);
+
+const currentVisionProvider = computed(
+  () => settingsStore.settings.visionRouting?.providers[modelsStore.activeProvider],
+);
+
+function supportsImages(model: { model: string; supportsImages?: boolean }): boolean {
+  const override = currentVisionProvider.value?.capabilityOverrides[model.model];
+  return override ?? model.supportsImages === true;
+}
+
+const currentModelSupportsImages = computed(() => {
+  const current = currentProviderModels.value.find(
+    (model) => model.model === modelsStore.activeModel,
+  );
+  if (current) return supportsImages(current);
+  return currentVisionProvider.value?.capabilityOverrides[modelsStore.activeModel] === true;
+});
+
+const visionModels = computed(() => currentProviderModels.value.filter(supportsImages));
+
+function nextVisionRouting(): VisionRoutingSettings {
+  const current = settingsStore.settings.visionRouting;
+  return {
+    enabled: current?.enabled ?? false,
+    providers: { ...(current?.providers ?? {}) },
+  };
+}
+
+function setVisionEnabled(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  const visionRouting = nextVisionRouting();
+  visionRouting.enabled = target.checked;
+  void settingsStore.update({ visionRouting });
+}
+
+function setVisionModel(event: Event): void {
+  const target = event.target as HTMLSelectElement;
+  const provider = modelsStore.activeProvider;
+  const visionRouting = nextVisionRouting();
+  const previous = visionRouting.providers[provider];
+  visionRouting.providers[provider] = {
+    model: target.value,
+    capabilityOverrides: { ...(previous?.capabilityOverrides ?? {}) },
+  };
+  void settingsStore.update({ visionRouting });
+}
+
+function capabilityOverride(modelId: string): string {
+  const value = currentVisionProvider.value?.capabilityOverrides[modelId];
+  return value === undefined ? 'auto' : value ? 'supported' : 'unsupported';
+}
+
+function setCapabilityOverride(modelId: string, event: Event): void {
+  const target = event.target as HTMLSelectElement;
+  const provider = modelsStore.activeProvider;
+  const visionRouting = nextVisionRouting();
+  const previous = visionRouting.providers[provider];
+  const capabilityOverrides = { ...(previous?.capabilityOverrides ?? {}) };
+  if (target.value === 'auto') delete capabilityOverrides[modelId];
+  else capabilityOverrides[modelId] = target.value === 'supported';
+  visionRouting.providers[provider] = {
+    model: previous?.model ?? '',
+    capabilityOverrides,
+  };
+  void settingsStore.update({ visionRouting });
+}
 
 const otherModels = computed(() =>
   displayModels.value.filter(
@@ -255,6 +325,64 @@ function providerLabel(id: string): string {
       </div>
     </div>
 
+    <section class="vision-card">
+      <div class="vision-heading">
+        <div>
+          <h4>图片理解</h4>
+          <p>图片在独立的一次性模型请求中分析，主模型只接收精简文字结果。</p>
+        </div>
+        <label class="vision-toggle">
+          <input
+            type="checkbox"
+            :checked="settingsStore.settings.visionRouting?.enabled"
+            @change="setVisionEnabled"
+          />
+          <span>{{ settingsStore.settings.visionRouting?.enabled ? '已开启' : '已关闭' }}</span>
+        </label>
+      </div>
+
+      <div class="vision-status">
+        当前模型 {{ currentModel.model }}：
+        <strong :class="currentModelSupportsImages ? 'vision-supported' : 'vision-unsupported'">
+          {{ currentModelSupportsImages ? '支持图片' : '仅文本' }}
+        </strong>
+      </div>
+
+      <label v-if="!currentModelSupportsImages" class="vision-field">
+        <span>{{ providerLabel(currentModel.provider) }} 图片理解模型</span>
+        <select
+          :value="currentVisionProvider?.model || ''"
+          :disabled="!settingsStore.settings.visionRouting?.enabled"
+          @change="setVisionModel"
+        >
+          <option value="">请选择模型</option>
+          <option v-for="model in visionModels" :key="model.model" :value="model.model">
+            {{ model.label }}
+          </option>
+        </select>
+      </label>
+      <p v-if="!currentModelSupportsImages && visionModels.length === 0" class="vision-empty">
+        未自动发现支持图片的模型，可在下方手动覆盖模型能力。
+      </p>
+
+      <details class="vision-overrides">
+        <summary>手动覆盖模型图片能力</summary>
+        <div class="vision-override-list">
+          <label v-for="model in currentProviderModels" :key="model.model">
+            <span>{{ model.label }}</span>
+            <select
+              :value="capabilityOverride(model.model)"
+              @change="setCapabilityOverride(model.model, $event)"
+            >
+              <option value="auto">自动识别</option>
+              <option value="supported">支持图片</option>
+              <option value="unsupported">不支持图片</option>
+            </select>
+          </label>
+        </div>
+      </details>
+    </section>
+
     <div class="list-heading">
       <div>
         <h4>启用的供应商</h4>
@@ -326,6 +454,7 @@ function providerLabel(id: string): string {
             <span class="model-name">{{ opt.label }}</span>
             <div class="model-meta">
               <span class="model-provider">{{ providerLabel(opt.provider) }}</span>
+              <span v-if="opt.supportsImages" class="vision-model-badge">图片</span>
               <span class="model-key-badge" :class="{ has: modelsStore.hasKey(opt.provider) }">
                 <template v-if="modelsStore.hasKey(opt.provider)">
                   <AppIcon name="check" :size="12" /> Key
@@ -472,6 +601,43 @@ function providerLabel(id: string): string {
   font-size: 11px;
 }
 .manage-key-btn:hover { border-color: var(--color-accent); }
+.vision-card {
+  padding: 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  background: var(--color-surface);
+}
+.vision-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.vision-heading h4 { margin: 0 0 3px; color: var(--color-text); font-size: 13px; }
+.vision-heading p { margin: 0; color: var(--color-text-muted); font-size: 11px; }
+.vision-toggle { display: flex; align-items: center; flex-shrink: 0; gap: 6px; color: var(--color-text-secondary); font-size: 11px; }
+.vision-status { margin-top: 12px; color: var(--color-text-secondary); font-size: 12px; }
+.vision-supported { color: var(--color-green); }
+.vision-unsupported { color: var(--color-yellow); }
+.vision-field { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; color: var(--color-text-secondary); font-size: 11px; }
+.vision-field select,
+.vision-override-list select {
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+.vision-empty { margin: 8px 0 0; color: var(--color-yellow); font-size: 11px; }
+.vision-overrides { margin-top: 12px; color: var(--color-text-secondary); font-size: 11px; }
+.vision-overrides summary { cursor: pointer; }
+.vision-override-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.vision-override-list label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.vision-override-list label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vision-override-list select { flex-shrink: 0; }
+.vision-model-badge {
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  font-size: 10px;
+}
 .list-heading {
   display: flex;
   align-items: flex-end;

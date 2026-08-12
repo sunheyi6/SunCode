@@ -1,28 +1,38 @@
+import type { ImageAttachment } from '@shared/types';
+
 const MIN_TEXTAREA_HEIGHT = 64;
 const MAX_TEXTAREA_HEIGHT = 200;
 export const COLLAPSED_TEXTAREA_HEIGHT = 120;
 const DROPDOWN_OPEN_BODY_CLASS = 'chat-input-dropdown-open';
 
 export interface SessionDrafts {
-  load: (sessionId: string | null) => string;
-  save: (sessionId: string | null, text: string) => void;
+  load: (sessionId: string | null) => ChatInputDraft;
+  save: (sessionId: string | null, draft: ChatInputDraft) => void;
+}
+
+export interface ChatInputDraft {
+  text: string;
+  attachments: ImageAttachment[];
 }
 
 export function createSessionDrafts(): SessionDrafts {
-  const drafts = new Map<string, string>();
+  const drafts = new Map<string, ChatInputDraft>();
 
   return {
     load(sessionId) {
-      if (!sessionId) return '';
-      return drafts.get(sessionId) ?? '';
+      if (!sessionId) return { text: '', attachments: [] };
+      const draft = drafts.get(sessionId);
+      return draft
+        ? { text: draft.text, attachments: [...draft.attachments] }
+        : { text: '', attachments: [] };
     },
-    save(sessionId, text) {
+    save(sessionId, draft) {
       if (!sessionId) return;
-      if (text.length === 0) {
+      if (draft.text.length === 0 && draft.attachments.length === 0) {
         drafts.delete(sessionId);
         return;
       }
-      drafts.set(sessionId, text);
+      drafts.set(sessionId, { text: draft.text, attachments: [...draft.attachments] });
     },
   };
 }

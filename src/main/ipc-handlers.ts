@@ -12,6 +12,7 @@ import {
   RECOMMENDED_MODELS,
   TITLE_GENERATION_PROMPT,
 } from '@shared/constants';
+import { validateImageAttachments } from '@shared/image-attachments';
 import { getProviderEnvKey } from '@shared/provider-env';
 import type { RuntimeEventDraft, RuntimeTerminationStatus } from '@shared/runtime-events';
 import { runtimeIdentityEnvironment } from '@shared/runtime-identity';
@@ -22,6 +23,7 @@ import type {
   DayStats,
   DiscoveredSkill,
   FileNode,
+  ImageAttachment,
   Message,
   ModelStats,
   RunEvent,
@@ -652,8 +654,17 @@ export function registerIpcHandlers(wm: WindowManager): void {
   // Agent
   ipcMain.handle(
     'agent:prompt',
-    async (_event, text: string, uiLanguage?: UiLanguage, requestedSessionId?: string) => {
+    async (
+      _event,
+      text: string,
+      uiLanguage?: UiLanguage,
+      requestedSessionId?: string,
+      attachments: ImageAttachment[] = [],
+    ) => {
       try {
+        const attachmentError = validateImageAttachments(attachments);
+        if (attachmentError) throw new Error(attachmentError);
+        if (!text.trim() && attachments.length === 0) return;
         const sessionId = requestedSessionId || currentSessionId;
         if (!sessionId) return;
         console.log('[Main] agent:prompt received:', text.slice(0, 80));
@@ -665,7 +676,14 @@ export function registerIpcHandlers(wm: WindowManager): void {
         const isFirstMessage = previousMessages.length === 0;
         const userMessage: Message = {
           role: 'user',
-          content: [{ type: 'text', text }],
+          content: [
+            ...(text ? [{ type: 'text' as const, text }] : []),
+            ...attachments.map((attachment) => ({
+              type: 'image' as const,
+              data: attachment.data,
+              mimeType: attachment.mimeType,
+            })),
+          ],
           uiLanguage,
         };
         await commitRuntimeFact(sessionId, {
@@ -687,7 +705,15 @@ export function registerIpcHandlers(wm: WindowManager): void {
           void generateTitleWithAI(sessionId, userMessage);
         }
 
-        sendToWorker({ type: 'prompt', sessionId, runId, turnId, text, uiLanguage });
+        sendToWorker({
+          type: 'prompt',
+          sessionId,
+          runId,
+          turnId,
+          text,
+          uiLanguage,
+          attachments,
+        });
       } catch (err) {
         console.error('[Main] agent:prompt failed:', (err as Error).message);
         throw err;

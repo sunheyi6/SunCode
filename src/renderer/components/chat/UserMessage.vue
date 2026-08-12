@@ -3,6 +3,8 @@ import { computed, ref } from 'vue';
 import type { ChatMessage } from '../../stores/chat';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ImageGallery from './ImageGallery.vue';
 
 const props = defineProps<{
   message: ChatMessage;
@@ -54,7 +56,13 @@ async function copyContent(text: string) {
 
 <template>
   <div class="user-message">
-    <div class="message-bubble">
+    <ImageGallery
+      v-if="message.images?.length"
+      class="message-images"
+      :images="message.images"
+      compact
+    />
+    <div v-if="message.content" class="message-bubble">
       <div
         class="message-text"
         :class="{ collapsed: isLongContent && !expanded }"
@@ -97,6 +105,11 @@ async function copyContent(text: string) {
   color: var(--color-bubble-user-text);
   border-radius: 18px 18px 6px 18px;
   padding: 10px 16px;
+}
+
+.message-images {
+  max-width: 85%;
+  margin-bottom: 7px;
 }
 
 .message-text {

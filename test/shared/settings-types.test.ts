@@ -18,6 +18,7 @@ describe('customEndpoints data model', () => {
   it('DEFAULT_SETTINGS 满足 AppSettings 形状', () => {
     const s: AppSettings = { ...DEFAULT_SETTINGS } as AppSettings;
     expect(Array.isArray(s.customEndpoints)).toBe(true);
+    expect(s.visionRouting).toEqual({ enabled: false, providers: {} });
   });
 
   it('accepts Raft as an appearance style', () => {
@@ -25,7 +26,12 @@ describe('customEndpoints data model', () => {
   });
 
   it('CustomEndpoint / CustomModelEntry 字段齐备', () => {
-    const m: CustomModelEntry = { id: 'gpt-x', name: 'GPT X', contextWindow: 64000 };
+    const m: CustomModelEntry = {
+      id: 'gpt-x',
+      name: 'GPT X',
+      contextWindow: 64000,
+      supportsImages: true,
+    };
     const e: CustomEndpoint = {
       id: 'custom-my-gw',
       name: '我的网关',

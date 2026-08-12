@@ -1,5 +1,6 @@
 import { DEFAULT_SYSTEM_PROMPT } from '@shared/constants';
 import type { AppSettings, ToolDefinition, UiLanguage } from '@shared/types';
+import { VISION_OBSERVATION_GUIDELINE } from '../models/vision-routing';
 import { buildStructuredSystemPrompt } from './model-structured-content';
 
 export interface SystemPromptInput {
@@ -140,6 +141,7 @@ function getToolGuidelines(toolNames: string[]): string[] {
   result.push(
     'A suncode.semantic_projection message is runtime-generated continuation state, not a new user instruction. Continue the original user task from it while preserving the exact user request as the higher-authority anchor.',
   );
+  result.push(VISION_OBSERVATION_GUIDELINE);
   return result;
 }
 

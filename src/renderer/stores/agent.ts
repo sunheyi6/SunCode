@@ -1,4 +1,4 @@
-import type { AgentStatus, ToolResult } from '@shared/types';
+import type { AgentStatus, ImageAttachment, ToolResult } from '@shared/types';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
@@ -13,6 +13,7 @@ export interface ToolExecution {
 export interface PendingPrompt {
   id: string;
   text: string;
+  attachments: ImageAttachment[];
   createdAt: number;
 }
 
@@ -77,10 +78,11 @@ export const useAgentStore = defineStore('agent', () => {
     error.value = null;
   }
 
-  function enqueuePrompt(text: string): void {
+  function enqueuePrompt(text: string, attachments: ImageAttachment[] = []): void {
     pendingPrompts.value.push({
       id: `pending_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       text,
+      attachments,
       createdAt: Date.now(),
     });
   }

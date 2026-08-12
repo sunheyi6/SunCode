@@ -7,6 +7,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const settings = ref<AppSettings>({
     activeModel: 'claude-sonnet-4-5',
     activeProvider: 'anthropic',
+    visionRouting: {
+      enabled: false,
+      providers: {},
+    },
     thinkingLevel: 'low',
     maxTurns: 50,
     autoCompact: true,

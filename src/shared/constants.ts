@@ -5,6 +5,10 @@ export const APP_NAME = 'SunCode';
 export const DEFAULT_SETTINGS = {
   activeModel: 'deepseek-v4-pro',
   activeProvider: 'deepseek',
+  visionRouting: {
+    enabled: false,
+    providers: {},
+  },
   thinkingLevel: 'low' as const,
   maxTurns: 50,
   autoCompact: true,

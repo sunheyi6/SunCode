@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { CustomEndpoint } from '@shared/types';
 import { buildCustomModel, createModelRegistry } from '../../src/worker/models/registry';
+import {
+  modelDeclaresImageInput,
+  resolveModelImageSupport,
+  resolveVisionTarget,
+  withImageInput,
+} from '../../src/worker/models/vision-routing';
+import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 
 function endpoint(over: Partial<CustomEndpoint>): CustomEndpoint {
   return {
@@ -51,6 +58,52 @@ describe('buildCustomModel', () => {
     expect(m.contextWindow).toBe(64000);
     expect(m.provider).toBe('custom-gw');
     expect(m.baseUrl).toBe('https://gw.example.com/v1');
+  });
+
+  it('可声明自定义模型接受图片输入', () => {
+    const m = buildCustomModel(endpoint({}), { id: 'vision', supportsImages: true });
+    expect(m.input).toEqual(['text', 'image']);
+  });
+});
+
+describe('vision routing', () => {
+  it('优先使用模型目录自动识别图片能力', () => {
+    const settings = { ...DEFAULT_SETTINGS, visionRouting: { enabled: true, providers: {} } };
+    const model = { input: ['text', 'image'] };
+    expect(modelDeclaresImageInput(model)).toBe(true);
+    expect(resolveModelImageSupport(settings, 'opencode-go', 'kimi', model)).toBe(true);
+  });
+
+  it('手动覆盖优先于模型目录', () => {
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      activeProvider: 'opencode-go',
+      activeModel: 'deepseek-v4-pro',
+      visionRouting: {
+        enabled: true,
+        providers: {
+          'opencode-go': {
+            model: 'qwen-vision',
+            capabilityOverrides: { 'qwen-vision': true, 'catalog-vision': false },
+          },
+        },
+      },
+    };
+    expect(
+      resolveModelImageSupport(settings, 'opencode-go', 'catalog-vision', {
+        input: ['text', 'image'],
+      }),
+    ).toBe(false);
+    expect(resolveVisionTarget(settings, { input: ['text'] })).toEqual({
+      provider: 'opencode-go',
+      model: 'qwen-vision',
+      forcedImageSupport: true,
+    });
+    expect(modelDeclaresImageInput(withImageInput({ input: ['text'] }))).toBe(true);
+  });
+
+  it('功能关闭时不产生视觉目标', () => {
+    expect(resolveVisionTarget({ ...DEFAULT_SETTINGS }, { input: ['text', 'image'] })).toBeNull();
   });
 });
 

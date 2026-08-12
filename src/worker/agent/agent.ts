@@ -9,6 +9,7 @@ import type {
   BackgroundProcess,
   ContextBudgetPolicy,
   GoalEvent,
+  ImageAttachment,
   Message,
   RunEvent,
   StreamEvent,
@@ -19,6 +20,13 @@ import type {
 } from '@shared/types';
 import { createMcpManager } from '../mcp/manager';
 import { createModelRegistry } from '../models/registry';
+import { analyzeImages } from '../models/vision-analysis';
+import {
+  buildTrustedVisionObservation,
+  isPureVisionQuestion,
+  resolveModelImageSupport,
+  withImageInput,
+} from '../models/vision-routing';
 
 import { createToolRegistry } from '../tools/registry';
 import { createSubagentTool } from '../tools/subagent';
@@ -255,7 +263,12 @@ export class Agent {
     this.totalTokens = { input: 0, output: 0, total: 0 };
   }
 
-  async prompt(text: string, uiLanguage?: UiLanguage, requestedRunId?: string): Promise<void> {
+  async prompt(
+    text: string,
+    uiLanguage?: UiLanguage,
+    requestedRunId?: string,
+    attachments: ImageAttachment[] = [],
+  ): Promise<void> {
     if (this.isRunning) {
       this.onError('Agent is already processing a request');
       return;
@@ -270,7 +283,14 @@ export class Agent {
     // Add user message
     const userMessage: Message = {
       role: 'user',
-      content: [{ type: 'text', text }],
+      content: [
+        ...(text ? [{ type: 'text' as const, text }] : []),
+        ...attachments.map((attachment) => ({
+          type: 'image' as const,
+          data: attachment.data,
+          mimeType: attachment.mimeType,
+        })),
+      ],
       uiLanguage: this.currentResponseLanguage,
     };
     this.messages.push(userMessage);
@@ -296,7 +316,14 @@ export class Agent {
       // Replace the user message with the init instruction
       this.messages[this.messages.length - 1] = {
         role: 'user',
-        content: [{ type: 'text', text: initPrompt }],
+        content: [
+          { type: 'text', text: initPrompt },
+          ...attachments.map((attachment) => ({
+            type: 'image' as const,
+            data: attachment.data,
+            mimeType: attachment.mimeType,
+          })),
+        ],
         uiLanguage: this.currentResponseLanguage,
       };
     }
@@ -523,15 +550,150 @@ export class Agent {
     }
   }
 
+  private async prepareImagesForModel(
+    model: unknown,
+  ): Promise<{ model: unknown; directResponse?: string }> {
+    const imageMessages = this.messages.filter(
+      (message) =>
+        message.role === 'user' &&
+        Array.isArray(message.content) &&
+        message.content.some((block) => block.type === 'image'),
+    );
+    if (imageMessages.length === 0) return { model };
+
+    const latestMessage = this.messages.at(-1);
+    const latestImageMessage =
+      latestMessage?.role === 'user' &&
+      Array.isArray(latestMessage.content) &&
+      latestMessage.content.some((block) => block.type === 'image')
+        ? latestMessage
+        : undefined;
+    if (latestImageMessage) {
+      const content = latestImageMessage.content;
+      if (!Array.isArray(content)) return { model };
+      const question = content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+        .trim();
+      if (isPureVisionQuestion(question)) {
+        const images = content.filter((block) => block.type === 'image');
+        const result = await analyzeImages(
+          this.settings,
+          model,
+          images,
+          question || '请简洁描述图片中的可见内容。',
+        );
+        latestImageMessage.content = [
+          ...(question ? [{ type: 'text' as const, text: question }] : []),
+          {
+            type: 'text',
+            text: buildTrustedVisionObservation(result.observation, result.provider, result.model),
+          },
+        ];
+        return { model, directResponse: result.observation };
+      }
+    }
+
+    if (
+      resolveModelImageSupport(
+        this.settings,
+        this.settings.activeProvider,
+        this.settings.activeModel,
+        model,
+      )
+    ) {
+      return { model: withImageInput(model) };
+    }
+
+    for (const message of imageMessages) {
+      if (!Array.isArray(message.content)) continue;
+      const text = message.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+        .trim();
+      const images = message.content.filter((block) => block.type === 'image');
+      const result = await analyzeImages(
+        this.settings,
+        model,
+        images,
+        text || '请描述图片中与当前任务有关的可见信息。',
+      );
+      message.content = [
+        {
+          type: 'text',
+          text: [
+            text,
+            buildTrustedVisionObservation(result.observation, result.provider, result.model),
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+        },
+      ];
+    }
+    return { model };
+  }
+
+  private finishDirectVisionRun(runId: string, response: string): void {
+    const finalMessage: Message = {
+      role: 'assistant',
+      content: [{ type: 'text', text: response }],
+    };
+    const timestamp = new Date().toISOString();
+    this.turnCount = 1;
+    this.onStream({ type: 'turn_start', turnCount: 1, maxTurns: 1 });
+    this.onRunEvent({ type: 'turn_started', runId, turnNumber: 1, timestamp });
+    this.onStream({ type: 'message_start' });
+    this.onRunEvent({
+      type: 'content.part',
+      runId,
+      turnNumber: 1,
+      part: { kind: 'text', text: response },
+      timestamp,
+    });
+    this.onStream({
+      type: 'message_end',
+      data: { text: response, thinking: '', toolCalls: [], isFinished: true },
+      message: finalMessage,
+    });
+    this.onStream({ type: 'turn_end', turnCount: 1, hasToolCalls: false });
+    this.onRunEvent({
+      type: 'turn_completed',
+      runId,
+      turnNumber: 1,
+      hasToolCalls: false,
+      timestamp,
+    });
+    this.onRunEvent({
+      type: 'run_completed',
+      runId,
+      turnCount: 1,
+      timestamp,
+      tokenUsage: { input: 0, output: 0, total: 0 },
+    });
+    this.messages.push(finalMessage);
+    this.onDone(finalMessage);
+    this.emitStatus('done');
+    this.saveCurrentSessionSnapshot('completed');
+  }
+
   private async runLoop(runId: string, summaryMode = false): Promise<void> {
     const modelRegistry = createModelRegistry(this.settings.customEndpoints ?? []);
-    const model = await modelRegistry.getModel(
+    let model = await modelRegistry.getModel(
       this.settings.activeProvider,
       this.settings.activeModel,
     );
 
     if (!model) {
       this.onError(`Model not found: ${this.settings.activeProvider}/${this.settings.activeModel}`);
+      return;
+    }
+
+    const preparedImages = await this.prepareImagesForModel(model);
+    model = preparedImages.model;
+    if (preparedImages.directResponse) {
+      this.finishDirectVisionRun(runId, preparedImages.directResponse);
       return;
     }
 
@@ -745,13 +907,20 @@ export class Agent {
     goalDef: import('@shared/types').GoalDefinition,
   ): Promise<void> {
     const modelRegistry = createModelRegistry(this.settings.customEndpoints ?? []);
-    const model = await modelRegistry.getModel(
+    let model = await modelRegistry.getModel(
       this.settings.activeProvider,
       this.settings.activeModel,
     );
 
     if (!model) {
       this.onError(`Model not found: ${this.settings.activeProvider}/${this.settings.activeModel}`);
+      return;
+    }
+
+    const preparedImages = await this.prepareImagesForModel(model);
+    model = preparedImages.model;
+    if (preparedImages.directResponse) {
+      this.finishDirectVisionRun(runId, preparedImages.directResponse);
       return;
     }
 

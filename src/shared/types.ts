@@ -35,8 +35,16 @@ export interface ThinkingContent {
 /** Image content block */
 export interface ImageContent {
   type: 'image';
-  base64: string;
+  data: string;
   mimeType: string;
+}
+
+/** Image selected in the renderer and transported over IPC before becoming message content. */
+export interface ImageAttachment {
+  id: string;
+  data: string;
+  mimeType: string;
+  name: string;
 }
 
 /** Union of all content block types */
@@ -223,6 +231,8 @@ export interface CustomModelEntry {
   name?: string;
   /** 可选上下文窗口（token），默认 128000。 */
   contextWindow?: number;
+  /** 端点模型是否接受图片输入；未设置时默认仅文本。 */
+  supportsImages?: boolean;
 }
 
 /** 自定义端点（一个 URL + Key + API 格式下挂多个模型）。 */
@@ -254,10 +264,25 @@ export type AppearanceStyle =
   | 'raft'
   | 'brutal';
 
+/** 单个供应商的图片理解旁路配置。 */
+export interface VisionProviderSettings {
+  /** 被主模型委托执行图片理解的一次性模型调用。 */
+  model: string;
+  /** 覆盖模型目录中的图片输入能力；未出现的模型继续使用自动识别。 */
+  capabilityOverrides: Record<string, boolean>;
+}
+
+/** 图片理解旁路。视觉调用不继承主 Agent 上下文，只把文字观察结果返回主模型。 */
+export interface VisionRoutingSettings {
+  enabled: boolean;
+  providers: Record<string, VisionProviderSettings>;
+}
+
 /** Application settings */
 export interface AppSettings {
   activeModel: string;
   activeProvider: string;
+  visionRouting: VisionRoutingSettings;
   thinkingLevel: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   maxTurns: number;
   autoCompact: boolean;
@@ -599,7 +624,7 @@ export type WorkerInMessage =
       turnId: string;
       text: string;
       uiLanguage?: UiLanguage;
-      attachments?: string[];
+      attachments?: ImageAttachment[];
     }
   | { type: 'abort'; sessionId: string }
   | { type: 'stop'; sessionId: string }

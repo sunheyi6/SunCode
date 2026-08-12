@@ -6,10 +6,17 @@ import {
   parseCommandFromInput,
   type SlashCommand,
 } from '@shared/commands';
-import type { DiscoveredSkill, GitInfo } from '@shared/types';
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+  isSupportedImageMimeType,
+  MAX_IMAGE_ATTACHMENT_BYTES,
+  MAX_IMAGE_ATTACHMENTS,
+  validateImageAttachments,
+} from '@shared/image-attachments';
+import type { DiscoveredSkill, GitInfo, ImageAttachment } from '@shared/types';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { bridge } from '../../api/bridge';
 import { useDropdownGroup } from '../../composables/useDropdown';
+import { useToast } from '../../composables/useToast';
 import { useChatStore } from '../../stores/chat';
 import { useSessionsStore } from '../../stores/sessions';
 import { useSettingsStore } from '../../stores/settings';
@@ -24,6 +31,8 @@ import {
   isInsideControlDropdown,
   syncChatInputDropdownBodyClass,
 } from './chat-input';
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import ImageGallery from './ImageGallery.vue';
 import ModelSelector from './ModelSelector.vue';
 import ThinkingSelector from './ThinkingSelector.vue';
 import WorkspaceSelector from './WorkspaceSelector.vue';
@@ -39,15 +48,17 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  send: [text: string];
+  send: [text: string, attachments: ImageAttachment[]];
   stop: [];
 }>();
 
 const sessionsStore = useSessionsStore();
 const chatStore = useChatStore();
 const settingsStore = useSettingsStore();
+const { showToast } = useToast();
 
 const inputText = ref('');
+const imageAttachments = shallowRef<ImageAttachment[]>([]);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const inputRef = ref<HTMLElement | null>(null);
 const inputExpanded = ref(false);
@@ -154,6 +165,7 @@ function handleLocalCommand(cmd: SlashCommand): void {
       // Clear worker + persisted messages for this session
       bridge.clearSessionMessages();
       inputText.value = '';
+      imageAttachments.value = [];
       void nextTick(() => resizeTextarea());
       break;
     case 'help':
@@ -230,13 +242,15 @@ watch(commandQueryActive, (active) => {
 
 // Track input changes to update dropdown position
 watch(inputText, () => {
-  chatInputSessionDrafts.save(sessionsStore.activeSessionId, inputText.value);
+  saveCurrentDraft();
   if (showCommandDropdown.value) {
     updateComposerRect();
   }
 });
 
-const hasInput = computed(() => inputText.value.trim().length > 0);
+const hasInput = computed(
+  () => inputText.value.trim().length > 0 || imageAttachments.value.length > 0,
+);
 const chatInputClasses = computed(() => getChatInputClasses(props.isEmptyConversation));
 const placeholderText = computed(() =>
   props.isEmptyConversation
@@ -266,8 +280,16 @@ function resizeTextarea(): void {
   textarea.style.height = `${getComposerTextareaHeight(textarea.scrollHeight)}px`;
 }
 
-function resetInputState(text: string): void {
+function saveCurrentDraft(): void {
+  chatInputSessionDrafts.save(sessionsStore.activeSessionId, {
+    text: inputText.value,
+    attachments: imageAttachments.value,
+  });
+}
+
+function resetInputState(text: string, attachments: ImageAttachment[] = []): void {
   inputText.value = text;
+  imageAttachments.value = [...attachments];
   historyIndex = -1;
   draftBeforeHistory = '';
   inputExpanded.value = false;
@@ -276,7 +298,8 @@ function resetInputState(text: string): void {
 
 async function handleSend(): Promise<void> {
   const text = inputText.value.trim();
-  if (!text) return;
+  const attachments = [...imageAttachments.value];
+  if (!text && attachments.length === 0) return;
 
   // Intercept local commands that shouldn't be sent to the worker
   const parsed = parseCommandFromInput(text);
@@ -286,6 +309,7 @@ async function handleSend(): Promise<void> {
     historyIndex = -1;
     draftBeforeHistory = '';
     inputText.value = '';
+    imageAttachments.value = [];
     await nextTick();
     if (textareaRef.value) {
       textareaRef.value.value = '';
@@ -303,10 +327,11 @@ async function handleSend(): Promise<void> {
   // the old text back to drafts (v-if/v-else switch unmounts the old
   // ChatInput before watch(inputText) has a chance to clear the draft).
   inputText.value = '';
+  imageAttachments.value = [];
   inputExpanded.value = false;
-  chatInputSessionDrafts.save(sessionsStore.activeSessionId, '');
+  chatInputSessionDrafts.save(sessionsStore.activeSessionId, { text: '', attachments: [] });
 
-  emit('send', text);
+  emit('send', text, attachments);
   await nextTick();
 
   if (textareaRef.value) {
@@ -326,8 +351,12 @@ let draftBeforeHistory = '';
 watch(
   () => sessionsStore.activeSessionId,
   (sessionId, previousSessionId) => {
-    chatInputSessionDrafts.save(previousSessionId, inputText.value);
-    resetInputState(chatInputSessionDrafts.load(sessionId));
+    chatInputSessionDrafts.save(previousSessionId, {
+      text: inputText.value,
+      attachments: imageAttachments.value,
+    });
+    const draft = chatInputSessionDrafts.load(sessionId);
+    resetInputState(draft.text, draft.attachments);
   },
   { immediate: true },
 );
@@ -438,6 +467,90 @@ function focusInput(): void {
   textareaRef.value?.focus();
 }
 
+function attachmentId(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `image_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  );
+}
+
+function fileToAttachment(file: File, index: number): Promise<ImageAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('读取图片失败'));
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('读取图片失败'));
+        return;
+      }
+      const separator = reader.result.indexOf(',');
+      if (separator < 0) {
+        reject(new Error('图片数据格式无效'));
+        return;
+      }
+      const extension = file.type.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
+      resolve({
+        id: attachmentId(),
+        data: reader.result.slice(separator + 1),
+        mimeType: file.type.toLowerCase(),
+        name: file.name || `clipboard-image-${index + 1}.${extension}`,
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handlePaste(event: ClipboardEvent): Promise<void> {
+  const imageFiles = Array.from(event.clipboardData?.items ?? [])
+    .filter((item) => item.kind === 'file' && item.type.toLowerCase().startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+  if (imageFiles.length === 0) return;
+
+  event.preventDefault();
+  const availableSlots = MAX_IMAGE_ATTACHMENTS - imageAttachments.value.length;
+  if (availableSlots <= 0) {
+    showToast(`一次最多添加 ${MAX_IMAGE_ATTACHMENTS} 张图片`, 'warning');
+    return;
+  }
+
+  const acceptedFiles = imageFiles.slice(0, availableSlots);
+  if (imageFiles.length > availableSlots) {
+    showToast(`一次最多添加 ${MAX_IMAGE_ATTACHMENTS} 张图片`, 'warning');
+  }
+
+  const unsupported = acceptedFiles.find((file) => !isSupportedImageMimeType(file.type));
+  if (unsupported) {
+    showToast(`不支持 ${unsupported.type || '未知格式'} 图片`, 'error');
+    return;
+  }
+  const oversized = acceptedFiles.find((file) => file.size > MAX_IMAGE_ATTACHMENT_BYTES);
+  if (oversized) {
+    showToast(`单张图片不能超过 20 MB：${oversized.name || '剪贴板图片'}`, 'error');
+    return;
+  }
+
+  try {
+    const attachments = await Promise.all(acceptedFiles.map(fileToAttachment));
+    const nextAttachments = [...imageAttachments.value, ...attachments];
+    const validationError = validateImageAttachments(nextAttachments);
+    if (validationError) {
+      showToast(validationError, 'error');
+      return;
+    }
+    imageAttachments.value = nextAttachments;
+    saveCurrentDraft();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '读取图片失败', 'error');
+  }
+}
+
+function removeAttachment(id: string): void {
+  imageAttachments.value = imageAttachments.value.filter((attachment) => attachment.id !== id);
+  saveCurrentDraft();
+  void nextTick(() => textareaRef.value?.focus());
+}
+
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown, true);
   void refreshGitInfo();
@@ -445,7 +558,7 @@ onMounted(() => {
   focusInput();
 });
 onUnmounted(() => {
-  chatInputSessionDrafts.save(sessionsStore.activeSessionId, inputText.value);
+  saveCurrentDraft();
   document.removeEventListener('pointerdown', onDocumentPointerDown, true);
   syncChatInputDropdownBodyClass(false, document.body.classList);
 });
@@ -491,6 +604,14 @@ watch(
         @close="closeCommandDropdown"
       />
 
+      <ImageGallery
+        v-if="imageAttachments.length"
+        class="composer-images"
+        :images="imageAttachments"
+        removable
+        @remove="removeAttachment"
+      />
+
       <textarea
         ref="textareaRef"
         v-model="inputText"
@@ -500,9 +621,10 @@ watch(
         rows="1"
         @input="resizeTextarea"
         @keydown="handleKeydown"
+        @paste="handlePaste"
       />
       <span
-        v-if="activeCommand"
+        v-if="activeCommand && imageAttachments.length === 0"
         class="cmd-inline-match"
         :style="{ minWidth: `${activeCommand.name.length + 1}ch` }"
         aria-hidden="true"
@@ -718,6 +840,10 @@ watch(
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.1),
     0 0 0 2px color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.composer-images {
+  margin: 0 0 12px 2px;
 }
 
 .input-field {

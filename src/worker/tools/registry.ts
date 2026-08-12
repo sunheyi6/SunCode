@@ -9,6 +9,7 @@ import { createEditTool } from './edit';
 import { createFindTool } from './find';
 import { createGlobTool } from './glob';
 import { createGrepTool } from './grep';
+import { createInspectImageTool } from './inspect-image';
 import { createLsTool } from './ls';
 import { createReadTool } from './read';
 import { createSearchLessonsTool } from './search-lessons';
@@ -99,6 +100,7 @@ export function createToolRegistry(
   };
 
   registry.register(createReadTool(workingDir));
+  if (settings) registry.register(createInspectImageTool(workingDir, settings));
   registry.register(createWriteTool(workingDir));
   registry.register(createEditTool(workingDir));
   registry.register(createBashTool(workingDir, callbacks, bashToolOptions));

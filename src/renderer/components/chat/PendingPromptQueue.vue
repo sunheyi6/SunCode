@@ -66,7 +66,10 @@ function onEditKeydown(e: KeyboardEvent): void {
         :class="{ first: index === 0 }"
       >
         <span class="queue-order">{{ index + 1 }}</span>
-        <span class="queue-text">{{ prompt.text }}</span>
+        <span class="queue-text">{{ prompt.text || '图片消息' }}</span>
+        <span v-if="prompt.attachments.length" class="image-count">
+          {{ prompt.attachments.length }} 张图片
+        </span>
         <span v-if="index === 0" class="first-badge">
           即将发送
         </span>
@@ -81,7 +84,8 @@ function onEditKeydown(e: KeyboardEvent): void {
         <template v-else>
           <button
             class="guide-btn"
-            title="立即引导当前任务（不中断）"
+            :title="prompt.attachments.length ? '图片消息将在队列中自动发送' : '立即引导当前任务（不中断）'"
+            :disabled="prompt.attachments.length > 0"
             @click="emit('inject', prompt.id)"
           >
             引导
@@ -193,6 +197,12 @@ function onEditKeydown(e: KeyboardEvent): void {
   font-size: 10px;
 }
 
+.image-count {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
 .guide-btn {
   flex-shrink: 0;
   padding: 4px 8px;
@@ -208,6 +218,11 @@ function onEditKeydown(e: KeyboardEvent): void {
 .guide-btn:hover {
   border-color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.guide-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .remove-btn {

@@ -2,10 +2,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
+import { buildTrustedVisionObservation, isPureVisionQuestion } from '../models/vision-routing';
 import { createEditTool } from './edit';
 import { createFindTool } from './find';
 import { createGlobTool } from './glob';
 import { createGrepTool } from './grep';
+import { buildVisionContext } from './inspect-image';
 import { createLsTool } from './ls';
 import { createReadTool } from './read';
 import { createWriteTool } from './write';
@@ -103,6 +105,52 @@ describe('file tool details', () => {
       expect(result.success).toBe(true);
     }
     expect(readResult.output).toContain('EXTERNAL_TOKEN=visible');
+  });
+
+  test('read does not inject image base64 into the model context', async () => {
+    const dir = await makeDir();
+    const filePath = join(dir, 'screen.png');
+    await writeFile(filePath, Buffer.from('fake-image-bytes'));
+
+    const result = await createReadTool(dir).execute({ file_path: filePath });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('inspect_image');
+    expect(result.output).toContain('not added to the main model context');
+    expect(result.output).not.toContain(Buffer.from('fake-image-bytes').toString('base64'));
+  });
+
+  test('vision request is isolated from the main agent context', () => {
+    const context = buildVisionContext('读取错误提示', [
+      { type: 'image', data: 'image-base64', mimeType: 'image/png' },
+    ]);
+
+    expect(context.messages).toHaveLength(1);
+    expect(context.tools).toEqual([]);
+    expect(context.messages[0].content).toEqual([
+      { type: 'text', text: '读取错误提示' },
+      { type: 'image', data: 'image-base64', mimeType: 'image/png' },
+    ]);
+  });
+
+  test('marks vision observations as trusted evidence for the main model', () => {
+    const observation = buildTrustedVisionObservation(
+      '这是 Viewer.js 的 GitHub 仓库页面。',
+      'opencode-go',
+      'qwen3.6-plus',
+    );
+
+    expect(observation).toContain('<vision_observation');
+    expect(observation).toContain('provider="opencode-go"');
+    expect(observation).toContain('这是 Viewer.js 的 GitHub 仓库页面。');
+  });
+
+  test('routes only pure visual questions through the direct vision path', () => {
+    expect(isPureVisionQuestion('这个图片展示的是什么内容？')).toBe(true);
+    expect(isPureVisionQuestion('请读取截图上的错误文字')).toBe(true);
+    expect(isPureVisionQuestion('')).toBe(true);
+    expect(isPureVisionQuestion('根据这张截图修改页面布局')).toBe(false);
+    expect(isPureVisionQuestion('分析截图中的报错并修复代码')).toBe(false);
   });
 
   test('glob matches files at every depth after a recursive wildcard', async () => {

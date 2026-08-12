@@ -1,3 +1,4 @@
+import type { ImageAttachment } from '@shared/types';
 import { computed, onMounted, onUnmounted } from 'vue';
 import { bridge } from '../api/bridge';
 import { useAgentStore } from '../stores/agent';
@@ -37,16 +38,19 @@ export function useAgent() {
 
   const isBusy = computed(() => chatStore.isStreaming);
 
-  function dispatch(text: string): void {
+  function dispatch(text: string, attachments: ImageAttachment[] = []): void {
     const sessionId = sessionsStore.activeSessionId;
     if (!sessionId) return;
 
-    const uiLanguage = detectUiLanguage(text);
-    chatStore.addUserMessage(text);
+    // Pinia/Vue may return queued attachments as reactive proxies, which Electron
+    // cannot structured-clone across IPC. Copy them back to plain data objects.
+    const ipcAttachments = attachments.map((attachment) => ({ ...attachment }));
+    const uiLanguage = detectUiLanguage(text || '请查看图片');
+    chatStore.addUserMessage(text, ipcAttachments);
     chatStore.setActiveSessionId(sessionId);
     chatStore.startAssistantMessage();
     void bridge
-      .prompt(text, uiLanguage, sessionId)
+      .prompt(text, uiLanguage, sessionId, ipcAttachments)
       .then(() => sessionsStore.invalidateSessionCache(sessionId))
       .then(() => sessionsStore.refresh())
       .catch((error: unknown) => {
@@ -62,7 +66,7 @@ export function useAgent() {
     nextPromptTimer = setTimeout(() => {
       nextPromptTimer = null;
       const prompt = agentStore.takeFirstPrompt();
-      if (prompt) dispatch(prompt.text);
+      if (prompt) dispatch(prompt.text, prompt.attachments);
     }, 120);
   }
 
@@ -184,15 +188,15 @@ export function useAgent() {
     );
   }
 
-  function send(text: string): void {
-    if (!text.trim()) return;
+  function send(text: string, attachments: ImageAttachment[] = []): void {
+    if (!text.trim() && attachments.length === 0) return;
 
     if (isBusy.value) {
-      agentStore.enqueuePrompt(text.trim());
+      agentStore.enqueuePrompt(text.trim(), attachments);
       return;
     }
 
-    dispatch(text.trim());
+    dispatch(text.trim(), attachments);
   }
 
   function abort(): void {
@@ -227,7 +231,7 @@ export function useAgent() {
       tokenUsage: agentStore.status.tokenUsage,
       modelName: agentStore.status.modelName,
     });
-    setTimeout(() => dispatch(prompt.text), 40);
+    setTimeout(() => dispatch(prompt.text, prompt.attachments), 40);
   }
 
   /** Inject a queued prompt as mid-run guidance. Unlike interruptAndSend,

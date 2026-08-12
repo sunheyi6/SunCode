@@ -7,7 +7,7 @@ export function createReadTool(workingDir: string) {
     readonly name = 'read';
     isReadonly = true;
     readonly description =
-      'Reads a file or directory. For files: returns contents with line numbers. For directories: lists entries. Supports reading images (PNG, JPG, GIF, WEBP) as base64. Specify offset/limit for large files.';
+      'Reads text files or lists directories. For PNG, JPG, GIF, and WEBP files, use inspect_image instead so binary data does not pollute the main model context. Specify offset/limit for large text files.';
     readonly parameters = obj(
       {
         file_path: p('string', 'The absolute path to the file to read'),
@@ -47,17 +47,8 @@ export function createReadTool(workingDir: string) {
         const ext = normalized.split('.').pop()?.toLowerCase();
         const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
         if (ext && imageExts.includes(ext)) {
-          const buffer = await readFile(normalized);
-          const base64 = buffer.toString('base64');
-          const mimeMap: Record<string, string> = {
-            png: 'image/png',
-            jpg: 'image/jpeg',
-            jpeg: 'image/jpeg',
-            gif: 'image/gif',
-            webp: 'image/webp',
-          };
           return this.success(
-            `[Image: ${normalized}]\nMIME: ${mimeMap[ext] || 'application/octet-stream'}\nBase64 (${(base64.length / 1024).toFixed(1)} KB):\n${base64}`,
+            `Image file: ${normalized}\nUse inspect_image with a focused question to analyze it. The image bytes were not added to the main model context.`,
           );
         }
 

@@ -74,6 +74,15 @@ describe('buildSystemPrompt', () => {
     );
   });
 
+  it('treats isolated vision observations as trusted attachment evidence', () => {
+    const prompt = parsePrompt();
+    const guideline = prompt.guidelines.find((item) => item.includes('<vision_observation>'));
+
+    expect(guideline).toContain('trusted visual evidence');
+    expect(guideline).toContain('do not search session files');
+    expect(guideline).toContain('do not call inspect_image');
+  });
+
   it('is deterministic for the same input', () => {
     const input = baseInput({ memoryContent: 'test memory' });
     expect(buildSystemPrompt(input)).toBe(buildSystemPrompt(input));
