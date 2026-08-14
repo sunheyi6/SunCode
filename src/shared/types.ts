@@ -937,6 +937,12 @@ export type RunEvent =
       durationMs: number;
       applied: boolean;
       timestamp: string;
+      /** (可重放) 被替换源消息在请求视图中的索引范围（含端点）。
+       *  仅 replace 模式且 applied 时存在，用于从日志重建压缩后的模型视图。 */
+      sourceStartIndex?: number;
+      sourceEndIndex?: number;
+      /** (可重放) 投影消息完整内容（contextKind='semantic_projection'）。 */
+      projectionMessage?: Message;
     }
   | {
       type: 'semantic_compact_rejected';

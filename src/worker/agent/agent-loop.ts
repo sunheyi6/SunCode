@@ -994,6 +994,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                   cacheWriteTokens: compactResult.tokenUsage.cacheWrite,
                   durationMs: Date.now() - compactStartedAt,
                   applied: semanticProjectionApplied,
+                  sourceStartIndex: candidate.sourceStartIndex,
+                  sourceEndIndex: candidate.sourceEndIndex,
+                  projectionMessage:
+                    settings.semanticCompactMode === 'replace' && created.message
+                      ? created.message
+                      : undefined,
                   timestamp: '',
                 });
               }

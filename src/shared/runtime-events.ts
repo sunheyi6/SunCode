@@ -41,6 +41,19 @@ export type RuntimeEventFact =
       finalMessageEventId?: string;
       reason?: string;
     }
+  | {
+      type: 'compaction_applied';
+      turnNumber: number;
+      mode: 'shadow' | 'replace';
+      projectionId: string;
+      previousProjectionId?: string;
+      sourceDigest: string;
+      /** 被替换源消息在请求视图中的索引范围（含端点），replace 模式下存在。 */
+      sourceStartIndex?: number;
+      sourceEndIndex?: number;
+      /** 投影消息完整内容（contextKind='semantic_projection'），replace 模式下存在。 */
+      projectionMessage?: Message;
+    }
   | { type: 'conversation_cleared' };
 
 /**

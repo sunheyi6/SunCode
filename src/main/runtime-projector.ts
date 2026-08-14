@@ -147,6 +147,10 @@ export function createSessionRuntimeProjector(): IncrementalSessionRuntimeProjec
         case 'permission_decided':
         case 'invocation_stop_requested':
         case 'invocation_terminated':
+        case 'compaction_applied':
+          // compaction_applied 只改写请求视图（contextMessages），从不改写
+          // 持久化消息列表，因此不参与消息投影；事实已落 ledger，重放时
+          // 从 readRuntimeEvents 直接读取即可重建模型视图。
           break;
       }
       lastEventId = event.eventId;

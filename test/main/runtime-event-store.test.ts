@@ -237,4 +237,99 @@ describe('Runtime Event Log', () => {
     await clearRuntimePartial(sessionId, 'run-partial');
     expect(await readRuntimePartial(sessionId, 'run-partial')).toBeNull();
   });
+
+  test('records compaction replacement so the model view is replayable; projection keeps messages untouched', async () => {
+    const sessionId = 'compaction-session';
+    const base = { runId: 'run-compact', turnId: 'turn-compact', invocationId: 'run-compact' };
+    const projectionMessage: Message = {
+      role: 'user',
+      contextKind: 'semantic_projection',
+      content: JSON.stringify({ type: 'suncode.semantic_projection', projectionId: 'proj-1' }),
+    };
+
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-compact:user-1',
+      fact: {
+        type: 'user_message_committed',
+        source: 'dispatch',
+        message: { role: 'user', content: 'first question' },
+      },
+    });
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-compact:user-2',
+      fact: {
+        type: 'user_message_committed',
+        source: 'dispatch',
+        message: { role: 'user', content: 'second question' },
+      },
+    });
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-compact:compaction:proj-1',
+      fact: {
+        type: 'compaction_applied',
+        turnNumber: 3,
+        mode: 'replace',
+        projectionId: 'proj-1',
+        sourceDigest: 'abc123',
+        sourceStartIndex: 0,
+        sourceEndIndex: 1,
+        projectionMessage,
+      },
+    });
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-compact:assistant',
+      fact: {
+        type: 'assistant_message_committed',
+        message: { role: 'assistant', content: 'final answer' },
+      },
+    });
+
+    const events = await readRuntimeEvents(sessionId);
+
+    // The compaction fact is durable and carries the full replacement detail.
+    const compaction = events.find((event) => event.fact.type === 'compaction_applied');
+    expect(compaction).toMatchObject({
+      fact: {
+        type: 'compaction_applied',
+        projectionId: 'proj-1',
+        sourceStartIndex: 0,
+        sourceEndIndex: 1,
+        projectionMessage,
+      },
+    });
+
+    // Replaying the ledger reconstructs the exact message list: compaction
+    // rewrites only the request view, never the durable messages.
+    const messages = projectSessionRuntime(events).messages;
+    expect(messages.map((message) => message.content)).toEqual([
+      'first question',
+      'second question',
+      'final answer',
+    ]);
+
+    // Idempotent replay: re-appending the same eventId coalesces instead of duplicating.
+    const duplicate = await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-compact:compaction:proj-1',
+      fact: {
+        type: 'compaction_applied',
+        turnNumber: 3,
+        mode: 'replace',
+        projectionId: 'proj-1',
+        sourceDigest: 'abc123',
+        sourceStartIndex: 0,
+        sourceEndIndex: 1,
+        projectionMessage,
+      },
+    });
+    expect(duplicate.eventId).toBe('run-compact:compaction:proj-1');
+    const afterDuplicate = await readRuntimeEvents(sessionId);
+    expect(
+      afterDuplicate.filter((event) => event.fact.type === 'compaction_applied'),
+    ).toHaveLength(1);
+  });
 });

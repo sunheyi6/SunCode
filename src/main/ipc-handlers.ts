@@ -316,6 +316,29 @@ function semanticDraftFromRunEvent(
           totalTokens: event.totalTokens,
         },
       };
+    case 'semantic_compact_completed':
+      // Compaction only rewrites the request view, never the durable message
+      // list, so the projection keeps messages untouched. The fact is logged
+      // for replay: reading the ledger reconstructs what the model actually
+      // saw (which range was replaced by which projection).
+      if (event.applied && event.mode === 'replace') {
+        return {
+          ...base,
+          eventId: `${context.runId}:compaction:${event.projectionId}`,
+          fact: {
+            type: 'compaction_applied',
+            turnNumber: event.turnNumber,
+            mode: event.mode,
+            projectionId: event.projectionId,
+            previousProjectionId: event.previousProjectionId,
+            sourceDigest: event.sourceDigest,
+            sourceStartIndex: event.sourceStartIndex,
+            sourceEndIndex: event.sourceEndIndex,
+            projectionMessage: event.projectionMessage,
+          },
+        };
+      }
+      return null;
     default:
       return null;
   }
