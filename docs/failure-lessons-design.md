@@ -124,6 +124,20 @@ export interface LessonExtractionContext {
 
 ---
 
+## 检索结果注入
+
+`Agent.runLoop()` 和 `runGoalLoop()` 根据当前真实用户目标调用 `loadRelevantLessons()`。返回文本不再写入 system prompt，而是进入：
+
+```text
+suncode.runtime_context.snapshot.relevantLessons
+```
+
+这样 lesson 检索结果变化时只追加新的运行时快照，不会破坏稳定的 system 前缀。主 Agent 会在每次运行开始前通过 `SubagentDispatcher.updateOptions()` 同步同一份 `relevantLessonsContent`，Subagent 再交由公共 `runAgentLoop()` 注入。
+
+运行时上下文使用 user provider role，但带有 `contextKind='runtime_context'`；教训提取、用户纠错识别和记忆摘要必须通过 `isUserAuthoredMessage()` 排除该内部消息。
+
+---
+
 ## Settings 扩展
 
 ```typescript

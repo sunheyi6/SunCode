@@ -1,28 +1,20 @@
-import type { MessageRole, ToolCallContent, ToolDefinition, UiLanguage } from '@shared/types';
+import type { MessageRole, ToolCallContent, ToolDefinition } from '@shared/types';
 
 const STRUCTURED_CONTENT_VERSION = 1;
 
 export interface StructuredSystemPromptInput {
   basePrompt: string;
+  agentRolePrompt?: string;
   permissionMode: string;
   planModeNotice?: string;
   guidelines: string[];
   tools: Array<Pick<ToolDefinition, 'name' | 'description' | 'parameters'> & { snippet: string }>;
-  memoryContent?: string;
-  relevantLessonsContent?: string;
-  /** Bounded source-bearing turn evidence window (not official proof). */
-  turnEvidenceContent?: string;
   agentsMdContent?: string;
   skillsContent?: string;
   projectKnowledge?: {
     entryPath: string;
     instruction: string;
   };
-  responseLanguage?: {
-    language: UiLanguage;
-    instruction: string;
-  };
-  currentDate: string;
   workingDirectory: string;
 }
 
@@ -41,6 +33,7 @@ export function buildStructuredSystemPrompt(input: StructuredSystemPromptInput):
     type: 'suncode.system_prompt',
     version: STRUCTURED_CONTENT_VERSION,
     basePrompt: input.basePrompt,
+    agentRolePrompt: input.agentRolePrompt,
     mode: {
       permissionMode: input.permissionMode,
       planModeNotice: input.planModeNotice,
@@ -53,16 +46,11 @@ export function buildStructuredSystemPrompt(input: StructuredSystemPromptInput):
       parameters: tool.parameters,
     })),
     context: {
-      memory: input.memoryContent,
-      relevantLessons: input.relevantLessonsContent,
-      turnEvidence: input.turnEvidenceContent,
       projectInstructions: input.agentsMdContent,
       skills: input.skillsContent,
       projectKnowledge: input.projectKnowledge,
     },
-    responseLanguage: input.responseLanguage,
     environment: {
-      currentDate: input.currentDate,
       workingDirectory: input.workingDirectory,
     },
   });

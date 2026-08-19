@@ -36,6 +36,7 @@ import type {
 } from '@shared/types';
 import { getAgentDataSubdir } from './agent-data-dir';
 import { buildStructuredTaskPrompt } from './model-structured-content';
+import { isUserAuthoredMessage } from './runtime-context';
 
 // ---- Paths ----
 
@@ -551,7 +552,7 @@ export function buildExtractionContexts(
   for (let i = 1; i < messages.length; i++) {
     const userMsg = messages[i]!;
     const prevMsg = messages[i - 1]!;
-    if (userMsg.role !== 'user') continue;
+    if (!isUserAuthoredMessage(userMsg)) continue;
     if (prevMsg.role !== 'assistant' || !prevMsg.toolCalls?.length) continue;
 
     const text =
@@ -657,7 +658,7 @@ function buildExtractionUserPrompt(ctx: LessonExtractionContext): string {
 
   // Try to find the original user message
   for (const msg of ctx.relevantMessages) {
-    if (msg.role === 'user') {
+    if (isUserAuthoredMessage(msg)) {
       const text =
         typeof msg.content === 'string'
           ? msg.content

@@ -339,6 +339,16 @@ function semanticDraftFromRunEvent(
         };
       }
       return null;
+    case 'runtime_context_committed':
+      return {
+        ...base,
+        eventId: `${context.runId}:runtime-context:${stableContentToken(
+          typeof event.message.content === 'string'
+            ? event.message.content
+            : JSON.stringify(event.message.content),
+        )}`,
+        fact: { type: 'runtime_context_committed', message: event.message },
+      };
     default:
       return null;
   }
@@ -1035,7 +1045,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
       if (runtimeEvents.length > 0 && meta) {
         const projection = projectRuntimeSession(id, runtimeEvents);
         messages = projection.messages;
-        modelHistory = projection.messages;
+        modelHistory = projection.modelMessages;
         const cursorUnchanged = projectionCursorMatches(meta.runtimeProjection, projection.cursor);
         const countUnchanged = meta.messageCount === messages.length;
         meta.runtimeProjection = projection.cursor;

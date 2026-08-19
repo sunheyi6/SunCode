@@ -14,11 +14,32 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import { Agent } from '../../src/worker/agent/agent';
 import { runAgentLoop } from '../../src/worker/agent/agent-loop';
+import {
+  appendRuntimeContextIfChanged,
+  isUserAuthoredMessage,
+} from '../../src/worker/agent/runtime-context';
+import type { Tool } from '../../src/worker/tools/types';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 import type { AppSettings, Message, RunEvent, StreamEvent } from '@shared/types';
 
 function userMsg(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
+}
+
+function mockTool(name: string): Tool {
+  const definition = {
+    name,
+    description: `${name} test tool`,
+    parameters: { type: 'object', properties: {} },
+  };
+  return {
+    ...definition,
+    isReadonly: true,
+    onProgress: null,
+    getDefinition: () => definition,
+    execute: () =>
+      Promise.resolve({ toolCallId: '', name, success: true, output: `${name} result` }),
+  };
 }
 
 /** A mock streamImpl that records the piContext.messages it received per call
@@ -169,6 +190,188 @@ describe('runAgentLoop — mid-run guidance injection', () => {
     expect(JSON.stringify(mainC.messages)).not.toContain('missing_tool');
   });
 
+  it('keeps the request header stable and append-extends messages between ordinary steps', async () => {
+    const captured: Array<{
+      messages: unknown[];
+      systemPrompt?: unknown;
+      tools?: unknown;
+    }> = [];
+    const streamEvents: StreamEvent[] = [];
+    let call = 0;
+    const streamImpl = (
+      _model: unknown,
+      context: Record<string, unknown>,
+    ): AsyncIterable<AssistantMessageEvent> => {
+      const currentCall = call++;
+      captured.push({
+        messages: (context.messages as unknown[]) ?? [],
+        systemPrompt: context.systemPrompt,
+        tools: context.tools,
+      });
+      return (async function* () {
+        if (currentCall === 0) {
+          yield {
+            type: 'toolcall_end',
+            contentIndex: 0,
+            toolCall: { type: 'toolCall', id: 'call-1', name: 'missing_tool', arguments: {} },
+            partial: {},
+          } as unknown as AssistantMessageEvent;
+          yield {
+            type: 'done',
+            reason: 'toolUse',
+            message: { stopReason: 'toolUse', usage: { input: 10, output: 2, totalTokens: 12 } },
+          } as unknown as AssistantMessageEvent;
+          return;
+        }
+        yield {
+          type: 'text_delta',
+          contentIndex: 0,
+          delta: 'final answer',
+          partial: {},
+        } as unknown as AssistantMessageEvent;
+        yield {
+          type: 'done',
+          reason: 'stop',
+          message: { stopReason: 'stop', usage: { input: 10, output: 2, totalTokens: 12 } },
+        } as unknown as AssistantMessageEvent;
+      })();
+    };
+
+    await runAgentLoop(
+      buildInput({
+        messages: [userMsg('inspect the request prefix')],
+        streamImpl,
+        tools: [mockTool('zeta'), mockTool('alpha')],
+        onStream: (event) => streamEvents.push(event),
+      }),
+    );
+
+    expect(captured).toHaveLength(2);
+    const first = captured[0];
+    const second = captured[1];
+    expect(second.systemPrompt).toBe(first.systemPrompt);
+    expect(second.tools).toEqual(first.tools);
+    expect((first.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual([
+      'alpha',
+      'zeta',
+    ]);
+    expect(second.messages.slice(0, first.messages.length)).toEqual(first.messages);
+    expect(JSON.stringify(second.messages)).toContain('missing_tool');
+    const parsedSystemPrompt = JSON.parse(String(first.systemPrompt));
+    expect(parsedSystemPrompt.context).not.toHaveProperty('turnEvidence');
+    expect(parsedSystemPrompt.context).not.toHaveProperty('memory');
+    expect(parsedSystemPrompt.context).not.toHaveProperty('relevantLessons');
+    expect(parsedSystemPrompt).not.toHaveProperty('responseLanguage');
+    expect(parsedSystemPrompt.environment).not.toHaveProperty('currentDate');
+    expect(JSON.stringify(first.messages[0])).toContain('suncode.runtime_context');
+    expect(JSON.stringify(first.messages[1])).toContain('inspect the request prefix');
+    expect(streamEvents.filter((event) => event.type === 'system_prompt')).toHaveLength(1);
+  });
+
+  it('only appends runtime context when its deterministic snapshot changes', () => {
+    const messages = [userMsg('first')];
+    const first = appendRuntimeContextIfChanged(messages, {
+      memoryContent: 'remember this',
+      responseLanguage: 'zh',
+      currentDate: '2026-08-19',
+    });
+    expect(first).toBeDefined();
+    expect(messages.map((message) => message.contextKind)).toEqual(['runtime_context', undefined]);
+    expect(messages.filter(isUserAuthoredMessage)).toHaveLength(1);
+
+    messages.push({ role: 'assistant', content: 'answer' }, userMsg('second'));
+    expect(
+      appendRuntimeContextIfChanged(messages, {
+        memoryContent: 'remember this',
+        responseLanguage: 'zh',
+        currentDate: '2026-08-19',
+      }),
+    ).toBeUndefined();
+
+    appendRuntimeContextIfChanged(messages, {
+      memoryContent: 'updated memory',
+      responseLanguage: 'zh',
+      currentDate: '2026-08-19',
+    });
+    expect(messages.at(-2)?.contextKind).toBe('runtime_context');
+    expect(messages.at(-1)?.content).toEqual(userMsg('second').content);
+    expect(messages.filter(isUserAuthoredMessage)).toHaveLength(2);
+  });
+
+  it('injects private sub-agent runtime context without emitting it to the parent ledger', async () => {
+    const captured: Array<{ messages: unknown[] }> = [];
+    const events: RunEvent[] = [];
+    await runAgentLoop(
+      buildInput({
+        messages: [userMsg('delegated task')],
+        memoryContent: 'subagent memory',
+        relevantLessonsContent: 'subagent lesson',
+        responseLanguage: 'en',
+        emitRuntimeContextEvent: false,
+        streamImpl: mockStream(['done'], captured),
+        onRunEvent: (event) => events.push(event),
+      }),
+    );
+
+    const request = JSON.stringify(captured[0]?.messages);
+    expect(request).toContain('subagent memory');
+    expect(request).toContain('subagent lesson');
+    expect(request).toContain('Respond in English');
+    expect(events.some((event) => event.type === 'runtime_context_committed')).toBe(false);
+  });
+
+  it('preserves the completed tool chain as the exact prefix of the next run', async () => {
+    const firstCaptured: Array<{ messages: unknown[] }> = [];
+    let call = 0;
+    const firstStream = (
+      _model: unknown,
+      context: Record<string, unknown>,
+    ): AsyncIterable<AssistantMessageEvent> => {
+      const currentCall = call++;
+      firstCaptured.push({ messages: (context.messages as unknown[]) ?? [] });
+      return (async function* () {
+        if (currentCall === 0) {
+          yield {
+            type: 'toolcall_end',
+            contentIndex: 0,
+            toolCall: { type: 'toolCall', id: 'call-prefix', name: 'missing_tool', arguments: {} },
+            partial: {},
+          } as unknown as AssistantMessageEvent;
+          yield {
+            type: 'done',
+            reason: 'toolUse',
+            message: { stopReason: 'toolUse', usage: { input: 1, output: 1, totalTokens: 2 } },
+          } as unknown as AssistantMessageEvent;
+          return;
+        }
+        yield { type: 'text_delta', contentIndex: 0, delta: 'finished', partial: {} } as unknown as AssistantMessageEvent;
+        yield {
+          type: 'done',
+          reason: 'stop',
+          message: { stopReason: 'stop', usage: { input: 1, output: 1, totalTokens: 2 } },
+        } as unknown as AssistantMessageEvent;
+      })();
+    };
+    const first = await runAgentLoop(
+      buildInput({ messages: [userMsg('first request')], streamImpl: firstStream }),
+    );
+    const nextMessages = [...first.modelMessages, userMsg('second request')];
+    const secondCaptured: Array<{ messages: unknown[] }> = [];
+    await runAgentLoop(
+      buildInput({
+        messages: nextMessages,
+        runId: 'test-run-2',
+        streamImpl: mockStream(['second answer'], secondCaptured),
+      }),
+    );
+
+    const previousFinalRequest = firstCaptured.at(-1)!.messages;
+    const nextRequest = secondCaptured[0]!.messages;
+    expect(nextRequest.slice(0, previousFinalRequest.length)).toEqual(previousFinalRequest);
+    expect(JSON.stringify(nextRequest)).toContain('finished');
+    expect(JSON.stringify(nextRequest.at(-1))).toContain('second request');
+  });
+
   afterEach(() => {
     delete process.env.SUNCODE_APP_DATA;
     rmSync(tempDataDir, { recursive: true, force: true });
@@ -196,9 +399,9 @@ describe('runAgentLoop — mid-run guidance injection', () => {
     // The model's turn-1 request context ends with the guidance user message.
     expect(captured.length).toBe(1);
     const turn1Msgs = captured[0].messages as Array<{ role?: string; content?: unknown }>;
-    expect(turn1Msgs.length).toBe(2);
-    expect(turn1Msgs[1]?.role).toBe('user');
-    expect(JSON.stringify(turn1Msgs[1])).toContain('guidance-A');
+    expect(turn1Msgs.length).toBe(3);
+    expect(turn1Msgs.at(-1)?.role).toBe('user');
+    expect(JSON.stringify(turn1Msgs.at(-1))).toContain('guidance-A');
 
     // The guidance was drained at turn-1 top; the stop-edge drain ran once
     // more (returning empty). Loop completed normally (not aborted).
@@ -303,10 +506,10 @@ describe('runAgentLoop — mid-run guidance injection', () => {
     );
 
     const msgs = captured[0].messages as Array<{ role?: string; content?: unknown }>;
-    // original, first-guidance, second-guidance — later guidance closer to the end.
-    expect(msgs.length).toBe(3);
-    expect(JSON.stringify(msgs[1])).toContain('first-guidance');
-    expect(JSON.stringify(msgs[2])).toContain('second-guidance');
+    // runtime context, original, first-guidance, second-guidance — later guidance is newest.
+    expect(msgs.length).toBe(4);
+    expect(JSON.stringify(msgs[2])).toContain('first-guidance');
+    expect(JSON.stringify(msgs[3])).toContain('second-guidance');
   });
 });
 
