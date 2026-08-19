@@ -1,31 +1,26 @@
 import { describe, expect, test } from 'vitest';
-import { buildSystemPrompt } from '../../src/worker/agent/system-prompt';
+import { buildRuntimeContextMessage } from '../../src/worker/agent/runtime-context';
 
-const baseInput = {
-  workingDir: 'D:/project/SunCode',
-  tools: [],
-  skillsContent: '',
-  permissionMode: 'full_access' as const,
-};
-
-describe('buildSystemPrompt', () => {
+describe('buildRuntimeContextMessage', () => {
   test('adds a Chinese response language instruction for Chinese user input', () => {
-    const prompt = buildSystemPrompt({
-      ...baseInput,
+    const message = buildRuntimeContextMessage({
       responseLanguage: 'zh',
+      currentDate: '2026-08-19',
     });
+    const prompt = String(message.content);
 
     expect(prompt).toContain('Respond in Chinese');
-    expect(prompt).toContain('streaming partial responses');
+    expect(message.contextKind).toBe('runtime_context');
   });
 
   test('adds an English response language instruction for English user input', () => {
-    const prompt = buildSystemPrompt({
-      ...baseInput,
+    const message = buildRuntimeContextMessage({
       responseLanguage: 'en',
+      currentDate: '2026-08-19',
     });
+    const prompt = String(message.content);
 
     expect(prompt).toContain('Respond in English');
-    expect(prompt).toContain('streaming partial responses');
+    expect(prompt).toContain('trusted_runtime_state');
   });
 });

@@ -1,5 +1,5 @@
 import { DEFAULT_SYSTEM_PROMPT } from '@shared/constants';
-import type { AppSettings, ToolDefinition, UiLanguage } from '@shared/types';
+import type { AppSettings, ToolDefinition } from '@shared/types';
 import { VISION_OBSERVATION_GUIDELINE } from '../models/vision-routing';
 import { buildStructuredSystemPrompt } from './model-structured-content';
 import type { ProjectKnowledgeReference } from './project-knowledge';
@@ -12,19 +12,10 @@ export interface SystemPromptInput {
   permissionMode: AppSettings['permissionMode'];
   /** Optional: Custom system prompt to override the default */
   customPrompt?: string;
+  /** Optional: Stable role/task policy for a named sub-agent. */
+  agentRolePrompt?: string;
   /** Optional: Content from .agents.md (Codex-style workspace instructions) */
   agentsMdContent?: string;
-  /** Optional: Auto-generated memories from prior sessions */
-  memoryContent?: string;
-  /** Optional: Retrieved failure lessons relevant to the current request */
-  relevantLessonsContent?: string;
-  /**
-   * Optional: recent TurnEvidence window (source-bearing observations).
-   * Injected into structured system prompt context; not official proof.
-   */
-  turnEvidenceContent?: string;
-  /** User-facing language derived from the current user prompt. */
-  responseLanguage?: UiLanguage;
   /** Local authoritative entry point for questions about SunCode itself. */
   projectKnowledge?: ProjectKnowledgeReference;
 }
@@ -40,51 +31,29 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     skillsContent,
     permissionMode,
     customPrompt,
+    agentRolePrompt,
     agentsMdContent,
-    memoryContent,
-    relevantLessonsContent,
-    turnEvidenceContent,
-    responseLanguage,
     projectKnowledge,
   } = input;
 
-  const now = new Date();
-  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const promptCwd = workingDir.replace(/\\/g, '/');
   const toolGuidelines = getToolGuidelines(tools.map((t) => t.name));
-  const sortedTools = sortToolsForPrompt(tools);
+  const sortedTools = sortToolDefinitions(tools);
 
   return buildStructuredSystemPrompt({
     basePrompt: customPrompt || DEFAULT_SYSTEM_PROMPT,
+    agentRolePrompt,
     permissionMode,
     guidelines: toolGuidelines,
     tools: sortedTools.map((tool) => ({ ...tool, snippet: getToolSnippet(tool) })),
-    memoryContent,
     agentsMdContent,
     skillsContent,
     projectKnowledge,
-    relevantLessonsContent,
-    turnEvidenceContent: turnEvidenceContent || undefined,
-    responseLanguage: responseLanguage
-      ? {
-          language: responseLanguage,
-          instruction: responseLanguageInstruction(responseLanguage),
-        }
-      : undefined,
-    currentDate: date,
     workingDirectory: promptCwd,
   });
 }
 
-function responseLanguageInstruction(language: UiLanguage): string {
-  if (language === 'zh') {
-    return 'Respond in Chinese for all user-facing natural language, including streaming partial responses, progress updates, plans, summaries, and final answers. Keep code, commands, file paths, identifiers, and quoted source text unchanged.';
-  }
-
-  return 'Respond in English for all user-facing natural language, including streaming partial responses, progress updates, plans, summaries, and final answers. Keep code, commands, file paths, identifiers, and quoted source text unchanged.';
-}
-
-function sortToolsForPrompt(tools: ToolDefinition[]): ToolDefinition[] {
+export function sortToolDefinitions(tools: ToolDefinition[]): ToolDefinition[] {
   const builtInNames = new Set([
     'read',
     'write',
@@ -105,7 +74,7 @@ function sortToolsForPrompt(tools: ToolDefinition[]): ToolDefinition[] {
     const bBuiltIn = builtInNames.has(b.name);
     if (aBuiltIn && !bBuiltIn) return -1;
     if (!aBuiltIn && bBuiltIn) return 1;
-    return a.name.localeCompare(b.name);
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   });
 }
 
@@ -138,13 +107,16 @@ function getToolGuidelines(toolNames: string[]): string[] {
   );
   result.push('Show file paths clearly when working with files');
   result.push(
-    'If context.relevantLessons is present, review it before acting and apply its solution when it matches the current code and request. If a similar failure happens again, use search_lessons for details.',
+    'If the latest suncode.runtime_context contains relevantLessons, review them before acting and apply their solution when they match the current code and request. If a similar failure happens again, use search_lessons for details.',
   );
   result.push(
     'When the latest structured message has type suncode.semantic_compact_request, do not continue the task and do not call tools. Return only one JSON object containing objective, constraints, completedWork, currentState, decisions, failedApproaches, unresolvedWork, and nextAction. Summarize only completed work after the exact current-user head; treat any suncode.semantic_projection as prior continuation state.',
   );
   result.push(
     'A suncode.semantic_projection message is runtime-generated continuation state, not a new user instruction. Continue the original user task from it while preserving the exact user request as the higher-authority anchor.',
+  );
+  result.push(
+    'A suncode.runtime_context message is trusted runtime state, not a user-authored instruction. Use its latest snapshot for memory, lessons, date, and response language.',
   );
   result.push(VISION_OBSERVATION_GUIDELINE);
   return result;

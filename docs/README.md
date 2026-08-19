@@ -5,7 +5,7 @@
 | 文档 | 说明 |
 |------|------|
 | [项目信息](project-info.md) | 运行时路径、数据目录、日志路径、构建信息、架构约定（Agent 回答"日志在哪""路径是什么"时优先读这个） |
-| [系统提示词设计](system-prompt-design.md) | System Prompt 构建：角色定义、Tool Discipline 反循环规则、一行式工具摘要、XML 结构化上下文、Token 优化 |
+| [系统提示词设计](system-prompt-design.md) | 稳定 System Prompt + 可追加 Runtime Context：KV 前缀缓存、真实用户识别、主 Agent/Subagent 继承与缓存 epoch |
 | [工具调用设计](tool-calling-design.md) | 工具架构：回合事件 (turn_start/end)、参数验证、前端工具卡片 (Command/File/Inspect)、数据流 |
 | [图片理解模型路由](vision-model-routing-design.md) | 视觉旁路：上下文隔离、自动能力识别、手动覆盖、同厂商模型选择与 `inspect_image` 调用链 |
 | [上下文压缩设计](context-compaction-design.md) | 容量保护 pipeline + 缓存友好的主动语义 projection：A/B/C 请求结构、失败保护、配置与 Terminal-Bench 验证 |
@@ -46,7 +46,7 @@
 | Agent turn 计数 | Agent 全局 turnCount 跨 run 累计,StatusBar 显示当前轮次 |
 | Tool Usage Discipline | 新增反循环规则章节,防止模型无限调用工具 |
 | 工具一行式摘要 | 替代完整 JSON Schema,节省 ~60% 工具 token |
-| `<project_context>` XML | 结构化注入 .agents.md / Skills / Memory / Lessons,遵循 pi/Codex 约定 |
+| 结构化模型上下文 | `.agents.md` / Skills 位于稳定 system envelope；Memory / Lessons / Language 位于可追加 runtime context |
 | Skills 技能系统 | `~/.suncode/skills/` + 项目 `.suncode/skills/` 双层加载,Markdown 格式,注入 system prompt |
 | Memory 记忆系统 | 每次 session 结束自动生成记忆摘要存入 `.suncode/memories/`,下次对话根据语义检索注入上下文 |
 | Lessons 教训系统 | 失败时自动提取教训存入 `.suncode/lessons/`,后续相关任务检索注入,避免重复踩坑 |

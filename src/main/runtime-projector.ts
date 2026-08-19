@@ -14,6 +14,7 @@ interface RunProjectionState {
 
 export interface SessionRuntimeProjection {
   messages: Message[];
+  modelMessages: Message[];
   cursor: RuntimeProjectionCursor;
 }
 
@@ -45,6 +46,7 @@ export interface IncrementalSessionRuntimeProjector {
 /** Apply only newly appended facts while retaining per-run projection state. */
 export function createSessionRuntimeProjector(): IncrementalSessionRuntimeProjector {
   let messages: Message[] = [];
+  let modelMessages: Message[] = [];
   const runs = new Map<string, RunProjectionState>();
   let latestUiLanguage: Message['uiLanguage'];
   let lastEventId: string | undefined;
@@ -58,22 +60,43 @@ export function createSessionRuntimeProjector(): IncrementalSessionRuntimeProjec
       const runId = event.runId;
       switch (event.fact.type) {
         case 'legacy_snapshot_imported':
-          messages = event.fact.messages.map(cloneMessage);
+          modelMessages = event.fact.messages.map(cloneMessage);
+          messages = modelMessages
+            .filter((message) => message.contextKind !== 'runtime_context')
+            .map(cloneMessage);
           latestUiLanguage = [...messages]
             .reverse()
-            .find((message) => message.role === 'user')?.uiLanguage;
+            .find(
+              (message) => message.role === 'user' && message.contextKind === undefined,
+            )?.uiLanguage;
           break;
         case 'conversation_cleared':
           messages = [];
+          modelMessages = [];
           latestUiLanguage = undefined;
           break;
         case 'user_message_committed':
           messages.push(cloneMessage(event.fact.message));
+          modelMessages.push(cloneMessage(event.fact.message));
           if (runId) runState(runs, runId).hasVisibleUserMessage = true;
           if (event.fact.message.uiLanguage !== undefined) {
             latestUiLanguage = event.fact.message.uiLanguage;
           }
           break;
+        case 'runtime_context_committed': {
+          const message = cloneMessage(event.fact.message);
+          let currentUserIndex = -1;
+          for (let index = modelMessages.length - 1; index >= 0; index--) {
+            const candidate = modelMessages[index];
+            if (candidate?.role === 'user' && candidate.contextKind === undefined) {
+              currentUserIndex = index;
+              break;
+            }
+          }
+          const insertionIndex = currentUserIndex >= 0 ? currentUserIndex : modelMessages.length;
+          modelMessages.splice(insertionIndex, 0, message);
+          break;
+        }
         case 'system_prompt_committed':
           if (runId) runState(runs, runId).systemPrompt = event.fact.systemPrompt;
           break;
@@ -141,6 +164,13 @@ export function createSessionRuntimeProjector(): IncrementalSessionRuntimeProjec
           } else {
             messages.push(message);
           }
+          const modelMessage = cloneMessage(message);
+          const lastModelMessage = modelMessages.at(-1);
+          if (!state?.hasVisibleUserMessage && lastModelMessage?.role === 'assistant') {
+            modelMessages[modelMessages.length - 1] = { ...lastModelMessage, ...modelMessage };
+          } else {
+            modelMessages.push(modelMessage);
+          }
           break;
         }
         case 'permission_requested':
@@ -159,6 +189,7 @@ export function createSessionRuntimeProjector(): IncrementalSessionRuntimeProjec
 
     return {
       messages,
+      modelMessages,
       cursor: {
         version: RUNTIME_PROJECTION_VERSION,
         lastEventId,
@@ -185,8 +216,7 @@ export function projectSessionRuntime(events: RuntimeEvent[]): SessionRuntimePro
 
 /** Current compatibility policy intentionally preserves the existing Message[] request shape. */
 export function projectModelHistory(events: RuntimeEvent[]): Message[] {
-  // projectSessionRuntime already clones messages into a fresh array.
-  return projectSessionRuntime(events).messages;
+  return projectSessionRuntime(events).modelMessages;
 }
 
 /** Classify invocation state from semantic facts without consulting run headers or UI state. */

@@ -55,7 +55,7 @@ export interface Message {
   role: MessageRole;
   content: string | ContentBlock[];
   /** Runtime-only model context projection; not a user-authored message. */
-  contextKind?: 'capacity_summary' | 'semantic_projection';
+  contextKind?: 'capacity_summary' | 'semantic_projection' | 'runtime_context';
   toolCallId?: string;
   /** UI language selected from the user prompt for localized progress display. */
   uiLanguage?: UiLanguage;
@@ -855,6 +855,7 @@ export type RunEvent =
   | { type: 'run_failed'; runId: RunId; error: string; timestamp: string }
   | { type: 'run_aborted'; runId: RunId; timestamp: string }
   | { type: 'guidance_injected'; runId: RunId; text: string; timestamp: string }
+  | { type: 'runtime_context_committed'; runId: RunId; message: Message; timestamp: string }
   | {
       type: 'completion_gate_blocked';
       runId: RunId;

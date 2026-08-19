@@ -1,5 +1,6 @@
 import { CHARS_PER_TOKEN, CONTEXT_SAFETY_MARGIN } from '@shared/constants';
 import type { Message, TextContent, ToolCallContent } from '@shared/types';
+import { isUserAuthoredMessage } from './runtime-context';
 
 /**
  * Estimate the number of tokens in a message or text.
@@ -69,7 +70,7 @@ export function compactMessages(
   let currentTurn: Message[] = [];
 
   for (const msg of nonSystemMessages) {
-    if (msg.role === 'user' && currentTurn.length > 0) {
+    if (isUserAuthoredMessage(msg) && currentTurn.length > 0) {
       turns.push(currentTurn);
       currentTurn = [];
     }
@@ -114,7 +115,7 @@ function summarizeTurns(turns: Message[][]): string {
   const summaryParts: string[] = [];
 
   for (const turn of turns) {
-    const userMsg = turn.find((m) => m.role === 'user');
+    const userMsg = turn.find(isUserAuthoredMessage);
     const assistantMsgs = turn.filter((m) => m.role === 'assistant');
 
     if (userMsg) {

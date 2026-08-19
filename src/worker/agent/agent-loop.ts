@@ -36,6 +36,7 @@ import { quickMatchLesson } from './lessons';
 import { buildStructuredTaskPrompt, buildStructuredTextMessage } from './model-structured-content';
 import { createProgressGuardState, updateSimpleTaskProgressGuard } from './progress-guard';
 import { prepareProjectKnowledge } from './project-knowledge';
+import { appendRuntimeContextIfChanged, isUserAuthoredMessage } from './runtime-context';
 import {
   applySemanticProjection,
   buildSemanticCompactRequest,
@@ -44,7 +45,7 @@ import {
 } from './semantic-compact';
 import { handleStream } from './stream-handler';
 import { StreamingToolExecutor } from './streaming-executor';
-import { buildSystemPrompt } from './system-prompt';
+import { buildSystemPrompt, sortToolDefinitions } from './system-prompt';
 import { isSimpleTask } from './task-policy';
 import { executeTools } from './tool-executor';
 import { formatToolResultForModel } from './tool-result-content';
@@ -77,6 +78,8 @@ export interface AgentLoopInput {
   settings: AppSettings;
   workingDir: string;
   skillsContent: string;
+  /** Stable role/task policy for a named sub-agent. */
+  agentRolePrompt?: string;
   /** Content from .agents.md / AGENTS.md (Codex-style workspace instructions). */
   agentsMdContent?: string;
   /** Auto-generated memories from prior sessions. */
@@ -87,6 +90,8 @@ export interface AgentLoopInput {
   relevantLessonsContent?: string;
   /** User-facing response language derived from the current user prompt. */
   responseLanguage?: UiLanguage;
+  /** Sub-agent runs share the parent ledger and must not project private context into it. */
+  emitRuntimeContextEvent?: boolean;
   abortSignal: AbortSignal;
   /** Unique identifier for this run (used for event logging). */
   runId: string;
@@ -134,6 +139,8 @@ export interface PrepareNextTurnResult {
 
 export interface AgentLoopResult {
   finalMessage: Message;
+  /** Provider-facing history retained for an append-only continuation in the next run. */
+  modelMessages: Message[];
   turnCount: number;
   tokenUsage: { input: number; output: number; total: number };
   /** Structured decision about why the loop terminated. */
@@ -168,10 +175,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     settings,
     workingDir,
     skillsContent,
+    agentRolePrompt,
     agentsMdContent,
     memoryContent,
     relevantLessonsContent,
     responseLanguage,
+    emitRuntimeContextEvent = true,
     abortSignal,
     runId,
     sessionId,
@@ -212,8 +221,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
     })());
 
+  const runtimeContextMessage = appendRuntimeContextIfChanged(initialMessages, {
+    memoryContent,
+    relevantLessonsContent,
+    responseLanguage,
+  });
+  if (runtimeContextMessage && emitRuntimeContextEvent) {
+    onRunEvent({
+      type: 'runtime_context_committed',
+      runId,
+      message: runtimeContextMessage,
+      timestamp: new Date().toISOString(),
+    });
+  }
   const contextMessages: Message[] = [...initialMessages];
-  const headAnchor = [...contextMessages].reverse().find((message) => message.role === 'user');
+  const headAnchor = [...contextMessages].reverse().find(isUserAuthoredMessage);
   const latestUserPrompt = headAnchor ? getMessageTextContent(headAnchor) : '';
   const guardSimpleTask = isSimpleTask(latestUserPrompt);
   let progressGuardState = createProgressGuardState();
@@ -230,6 +252,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     seedFromStore: true,
   });
   const projectKnowledge = prepareProjectKnowledge({ workingDir, sessionId, settings });
+  // Keep the provider request header byte-stable throughout a run. Dynamic
+  // observations remain in assistant/tool messages and in TurnEvidence for
+  // completion checks; they must not rewrite the system-prefix cache key.
+  const effectiveTools = tools;
+  const toolDefs = sortToolDefinitions(effectiveTools.map((tool) => tool.getDefinition()));
+  const systemPrompt = buildSystemPrompt({
+    workingDir,
+    tools: toolDefs,
+    skillsContent,
+    agentRolePrompt,
+    permissionMode: 'full_access',
+    agentsMdContent,
+    projectKnowledge,
+  });
+  if (contextMessages[0]?.role === 'system') {
+    contextMessages[0] = { role: 'system', content: systemPrompt };
+  } else {
+    contextMessages.unshift({ role: 'system', content: systemPrompt });
+  }
 
   // Diagnostic logger: persists to .suncode/diagnostics/<runId>.log
   const diag = new DiagLogger(workingDir, runId);
@@ -238,7 +279,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     `model=${settings.activeProvider}/${settings.activeModel} tools=${tools.length} maxTurns=${loopTurnLimit}`,
   );
 
-  let lastSystemPrompt = '';
+  let systemPromptEmitted = false;
 
   // Accumulate the latest 📋 plan block across turns. Each turn's assistantText
   // is single-turn only, so without accumulation the final message would only
@@ -285,28 +326,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     try {
-      const effectiveTools = tools;
-      const toolDefs = effectiveTools.map((t) => t.getDefinition());
-      const turnEvidenceContent = turnEvidence.formatPromptWindow();
-      const systemPrompt = buildSystemPrompt({
-        workingDir,
-        tools: toolDefs,
-        skillsContent,
-        permissionMode: 'full_access',
-        agentsMdContent,
-        memoryContent,
-        relevantLessonsContent,
-        turnEvidenceContent: turnEvidenceContent || undefined,
-        responseLanguage,
-        projectKnowledge,
-      });
-      if (systemPrompt !== lastSystemPrompt) {
-        if (contextMessages[0]?.role === 'system') {
-          contextMessages[0] = { role: 'system', content: systemPrompt };
-        } else {
-          contextMessages.unshift({ role: 'system', content: systemPrompt });
-        }
-        lastSystemPrompt = systemPrompt;
+      if (!systemPromptEmitted) {
+        systemPromptEmitted = true;
         onStream({ type: 'system_prompt', systemPrompt });
       }
 
@@ -534,13 +555,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             if (thinkingText) contentBlocks.push({ type: 'thinking', text: thinkingText });
             contentBlocks.push({ type: 'text', text: mergedText });
 
+            const finalMessage: Message = {
+              role: 'assistant',
+              content: contentBlocks,
+              taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
+              memoryReferences: input.memoryEntries,
+            };
             return {
-              finalMessage: {
-                role: 'assistant',
-                content: contentBlocks,
-                taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
-                memoryReferences: input.memoryEntries,
-              },
+              finalMessage,
+              modelMessages: [
+                ...contextMessages.filter((message) => message.role !== 'system'),
+                finalMessage,
+              ],
               turnCount,
               tokenUsage,
               decision: { decision: 'stop', reason: 'blocked', taxonomy: 'blocked' },
@@ -663,13 +689,18 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           tokensTotal: tokenUsage.total,
         });
 
+        const finalMessage: Message = {
+          role: 'assistant',
+          content: contentBlocks,
+          taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
+          memoryReferences: input.memoryEntries,
+        };
         return {
-          finalMessage: {
-            role: 'assistant',
-            content: contentBlocks,
-            taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
-            memoryReferences: input.memoryEntries,
-          },
+          finalMessage,
+          modelMessages: [
+            ...contextMessages.filter((message) => message.role !== 'system'),
+            finalMessage,
+          ],
           turnCount,
           tokenUsage,
           decision: turnDecision,
@@ -1082,18 +1113,23 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     msgs: contextMessages.length,
   });
 
+  const finalMessage: Message = {
+    role: 'assistant',
+    content: [
+      {
+        type: 'text' as const,
+        text: `已达到当前任务的轮次限制（${loopTurnLimit}轮）。请查看已完成的进展；如需继续，可补充更具体的方向。`,
+      },
+    ],
+    taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
+    memoryReferences: input.memoryEntries,
+  };
   return {
-    finalMessage: {
-      role: 'assistant',
-      content: [
-        {
-          type: 'text' as const,
-          text: `已达到当前任务的轮次限制（${loopTurnLimit}轮）。请查看已完成的进展；如需继续，可补充更具体的方向。`,
-        },
-      ],
-      taskPlan: buildAccumulatedTaskPlan(accumulatedPlanBlock, accumulatedPlanTaskType),
-      memoryReferences: input.memoryEntries,
-    },
+    finalMessage,
+    modelMessages: [
+      ...contextMessages.filter((message) => message.role !== 'system'),
+      finalMessage,
+    ],
     turnCount,
     tokenUsage,
     decision: { decision: 'stop', reason: 'max_turns', taxonomy: 'max_turns_exhausted' },
@@ -1127,7 +1163,7 @@ function convertMessage(msg: Message): Record<string, unknown> {
   }
 
   if (msg.contextKind) {
-    if (msg.contextKind === 'semantic_projection') {
+    if (msg.contextKind === 'semantic_projection' || msg.contextKind === 'runtime_context') {
       return {
         role: 'user' as const,
         content: getMessageTextContent(msg),

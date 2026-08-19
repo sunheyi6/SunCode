@@ -1,256 +1,166 @@
-# 系统提示词设计文档
+# System Prompt 与运行时上下文设计
 
-## 1. 设计目标
+## 1. 目标
 
-系统提示词（System Prompt）是 AI coding agent 的核心指令集，决定了模型如何理解任务、使用工具、组织回答。设计目标：
+SunCode 不显式管理供应商 KV 缓存，而是尽量让相邻模型请求满足“稳定前缀 + 只追加后缀”。供应商可据此前缀自动命中缓存。
 
-- **角色清晰**：让模型明确自己是 coding agent，而非通用助手
-- **行为约束**：规范模型如何探索代码、编辑文件、执行命令
-- **工具引导**：教会模型何时使用哪个工具，如何正确传参
-- **安全边界**：防止破坏性操作（如 `rm -rf /`）
-- **可扩展**：支持 Skills 注入领域知识，支持 MCP 动态工具
+核心原则：
 
----
+- 高权限、低频变化的指令进入 system prompt。
+- 每轮可能变化的状态进入内部 `runtime_context` 用户角色消息。
+- 工具调用产生的事实保留在 assistant/tool 消息中，不回写 system prompt。
+- 内部上下文消息不能被业务逻辑误判为用户的新指令。
+- 主 Agent 与 Subagent 使用同一套构造规则。
 
-## 2. 提示词结构
+## 2. 请求结构
 
-```
-┌─────────────────────────────────────┐
-│ 1. 角色定义 (Identity)               │  ← 你是谁
-├─────────────────────────────────────┤
-│ 2. 能力说明 (Capabilities)           │  ← 你能做什么
-├─────────────────────────────────────┤
-│ 3. 行为准则 (Guidelines)             │  ← 你应该怎么做
-├─────────────────────────────────────┤
-│ 4. 工具调度纪律 (Tool Discipline)     │  ← ★ 最关键的反循环规则
-├─────────────────────────────────────┤
-│ 5. 环境信息 (Environment)            │  ← 你在哪里工作
-├─────────────────────────────────────┤
-│ 6. <project_context> (如有)          │  ← .agents.md 项目约束 (XML)
-├─────────────────────────────────────┤
-│ 7. 工具摘要 (Tools - 一行式)          │  ← ★ 省 token 的工具摘要
-├─────────────────────────────────────┤
-│ 8. <available_skills> (如有)         │  ← Skills 领域知识 (XML)
-├─────────────────────────────────────┤
-│ 9. 开始指令 (Begin)                  │  ← 开始工作吧
-└─────────────────────────────────────┘
+```text
+system: suncode.system_prompt                 稳定请求头
+user:   suncode.runtime_context（按变化追加）  可信运行时状态
+user:   用户真实请求
+assistant/tool: 历史执行链
+user:   下一条真实请求
 ```
 
----
+`system prompt` 与工具定义在一次运行开始时构建一次。同一运行内的后续模型请求复用完全相同的 system 字符串和确定性排序后的工具定义。
 
-## 3. 各模块设计详解
+### 2.1 `suncode.system_prompt`
 
-### 3.1 角色定义
+由 `system-prompt.ts` 和 `model-structured-content.ts` 生成，主要字段：
 
-```
-You are SunCode, an expert software engineer AI assistant running as a desktop application.
-Your purpose is to help users write, understand, debug, and refactor code.
-```
-
-**设计要点**：
-- 用 `expert software engineer` 而非 `coding assistant`，引导模型以高级工程师思维工作
-- 明确"桌面应用"身份，区别于浏览器环境
-- 目标动词清晰：write / understand / debug / refactor
-
-### 3.2 能力说明
-
-简明列出模型能执行的操作类型，这帮助模型在决策时知道自己能做什么：
-
-- 读/写/编辑/搜索文件
-- 执行 shell 命令
-- 分析代码库结构
-- 提供解释和建议
-
-### 3.3 行为准则
-
-这是直接影响模型行为质量的部分，每条准则都解决一类常见问题：
-
-| # | 准则 | 解决的问题 |
-|---|------|-----------|
-| 1 | Be concise but thorough | 防止过度啰嗦 |
-| 2 | Show before/after diff when editing | 让用户可视化变更 |
-| 3 | Explain reasoning before changes | 建立信任，可审查 |
-| 4 | Gather info before answering | 防止模型假设文件内容 |
-| 5 | Explain root cause before fixing bugs | 教育用户，防止表面修复 |
-| 6 | Read files instead of assuming | **最关键**：防止幻觉 |
-| 7 | Respect existing code style | 保持代码库一致性 |
-| 8 | Include clear command descriptions | bash 工具要求 |
-| 9 | Ask for clarification, don't guess | 防止错误操作 |
-| 10 | Use parallel tool calls | 提升效率 |
-
-### 3.4 工具调度纪律 (Tool Usage Discipline) ★ 新增
-
-这是 2026-06 针对 DeepSeek 等模型反复调用工具的循环问题新增的关键章节，
-参考 Codex / pi 项目的反循环设计。分三个子节：
-
-**When to STOP using tools** — 明确"什么时候该停手"
-- 1-3 次工具调用后必须评估是否已够回答
-- 浏览类请求（"查看项目结构"）最多 2 次工具调用后就汇总
-- Bug 修复：读相关文件 → 找根因 → 修 → 停
-- 如果发现自己要重复执行同一个命令，立即停止
-
-**Anti-looping rules** — 防止无限工具循环
-- 同一命令不准执行两次
-- 信息类请求不准超过 2-3 轮
-- 找到答案后不准继续探索无关文件
-- 不确定时直接回应"我找到了这些，需要深入吗？"
-
-**Response format for informational requests** — 结构化回答格式
-- 浏览类请求必须输出：高层概述 + 组织好的信息 + 可选的深入提示
-- 明确告知：每次额外的工具调用都在消耗用户时间
-
-### 3.5 工具摘要 (一行式) ★ 重新设计 |
-
-### 3.4 环境信息
-
-```
-## Environment
-- Working directory: /Users/user/project
-- Operating system: darwin
-- Date: 2026-06-22
-- Maximum turns: 50
+```json
+{
+  "type": "suncode.system_prompt",
+  "version": 1,
+  "basePrompt": "...",
+  "agentRolePrompt": "...",
+  "mode": { "permissionMode": "full_access" },
+  "guidelines": [],
+  "tools": [],
+  "context": {
+    "projectInstructions": "...",
+    "skills": "...",
+    "projectKnowledge": "..."
+  },
+  "environment": { "workingDirectory": "..." }
+}
 ```
 
-动态注入运行时环境变量，让模型感知其所处的环境。`Maximum turns` 限制让模型知道它有有限的操作次数，促使其高效工作。
+其中 `agentRolePrompt` 仅在命名 Subagent 中存在，用来保存该 Agent 的稳定角色约束。它属于 system 权限层，不能作为普通 user 消息追加。
 
-### 3.5 工具摘要 (一行式) ★ 重新设计
+### 2.2 `suncode.runtime_context`
 
-**旧设计**：每个工具展开完整 JSON Schema（~200 字符/工具，6 工具 ≈ 1200+ 字符），
-占用大量系统提示 token。
+由 `runtime-context.ts` 生成：
 
-**新设计**：参考 pi 项目的 `toolSnippets` 方案，每个工具用一行摘要描述：
-
-```
-- **read**: Read file contents with line numbers. `file_path` (required), `offset`, `limit`.
-- **write**: Create or overwrite a file. `file_path` and `content` required.
-- **edit**: Exact string replacement. `file_path`, `old_string`, `new_string` required.
-- **bash**: Execute a shell command. `command` (required), `description`, `timeout`.
-- **grep**: Regex search via ripgrep. `pattern` (required), `path`, `glob`, `type`.
-- **glob**: Find files by glob pattern. `pattern` required (e.g. "**/*.ts").
-```
-
-完整 JSON Schema 仍然通过 `tool.getDefinition()` 提供给 function-calling
-provider 的 API 层使用，但不再占用系统提示 token。
-
-**Token 节省**：旧格式 ~1200 chars → 新格式 ~450 chars，节省 ~60%。
-
-**关键设计**：
-- 每行包含：`name` + 一句话功能 + 必需参数列表
-- 参数用反引号标注，一目了然
-- 按照 pi 项目的实践，LLM 不需要完整 Schema 也能正确选工具——provider 的 function calling 机制会处理参数详情
-
-### 3.6 工具使用指南
-
-明确的工具使用规则，列举了常见的正确/错误用法：
-
-```
-1. You may call multiple tools in a single response when operations are independent.
-2. Always read files before editing them - never assume file contents.
-3. When making edits, use the edit tool with exact string matching.
-4. When executing bash commands, include clear descriptions of what each command does.
-5. Search for code patterns with grep before making broad changes.
-6. If a tool returns an error, analyze the error and adjust your approach.
-7. After completing all necessary changes, respond with a summary of what was done.
+```json
+{
+  "type": "suncode.runtime_context",
+  "version": 1,
+  "snapshot": {
+    "memory": "...",
+    "relevantLessons": "...",
+    "responseLanguage": {
+      "language": "zh",
+      "instruction": "..."
+    },
+    "currentDate": "2026-08-19"
+  },
+  "semantics": {
+    "authority": "trusted_runtime_state",
+    "supersedesPriorRuntimeContext": true,
+    "userAuthored": false
+  }
+}
 ```
 
-### 3.7 结构化上下文注入
+它在 provider API 中使用 `user` 角色，但 `Message.contextKind === 'runtime_context'`。所有需要寻找“真实用户”的逻辑必须使用 `isUserAuthoredMessage()`，不能只判断 `role === 'user'`。
 
-Skills 和 Workspace 指令采用结构化 XML 标签组织，遵循 pi / Codex 的设计约定：
+插入策略：
 
-**`<project_context>`** — 来自 `.agents.md` 的项目级约束：
-```xml
-<project_context>
-<!-- .agents.md 的内容 -->
-- 代码风格要求
-- 部署规则
-- 安全约束
-</project_context>
+1. 构造当前快照的确定性 JSON。
+2. 与历史中最近的 runtime context 比较完整内容。
+3. 内容相同则不追加。
+4. 内容变化则插入当前真实用户消息之前。
+
+因此一次跨轮请求通常形如：
+
+```text
+R1, U1, A1, U2
 ```
 
-**`<available_skills>`** — 来自 Skill 文件的领域知识：
-```xml
-<available_skills>
-<!-- Skills 内容 -->
-- 特定框架的编码规范
-- 项目工具链的使用说明
-</available_skills>
+若运行时状态变化，则为：
+
+```text
+R1, U1, A1, R2, U2
 ```
 
-XML 标签让模型能清晰区分"通用指令"和"项目特定规则"。
-参考 [agentskills.io](https://agentskills.io) 约定和 pi 项目的 `<project_instructions>` 实践。
+`R2` 声明覆盖旧快照，但旧消息不被原地修改，保证已有前缀仍然稳定。
 
-### 3.8 `.agents.md` 加载
+## 3. 主 Agent
 
-遵循 Codex 约定，加载两级 `.agents.md`：
-1. 项目级：`<workspace>/.agents.md`（fallback `AGENTS.md`）
-2. 用户级：`~/.agents.md`
+`Agent.runLoop()` 在处理真实用户请求后加载：
 
-两者合并后注入 `<project_context>` 标签。该内容通过
-`AgentLoopInput.agentsMdContent` 传入 `buildSystemPrompt()`。
+- 工作区指令与 Skills：静态 system context。
+- 检索后的 memory：runtime context。
+- 当前任务相关 lessons：runtime context。
+- 当前 UI 回复语言：runtime context。
 
----
+`runAgentLoop()` 会保留完整 provider-facing 历史，包括 assistant tool call 与 tool result。正常完成后，下一次请求在该历史后追加最终回答和新用户消息，不再压扁成“用户请求 + 最终回答”。
 
-## 4. 提示词生成流程
+运行事件中的 `runtime_context_committed` 会写入 session ledger。`runtime-projector.ts` 维护两个投影：
 
-```
-Agent.runLoop()
-    │
-    ├─ loadAgentsMd(workingDir)        // .agents.md / AGENTS.md
-    ├─ skillsLoader.loadAll()          // Skills 内容
-    │
-    ├─ buildSystemPrompt({
-    │     workingDir,      // 进程 cwd
-    │     tools,           // ToolRegistry.getDefinitions()
-    │     skillsContent,   // SkillsLoader.loadAll()
-    │     maxTurns,        // 用户设置
-    │     agentsMdContent, // .agents.md 内容 (v2026-06 新增)
-    │     customPrompt,    // 可选的自定义提示词
-    │  })
-    │
-    ├─ getToolSnippet()    // 一行工具摘要（替代完整 JSON Schema）
-    │
-    ├─ 结构化注入:
-    │   ├─ <project_context>agentsMdContent</project_context>
-    │   └─ <available_skills>skillsContent</available_skills>
-    │
-    └─ 放入 piContext.systemPrompt → 发送给 LLM
-```
+- `messages`：Renderer 可见消息，不包含 runtime context。
+- `modelMessages`：Worker 恢复模型历史时使用，包含 runtime context。
 
-### 提示词大小对比
+## 4. Subagent
 
-| 部分 | 旧设计 (chars) | 新设计 (chars) | 节省 |
-|------|---------------|---------------|------|
-| 工具 Schema | ~1200 | ~450 | -62% |
-| 反循环规则 | 0 | ~600 | 新增 |
-| 结构化 XML 标签 | 0 | ~50 | 新增 |
-| **总计** | ~3400 | ~2800 | -18% |
+Subagent 复用 `runAgentLoop()`，不自行拼接第二份 system prompt：
 
-虽然加了反循环规则，因工具摘要大幅缩减，总提示词反而减少了 ~18%。
+- `agentRolePrompt` 保存 `SubagentDefinition.systemPrompt`，不会被公共循环覆盖。
+- `memoryContent`、`relevantLessonsContent`、`responseLanguage` 进入同一种 runtime context。
+- `parentMessages` 与当前 `AbortSignal` 在每次主 Agent 运行开始时刷新。
+- 命名会话保存 `result.modelMessages`，保留完整工具链供下一次同名调用追加。
+- 已有命名会话历史时不重复注入 parent context。
+- Subagent 的私有 runtime context 不提交到主 session ledger，避免污染主 Agent 的模型投影。
 
----
+临时 Subagent 没有跨调用历史，但仍能共享稳定 system header，并在单次执行内保持追加式请求。
 
-## 5. 经验总结
+## 5. 缓存 epoch
 
-### ✅ 有效实践
+以下变化会自然开启新的缓存 epoch，因为它们改变 system prompt 或工具定义：
 
-1. **版本化提示词**：系统提示词应像代码一样版本管理，每次改动记录效果
-2. **先读后写**：Rule #6 重复了 3 次（Guideline #6 + Tool Guideline #2 + Rule #2），因为这是模型最常见的错误
-3. **显式优于隐式**：工具参数说明中包含"默认值是多少""合法范围是什么"
-4. **约束工具选择**：告诉模型在哪些场景下用哪个工具，而不是让模型自己猜
+- 默认或自定义 base prompt 改变。
+- 工作目录、项目指令、Skills、Project Knowledge 改变。
+- Subagent 角色定义改变。
+- 可用工具集合、描述或参数 Schema 改变。
+- 权限模式改变。
 
-### ❌ 常见反模式
+memory、lessons、日期、回复语言变化不会重写 system prompt，只会追加新的 runtime context。
 
-1. **过度约束**：太多"Don't"规则会让模型变得被动、不敢行动
-2. **缺少示例**：工具用法只有 Schema 没有示例，模型容易传错参数
-3. **忽略容错**：不告诉模型"工具失败了该怎么办"，它可能循环重试同一个错误参数
-4. **提示词过长**：系统提示词占 context window 太大比例，压缩了对话空间
+上下文压缩或语义 projection 会有意改写模型请求视图，也应视为新的历史 epoch，而不是缓存异常。
 
-### 📊 提示词占比
+## 6. TurnEvidence 边界
 
-| 模型 | Context Window | 典型 System Prompt | 占比 |
-|------|---------------|-------------------|------|
-| Claude Sonnet 4.5 | 200K | ~3K tokens | 1.5% |
-| GPT-5.1 Codex | 128K | ~3K tokens | 2.3% |
-| Gemini 2.5 Pro | 1M | ~3K tokens | 0.3% |
+`TurnEvidenceBuffer` 用于完成门校验和证据索引，不进入 system prompt。模型看到的工具事实以 assistant/tool 消息为准；把 evidence 再注入 system 会同时造成权限混淆、内容重复和缓存失效。
 
-保持系统提示词在 2000-4000 tokens 是最佳范围。
+## 7. 关键实现
+
+| 文件 | 职责 |
+|------|------|
+| `src/worker/agent/system-prompt.ts` | 构建稳定 system envelope，确定性排序工具 |
+| `src/worker/agent/model-structured-content.ts` | 结构化 JSON 序列化 |
+| `src/worker/agent/runtime-context.ts` | 构造、去重和插入 runtime context；识别真实用户 |
+| `src/worker/agent/agent-loop.ts` | 冻结请求头、保留 provider-facing 历史 |
+| `src/worker/agent/subagent.ts` | Subagent 角色、上下文继承和命名历史 |
+| `src/main/runtime-projector.ts` | 分离 UI 消息投影与模型历史投影 |
+
+## 8. 测试约束
+
+测试应验证行为而不是具体提示词文案：
+
+- 同一运行的 system prompt 和 tools 完全相同。
+- 后一请求以前一请求消息为精确前缀。
+- runtime context 相同不重复，变化时追加。
+- memory、lessons、language 不出现在 system prompt。
+- runtime context 不被当作真实用户，也不出现在 UI 投影。
+- Subagent 的角色仍位于 system envelope，私有 runtime context 不进入主 ledger。

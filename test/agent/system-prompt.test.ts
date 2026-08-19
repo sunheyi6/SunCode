@@ -20,17 +20,16 @@ interface StructuredPromptForTest {
   type: string;
   version: number;
   basePrompt: string;
+  agentRolePrompt?: string;
   mode: { permissionMode: string; planModeNotice?: string };
   guidelines: string[];
   tools: Array<{ name: string; description: string; snippet: string }>;
   context: {
-    memory?: string;
-    relevantLessons?: string;
     projectInstructions?: string;
     skills?: string;
     projectKnowledge?: { entryPath: string; instruction: string };
   };
-  environment: { currentDate: string; workingDirectory: string };
+  environment: { workingDirectory: string };
 }
 
 function parsePrompt(overrides?: Partial<SystemPromptInput>): StructuredPromptForTest {
@@ -50,7 +49,7 @@ describe('buildSystemPrompt', () => {
         workingDirectory: '/test/workspace',
       },
     });
-    expect(prompt.environment.currentDate).toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(prompt.environment).not.toHaveProperty('currentDate');
   });
 
   it('keeps tool guidance and tool schemas in structured fields', () => {
@@ -85,21 +84,21 @@ describe('buildSystemPrompt', () => {
   });
 
   it('is deterministic for the same input', () => {
-    const input = baseInput({ memoryContent: 'test memory' });
+    const input = baseInput();
     expect(buildSystemPrompt(input)).toBe(buildSystemPrompt(input));
   });
 
-  it('keeps static fields stable when dynamic context changes', () => {
-    const without = parsePrompt({ memoryContent: '', skillsContent: '' });
-    const withDynamic = parsePrompt({
-      memoryContent: 'Some prior work...',
-      skillsContent: '<skill name="test">...</skill>',
-    });
+  it('does not contain per-run dynamic context fields', () => {
+    const prompt = parsePrompt();
+    expect(prompt.context).not.toHaveProperty('memory');
+    expect(prompt.context).not.toHaveProperty('relevantLessons');
+    expect(prompt).not.toHaveProperty('responseLanguage');
+  });
 
-    expect({ ...without, context: undefined }).toEqual({
-      ...withDynamic,
-      context: undefined,
-    });
+  it('keeps a sub-agent role in the stable system envelope', () => {
+    const prompt = parsePrompt({ agentRolePrompt: '只负责审查实现，不要修改文件。' });
+
+    expect(prompt.agentRolePrompt).toBe('只负责审查实现，不要修改文件。');
   });
 
   it('normalizes working directory into the environment field', () => {
@@ -120,8 +119,6 @@ describe('buildSystemPrompt', () => {
 
   it('stores optional context in named fields', () => {
     const prompt = parsePrompt({
-      memoryContent: 'Test memory',
-      relevantLessonsContent: 'Use the known fix first',
       agentsMdContent: '# Project Rules',
       skillsContent: 'SKILL: test',
       projectKnowledge: {
@@ -131,8 +128,6 @@ describe('buildSystemPrompt', () => {
     });
 
     expect(prompt.context).toEqual({
-      memory: 'Test memory',
-      relevantLessons: 'Use the known fix first',
       projectInstructions: '# Project Rules',
       skills: 'SKILL: test',
       projectKnowledge: {
