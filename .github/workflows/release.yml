@@ -100,6 +100,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -128,11 +130,38 @@ jobs:
           BINARIES=(*)
           echo "Binaries to upload: ${BINARIES[*]}"
 
-          # Build release notes
+          # ---- Build release notes: changelog from git history ----
           cat > /tmp/notes.md << NOTES
           ## SunCode ${RELEASE_TAG}
 
-          ### 文件
+          ### 📦 更新内容
+          NOTES
+
+          PREV_TAG="$(git describe --tags --abbrev=0 "${RELEASE_TAG}^" 2>/dev/null || true)"
+          if [ -n "${PREV_TAG}" ]; then
+            { echo ""
+              git log --no-merges --format='%s' "${PREV_TAG}..${RELEASE_TAG}" 2>/dev/null | awk '
+                /^chore\(release\)/ { next }
+                /^feat/   { feat[++n1] = $0; next }
+                /^fix/    { fix[++n2] = $0; next }
+                /^perf/   { perf[++n3] = $0; next }
+                /^refactor|^docs|^chore/ { other[++n4] = $0; next }
+                          { other[++n4] = $0 }
+                END {
+                  if (n1) { print "**✨ 新功能**"; for (i=1;i<=n1;i++) print "- " feat[i] }
+                  if (n2) { print "**🐛 修复**"; for (i=1;i<=n2;i++) print "- " fix[i] }
+                  if (n3) { print "**⚡ 性能优化**"; for (i=1;i<=n3;i++) print "- " perf[i] }
+                  if (n4) { print "**🔧 其他**"; for (i=1;i<=n4;i++) print "- " other[i] }
+                }'
+            } >> /tmp/notes.md
+          else
+            echo "- 首个版本发布" >> /tmp/notes.md
+          fi
+
+          # ---- Append binary file table ----
+          cat >> /tmp/notes.md << NOTES
+
+          ### 📄 文件
 
           | 文件 | SHA256 |
           |------|--------|
