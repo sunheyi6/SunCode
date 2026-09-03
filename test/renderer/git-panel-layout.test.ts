@@ -10,8 +10,10 @@ function scopedStyleBlock(source: string): string {
 }
 
 function cssRule(style: string, selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = style.match(new RegExp(`${escaped}\\s*\\{([\\s\\S]*?)\\}`));
+  const normalizedStyle = style.replace(/\r\n/g, '\n');
+  const normalizedSelector = selector.replace(/\r\n/g, '\n');
+  const escaped = normalizedSelector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = normalizedStyle.match(new RegExp(`${escaped}\\s*\\{([\\s\\S]*?)\\}`));
   expect(match).not.toBeNull();
   return match?.[1] ?? '';
 }

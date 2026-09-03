@@ -9,10 +9,16 @@ export interface Tool {
   readonly parameters: ToolDefinition['parameters'];
   /** Whether this tool is read-only, used only for streaming pre-execution scheduling. */
   readonly isReadonly: boolean;
-  execute(params: Record<string, unknown>): Promise<ToolResult>;
+  execute(params: Record<string, unknown>, options?: ToolExecutionOptions): Promise<ToolResult>;
   getDefinition(): ToolDefinition;
   /** Set before execution to receive real-time output chunks (throttled ~100ms). */
   onProgress: ((chunk: string) => void) | null;
+}
+
+/** Per-invocation hooks for tools that support progress and cancellation. */
+export interface ToolExecutionOptions {
+  onProgress?: (chunk: string) => void;
+  signal?: AbortSignal;
 }
 
 /**
@@ -25,7 +31,10 @@ export abstract class BaseTool implements Tool {
   readonly isReadonly: boolean = false;
   onProgress: ((chunk: string) => void) | null = null;
 
-  abstract execute(params: Record<string, unknown>): Promise<ToolResult>;
+  abstract execute(
+    params: Record<string, unknown>,
+    options?: ToolExecutionOptions,
+  ): Promise<ToolResult>;
 
   getDefinition(): ToolDefinition {
     return {

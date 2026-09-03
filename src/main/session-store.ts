@@ -23,6 +23,7 @@ const SESSION_META_MAX_PREFIX = 64 * 1024;
 const SESSION_META_READ_CONCURRENCY = 24;
 const SESSION_TAIL_READ_CHUNK = 64 * 1024;
 const sessionWriteQueues = new Map<string, Promise<void>>();
+const sessionSerializedCache = new Map<string, string>();
 
 /** Ensure the sessions directory exists. Call once on startup. */
 export function initSessionStore(): void {
@@ -344,16 +345,18 @@ export function limitMessages(messages: Message[], maxMessages?: number): Messag
 
 /** Save a session to disk atomically (write .tmp → rename). */
 export async function saveSession(meta: SessionMeta, messages: Message[]): Promise<void> {
-  const data: SessionFile = { meta, messages };
-  const json = JSON.stringify(data, null, 2);
   const previous = sessionWriteQueues.get(meta.id) ?? Promise.resolve();
   const write = previous
     .catch(() => undefined)
     .then(async () => {
+      const data: SessionFile = { meta, messages };
+      const json = JSON.stringify(data, null, 2);
+      if (sessionSerializedCache.get(meta.id) === json) return;
       const tmp = tempPath(meta.id);
       const dest = sessionPath(meta.id);
       await writeFile(tmp, json, 'utf-8');
       await rename(tmp, dest);
+      sessionSerializedCache.set(meta.id, json);
     });
   sessionWriteQueues.set(meta.id, write);
   try {
@@ -369,6 +372,7 @@ export async function deleteSession(id: string): Promise<void> {
   try {
     await sessionWriteQueues.get(id)?.catch(() => undefined);
     sessionWriteQueues.delete(id);
+    sessionSerializedCache.delete(id);
     if (existsSync(path)) {
       await unlink(path);
     }
@@ -390,6 +394,7 @@ export async function deleteSessions(ids: string[]): Promise<void> {
     ids.map(async (id) => {
       await sessionWriteQueues.get(id)?.catch(() => undefined);
       sessionWriteQueues.delete(id);
+      sessionSerializedCache.delete(id);
       const path = sessionPath(id);
       if (existsSync(path)) {
         await unlink(path);

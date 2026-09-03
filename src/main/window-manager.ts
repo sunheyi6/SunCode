@@ -38,7 +38,7 @@ export class WindowManager {
       modal: true,
       resizable: false,
       webPreferences: {
-        preload: join(__dirname, 'preload.js'),
+        preload: join(__dirname, 'preload.cjs'),
         contextIsolation: true,
         nodeIntegration: false,
       },

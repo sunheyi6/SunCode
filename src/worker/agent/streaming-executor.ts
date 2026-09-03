@@ -71,10 +71,6 @@ export class StreamingToolExecutor {
   }
 
   private startExecution(toolCall: ToolCallContent, tool: Tool): void {
-    tool.onProgress = (chunk: string) => {
-      this.callbacks.onToolProgress?.(toolCall.id, chunk);
-    };
-
     this.callbacks.onToolStart?.(toolCall);
     this.callbacks.onRunEvent?.({
       type: 'tool_started',
@@ -86,11 +82,12 @@ export class StreamingToolExecutor {
       description: toolCall.name,
     });
 
-    const promise = this.executeTool(tool, toolCall)
+    const promise = this.executeTool(tool, toolCall, (chunk) =>
+      this.callbacks.onToolProgress?.(toolCall.id, chunk),
+    )
       .then((result) => {
         result.toolCallId = toolCall.id;
         this.results.set(toolCall.id, result);
-        tool.onProgress = null;
         this.callbacks.onToolEnd?.(result);
         this.emitCompleted(toolCall, result);
         return result;
@@ -104,7 +101,6 @@ export class StreamingToolExecutor {
           error: (err as Error).message,
         };
         this.results.set(toolCall.id, result);
-        tool.onProgress = null;
         this.callbacks.onToolEnd?.(result);
         this.emitCompleted(toolCall, result);
         return result;
@@ -127,7 +123,11 @@ export class StreamingToolExecutor {
     });
   }
 
-  private async executeTool(tool: Tool, toolCall: ToolCallContent): Promise<ToolResult> {
+  private async executeTool(
+    tool: Tool,
+    toolCall: ToolCallContent,
+    onProgress?: (chunk: string) => void,
+  ): Promise<ToolResult> {
     let params: Record<string, unknown>;
     try {
       params = JSON.parse(toolCall.arguments);
@@ -141,16 +141,24 @@ export class StreamingToolExecutor {
       };
     }
 
-    return Promise.race([
-      tool.execute(params),
-      new Promise<ToolResult>((_, reject) =>
-        setTimeout(
-          () =>
-            reject(new Error(`Tool execution timed out after ${DEFAULT_TOOL_TIMEOUT_MS / 1000}s`)),
-          DEFAULT_TOOL_TIMEOUT_MS,
-        ),
-      ),
-    ]);
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const executePromise = tool.execute(params, {
+      onProgress,
+      signal: controller.signal,
+    });
+    const timeoutPromise = new Promise<ToolResult>((_, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`Tool execution timed out after ${DEFAULT_TOOL_TIMEOUT_MS / 1000}s`));
+      }, DEFAULT_TOOL_TIMEOUT_MS);
+    });
+
+    try {
+      return await Promise.race([executePromise, timeoutPromise]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   /**

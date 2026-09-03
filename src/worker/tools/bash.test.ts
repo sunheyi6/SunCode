@@ -277,7 +277,7 @@ describe('bash tool details', () => {
     if (result.pid) killProcessTree(result.pid);
   });
 
-  test('includes observed startup output in service observation result', async () => {
+  test('returns startup output when a service marker is provided', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'suncode-service-output-'));
     try {
       await writeFile(
@@ -292,12 +292,12 @@ describe('bash tool details', () => {
         command,
         run_in_background: true,
         background_mode: 'service',
+        startup_marker: 'startup-log-line',
         readiness_timeout: 30000,
       });
 
       expect(result.success).toBe(true);
-      expect(result.output).toContain('Observed output during startup window');
-      expect(result.output).toContain('startup-log-line');
+      expect(result.output).toContain('Matched startup marker');
       expect(result.details).toMatchObject({
         type: 'command',
         command,
