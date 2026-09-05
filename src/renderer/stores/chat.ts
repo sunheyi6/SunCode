@@ -213,12 +213,36 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false);
   const showCallTrace = ref(false);
   let currentAssistantMsg: ChatMessage | null = null;
-  let lastParsedPlanLength = 0;
-  let lastThinkingLength = 0;
-  let lastTextLength = 0;
-  let lastToolCallCount = 0;
-  let currentTurnBlockStartIndex = 0;
   let latestUiLanguage: UiLanguage = 'zh';
+
+  interface StreamAccumulatorState {
+    lastParsedPlanLength: number;
+    lastThinkingLength: number;
+    lastTextLength: number;
+    lastToolCallCount: number;
+    currentTurnBlockStartIndex: number;
+  }
+
+  // Runs can continue in more than one session while the user switches views.
+  // These counters must therefore belong to a session, otherwise deltas from
+  // two interleaved streams can be appended at the wrong offsets.
+  const streamStates = new Map<string, StreamAccumulatorState>();
+
+  function resetStreamState(sessionId: string, blockStartIndex = 0): StreamAccumulatorState {
+    const state: StreamAccumulatorState = {
+      lastParsedPlanLength: 0,
+      lastThinkingLength: 0,
+      lastTextLength: 0,
+      lastToolCallCount: 0,
+      currentTurnBlockStartIndex: blockStartIndex,
+    };
+    streamStates.set(sessionId, state);
+    return state;
+  }
+
+  function getStreamState(sessionId: string): StreamAccumulatorState {
+    return streamStates.get(sessionId) ?? resetStreamState(sessionId);
+  }
 
   /** ID of the renderer's currently visible session. */
   let activeSessionId: string | null = null;
@@ -240,7 +264,9 @@ export const useChatStore = defineStore('chat', () => {
     });
   }
 
-  function startAssistantMessage(): void {
+  function startAssistantMessage(sessionId?: string): void {
+    const streamSessionId = sessionId ?? activeSessionId;
+    if (streamSessionId) resetStreamState(streamSessionId);
     const assistantMessage: ChatMessage = {
       id: nextId(),
       role: 'assistant',
@@ -251,17 +277,12 @@ export const useChatStore = defineStore('chat', () => {
       isStreaming: true,
       uiLanguage: latestUiLanguage,
     };
-    lastParsedPlanLength = 0;
-    lastThinkingLength = 0;
-    lastTextLength = 0;
-    lastToolCallCount = 0;
-    currentTurnBlockStartIndex = 0;
     messages.value.push(assistantMessage);
     // Vue wraps objects inserted into a reactive array. Keep the wrapped
     // instance so stream mutations update the rendered message.
     currentAssistantMsg = messages.value[messages.value.length - 1];
     isStreaming.value = true;
-    if (activeSessionId) streamingSessionIds.add(activeSessionId);
+    if (streamSessionId) streamingSessionIds.add(streamSessionId);
   }
 
   /** Return the assistant message that should receive stream/tool events for a given session.
@@ -282,7 +303,7 @@ export const useChatStore = defineStore('chat', () => {
       isStreaming: true,
       uiLanguage: latestUiLanguage,
     };
-    currentTurnBlockStartIndex = 0;
+    resetStreamState(sessionId);
     pendingAssistantMessages.set(sessionId, msg);
     return msg;
   }
@@ -295,7 +316,8 @@ export const useChatStore = defineStore('chat', () => {
         if (msg) msg.systemPrompt = event.systemPrompt || '';
         break;
 
-      case 'turn_start':
+      case 'turn_start': {
+        const state = getStreamState(sessionId);
         if (msg) {
           msg.turnCount = event.turnCount ?? 0;
           msg.maxTurns = event.maxTurns ?? 0;
@@ -303,18 +325,19 @@ export const useChatStore = defineStore('chat', () => {
         // Each turn's data.text is single-turn only. Reset all length
         // trackers so plan re-parse and text append work for progress
         // updates (📋 进度更新) in later turns.
-        lastThinkingLength = 0;
-        lastTextLength = 0;
-        lastParsedPlanLength = 0;
-        lastToolCallCount = 0;
-        currentTurnBlockStartIndex = msg?.blocks?.length ?? 0;
+        state.lastThinkingLength = 0;
+        state.lastTextLength = 0;
+        state.lastParsedPlanLength = 0;
+        state.lastToolCallCount = 0;
+        state.currentTurnBlockStartIndex = msg?.blocks?.length ?? 0;
         console.debug(
           '[RenderStream] turn_start',
           `turn=${event.turnCount ?? 0}`,
-          `blockStartIndex=${currentTurnBlockStartIndex}`,
+          `blockStartIndex=${state.currentTurnBlockStartIndex}`,
           `sessionId=${sessionId.slice(-8)}`,
         );
         break;
+      }
 
       case 'turn_end':
         // Intermediate tool turns belong to the current assistant response.
@@ -375,6 +398,7 @@ export const useChatStore = defineStore('chat', () => {
         }
         const target = activeAssistantMessage(sessionId);
         if (!target) break;
+        const state = getStreamState(sessionId);
 
         const data = event.data;
         if (!data) {
@@ -396,6 +420,7 @@ export const useChatStore = defineStore('chat', () => {
               currentAssistantMsg = null;
             }
             pendingAssistantMessages.delete(sessionId);
+            streamStates.delete(sessionId);
           }
           break;
         }
@@ -405,18 +430,23 @@ export const useChatStore = defineStore('chat', () => {
         if (!target.blocks) target.blocks = [];
 
         const currentTextLen = data.text?.length ?? 0;
-        if (currentTextLen < lastTextLength) {
-          replaceTextBlocksFrom(target, currentTurnBlockStartIndex, data.text || '');
-          lastTextLength = currentTextLen;
-        } else if (currentTextLen > lastTextLength) {
+        const previousTextLen = state.lastTextLength;
+        if (currentTextLen < previousTextLen) {
+          replaceTextBlocksFrom(target, state.currentTurnBlockStartIndex, data.text || '');
+          state.lastTextLength = currentTextLen;
+        } else if (currentTextLen > previousTextLen) {
           appendTextBlock(
             target,
-            data.text?.slice(lastTextLength) || '',
-            lastTextLength === 0 && target.blocks.length === currentTurnBlockStartIndex,
+            data.text?.slice(previousTextLen) || '',
+            previousTextLen === 0 && target.blocks.length === state.currentTurnBlockStartIndex,
           );
-          lastTextLength = currentTextLen;
+          state.lastTextLength = currentTextLen;
         }
-        target.content = textFromBlocks(target.blocks) || data.text || '';
+        if (currentTextLen < previousTextLen) {
+          target.content = textFromBlocks(target.blocks) || data.text || '';
+        } else if (currentTextLen > previousTextLen) {
+          target.content += data.text?.slice(previousTextLen) || '';
+        }
 
         // Debug aid for streaming-render diagnostics: record the diff decision
         // (replace / append / no-op) and the accumulator snapshot so that
@@ -424,35 +454,35 @@ export const useChatStore = defineStore('chat', () => {
         // worker snapshot or the renderer diff logic. View via DevTools with
         // Verbose level; Default level hides console.debug.
         const textAction =
-          currentTextLen < lastTextLength
+          currentTextLen < previousTextLen
             ? 'replace'
-            : currentTextLen > lastTextLength
+            : currentTextLen > previousTextLen
               ? 'append'
               : 'no-op';
         console.debug(
           '[RenderStream] message_update',
           `text=${textAction}`,
           `inLen=${currentTextLen}`,
-          `lastLen=${lastTextLength}`,
+          `lastLen=${previousTextLen}`,
           `blocks=${target.blocks?.length ?? 0}`,
-          `blockStart=${currentTurnBlockStartIndex}`,
+          `blockStart=${state.currentTurnBlockStartIndex}`,
           `thinkLen=${data.thinking?.length ?? 0}`,
-          `lastThinkLen=${lastThinkingLength}`,
+          `lastThinkLen=${state.lastThinkingLength}`,
           `tools=${data.toolCalls?.length ?? 0}`,
-          `lastTools=${lastToolCallCount}`,
+          `lastTools=${state.lastToolCallCount}`,
           `sess=${sessionId.slice(-8)}`,
         );
 
         // Check if thinking has NEW content (length increased)
         const currentThinkingLen = data.thinking?.length ?? 0;
-        if (currentThinkingLen > lastThinkingLength) {
-          appendThinkingBlock(target, data.thinking?.slice(lastThinkingLength) || '');
-          lastThinkingLength = currentThinkingLen;
+        if (currentThinkingLen > state.lastThinkingLength) {
+          appendThinkingBlock(target, data.thinking?.slice(state.lastThinkingLength) || '');
+          state.lastThinkingLength = currentThinkingLen;
         }
 
         // Check if there are NEW tool calls
         const incoming = data.toolCalls || [];
-        if (incoming.length > lastToolCallCount) {
+        if (incoming.length > state.lastToolCallCount) {
           // Find the new tool calls
           const existingBlockIds = new Set(
             target.blocks
@@ -490,7 +520,7 @@ export const useChatStore = defineStore('chat', () => {
             }
           }
           target.toolCalls = merged;
-          lastToolCallCount = merged.length;
+          state.lastToolCallCount = merged.length;
         }
         target.isStreaming = event.type === 'message_update';
         if (sessionId === activeSessionId) {
@@ -505,11 +535,12 @@ export const useChatStore = defineStore('chat', () => {
         // last parse (so progress updates reach GitPanel without waiting).
         if (event.type === 'message_update' && data.text) {
           const planMarkerJustAppeared =
-            data.text.includes('📋') && !data.text.slice(0, lastParsedPlanLength).includes('📋');
-          if (data.text.length - lastParsedPlanLength >= 30 || planMarkerJustAppeared) {
+            data.text.includes('📋') &&
+            !data.text.slice(0, state.lastParsedPlanLength).includes('📋');
+          if (data.text.length - state.lastParsedPlanLength >= 30 || planMarkerJustAppeared) {
             const plan = parseTaskPlan(data.text, true);
             if (plan) target.taskPlan = plan;
-            lastParsedPlanLength = data.text.length;
+            state.lastParsedPlanLength = data.text.length;
           }
         }
 
@@ -543,6 +574,7 @@ export const useChatStore = defineStore('chat', () => {
               currentAssistantMsg = null;
             }
             pendingAssistantMessages.delete(sessionId);
+            streamStates.delete(sessionId);
           }
         }
         break;
@@ -559,6 +591,7 @@ export const useChatStore = defineStore('chat', () => {
           currentAssistantMsg = null;
         }
         pendingAssistantMessages.delete(sessionId);
+        streamStates.delete(sessionId);
         break;
     }
   }
@@ -748,6 +781,7 @@ export const useChatStore = defineStore('chat', () => {
     // Clear streaming state for the active session
     if (activeSessionId) {
       streamingSessionIds.delete(activeSessionId);
+      streamStates.delete(activeSessionId);
     }
     isStreaming.value = false;
   }
@@ -766,6 +800,7 @@ export const useChatStore = defineStore('chat', () => {
     currentAssistantMsg = null;
     isStreaming.value = false;
     showCallTrace.value = false;
+    if (activeSessionId) streamStates.delete(activeSessionId);
   }
 
   function loadMessages(sessionId: string, sessionMessages: Message[]): void {

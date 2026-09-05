@@ -9,7 +9,6 @@ import {
   DEFAULT_SETTINGS,
   LITE_MODELS,
   MAX_SESSION_TITLE_LENGTH,
-  RECOMMENDED_MODELS,
   TITLE_GENERATION_PROMPT,
 } from '@shared/constants';
 import { validateImageAttachments } from '@shared/image-attachments';
@@ -50,6 +49,8 @@ import {
   removeWorktreeForSession,
   validateWorktreePath,
 } from './git-worktree';
+import { registerModelIpcHandlers } from './ipc/model-handlers';
+import { registerSettingsIpcHandlers } from './ipc/settings-handlers';
 import { getLogPath, logger } from './logger';
 import { getAppDataDir } from './paths';
 import { appendEvent, getEvents, getTokenUsageAggregate, listRuns, startRun } from './run-store';
@@ -144,6 +145,7 @@ interface InvocationContext {
 const activeInvocationBySession = new Map<string, InvocationContext>();
 const invocationContexts = new Map<string, InvocationContext>();
 const workerMessageQueues = new Map<string, Promise<void>>();
+const projectionPersistQueues = new Map<string, Promise<Message[]>>();
 
 function invocationKey(sessionId: string, runId: string): string {
   return `${sessionId}::${runId}`;
@@ -243,7 +245,7 @@ function stableContentToken(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 }
 
-async function persistRuntimeProjection(sessionId: string): Promise<Message[]> {
+async function persistRuntimeProjectionNow(sessionId: string): Promise<Message[]> {
   let meta = sessions.get(sessionId);
   if (!meta) {
     const disk = await loadSession(sessionId);
@@ -266,6 +268,30 @@ async function persistRuntimeProjection(sessionId: string): Promise<Message[]> {
     await saveSession(meta, projection.messages);
   }
   return projection.messages;
+}
+
+/** Serialize projection persistence per session so concurrent worker events do
+ * not repeatedly read and rewrite the same session snapshot. */
+async function persistRuntimeProjection(sessionId: string): Promise<Message[]> {
+  const previous = projectionPersistQueues.get(sessionId) ?? Promise.resolve([]);
+  const next = previous
+    .catch((error) => {
+      logger.warn('[RuntimeProjection] Previous persistence failed', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    })
+    .then(() => persistRuntimeProjectionNow(sessionId));
+  projectionPersistQueues.set(sessionId, next);
+
+  try {
+    return await next;
+  } finally {
+    if (projectionPersistQueues.get(sessionId) === next) {
+      projectionPersistQueues.delete(sessionId);
+    }
+  }
 }
 
 async function terminateInvocation(
@@ -690,6 +716,17 @@ export function registerIpcHandlers(wm: WindowManager): void {
 
   // Ensure session storage directory exists
   initSessionStore();
+
+  registerSettingsIpcHandlers({
+    getSettings: () => currentSettings,
+    setSettings: (settings) => {
+      currentSettings = settings;
+    },
+    saveSettings,
+    sendToWorker,
+    getMainWindow: () => windowManager.getMainWindow(),
+  });
+  registerModelIpcHandlers();
 
   // Agent
   ipcMain.handle(
@@ -1236,38 +1273,6 @@ export function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
-  // Settings
-  ipcMain.handle('settings:get', async () => {
-    try {
-      return currentSettings;
-    } catch (err) {
-      console.error('[Main] settings:get failed:', (err as Error).message);
-      return { ...DEFAULT_SETTINGS };
-    }
-  });
-
-  ipcMain.handle('settings:update', async (_event, partial: Partial<AppSettings>) => {
-    try {
-      currentSettings = { ...currentSettings, ...partial, permissionMode: 'full_access' };
-
-      if (partial.envApiKeys) {
-        for (const [provider, key] of Object.entries(partial.envApiKeys)) {
-          const envKey = getProviderEnvKey(provider);
-          if (envKey && key) process.env[envKey] = key;
-        }
-      }
-
-      sendToWorker({ type: 'config', settings: currentSettings });
-      const mainWindow = windowManager.getMainWindow();
-      mainWindow?.webContents.send('settings:changed', currentSettings);
-      await saveSettings(currentSettings);
-      return currentSettings;
-    } catch (err) {
-      console.error('[Main] settings:update failed:', (err as Error).message);
-      return currentSettings;
-    }
-  });
-
   // Skills listing --- scan built-in and compatible user-level skill files for the settings UI.
   ipcMain.handle('skills:list', async () => {
     try {
@@ -1616,82 +1621,6 @@ export function registerIpcHandlers(wm: WindowManager): void {
       return { message: 'chore: update' };
     } catch {
       return { message: 'chore: update' };
-    }
-  });
-
-  // ===== Model Discovery =====
-  ipcMain.handle('models:getProviders', async () => {
-    try {
-      const { getProviders } = await import('@earendil-works/pi-ai');
-      return getProviders();
-    } catch {
-      // Fallback providers if pi-ai is unavailable
-      return [
-        'anthropic',
-        'openai',
-        'google',
-        'deepseek',
-        'xai',
-        'groq',
-        'mistral',
-        'openrouter',
-        'opencode-go',
-      ];
-    }
-  });
-
-  ipcMain.handle('models:getModels', async (_event, provider: string) => {
-    try {
-      const { getModels } = await import('@earendil-works/pi-ai');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const models = getModels(provider as any);
-      return models.map((m) => {
-        const d = m as unknown as Record<string, unknown>;
-        return {
-          id: d.id as string,
-          name: d.name as string,
-          provider: (d.provider as string) || provider,
-          contextWindow: (d.contextWindow as number) || 128000,
-          maxTokens: (d.maxTokens as number) || 4096,
-          supportsReasoning: Boolean(d.reasoning),
-          supportsImages: Array.isArray(d.input) && (d.input as string[]).includes('image'),
-        };
-      });
-    } catch {
-      return [];
-    }
-  });
-
-  ipcMain.handle('models:getRecommended', async () => {
-    return RECOMMENDED_MODELS;
-  });
-
-  // ===== API Keys =====
-  ipcMain.handle('settings:setApiKey', async (_event, provider: string, key: string) => {
-    try {
-      const envKey = getProviderEnvKey(provider);
-      if (envKey) process.env[envKey] = key;
-      currentSettings.envApiKeys[provider] = key;
-      sendToWorker({ type: 'config', settings: currentSettings });
-      await saveSettings(currentSettings);
-      return true;
-    } catch (err) {
-      console.error('[Main] settings:setApiKey failed:', (err as Error).message);
-      return false;
-    }
-  });
-
-  ipcMain.handle('settings:getApiKeys', async () => {
-    try {
-      const keys: Record<string, string> = {};
-      for (const [provider] of Object.entries(currentSettings.envApiKeys)) {
-        const envKey = getProviderEnvKey(provider);
-        keys[provider] = envKey ? process.env[envKey] || '' : '';
-      }
-      return keys;
-    } catch (err) {
-      console.error('[Main] settings:getApiKeys failed:', (err as Error).message);
-      return {};
     }
   });
 

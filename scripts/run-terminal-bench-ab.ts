@@ -8,12 +8,15 @@
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   encodeHarborSettingsPatch,
   parseSettingAssignment,
   validateHarborSettingsPatch,
 } from './terminal-bench-settings';
+
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 interface ArmSpec {
   id: string;
@@ -181,7 +184,7 @@ async function main(): Promise<void> {
   const tasks = await resolveTasks(options.tasks, options.taskFiles);
   const arms = buildArms(options);
   assertUniqueAttemptIds(tasks, options.reps, arms);
-  const runRoot = resolve(options.outDir, options.runId);
+  const runRoot = resolve(projectRoot, options.outDir, options.runId);
   const harborJobsDir = join(runRoot, 'harbor');
   const resultsPath = join(runRoot, 'ab-results.jsonl');
   await mkdir(runRoot, { recursive: true });
@@ -191,7 +194,7 @@ async function main(): Promise<void> {
     schemaVersion: 'suncode.terminal_bench_ab.v1',
     runId: options.runId,
     sourceFingerprint: await buildSourceFingerprint(),
-    toolchainFingerprint: buildToolchainFingerprint(),
+    toolchainFingerprint: options.dryRun ? 'dry-run' : buildToolchainFingerprint(),
     tasksFingerprint: sha256(canonicalJson(tasks)),
     tasks,
     reps: options.reps,
@@ -278,7 +281,7 @@ function settingsFromAssignments(assignments: string[]): Record<string, unknown>
 async function resolveTasks(explicitTasks: string[], taskFiles: string[]): Promise<string[]> {
   const tasks = [...explicitTasks];
   for (const taskFile of taskFiles) {
-    const raw = await readFile(resolve(taskFile), 'utf8');
+    const raw = await readFile(resolve(projectRoot, taskFile), 'utf8');
     const trimmed = raw.trim();
     if (trimmed.startsWith('[')) {
       const parsed = JSON.parse(trimmed) as unknown;
@@ -335,7 +338,7 @@ async function runAttempt(input: {
   const settingsPatchB64 = encodeHarborSettingsPatch(input.arm.settings);
   const runnerArgs = [
     'run',
-    resolve('scripts/run-terminal-bench.ts'),
+    resolve(projectRoot, 'scripts/run-terminal-bench.ts'),
     ...input.commonArgs,
     '--jobs-dir',
     input.harborJobsDir,
@@ -626,7 +629,11 @@ async function buildSourceFingerprint(): Promise<string> {
     .sort();
   const hash = createHash('sha256').update(head).update('\0').update(diff);
   for (const path of untracked) {
-    hash.update('\0').update(path).update('\0').update(await readFile(resolve(path)));
+    hash
+      .update('\0')
+      .update(path)
+      .update('\0')
+      .update(await readFile(resolve(projectRoot, path)));
   }
   return `sha256:${hash.digest('hex')}`;
 }
@@ -641,7 +648,7 @@ function buildToolchainFingerprint(): string {
 
 function ensureDockerEngine(): void {
   const result = spawnSync('docker', ['info', '--format', '{{.ServerVersion}}'], {
-    cwd: process.cwd(),
+    cwd: projectRoot,
     encoding: 'utf8',
   });
   if (result.status !== 0) {
@@ -650,7 +657,7 @@ function ensureDockerEngine(): void {
 }
 
 function toolOutput(command: string, args: string[]): string {
-  const result = spawnSync(command, args, { cwd: process.cwd(), encoding: 'utf8' });
+  const result = spawnSync(command, args, { cwd: projectRoot, encoding: 'utf8' });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
   }
@@ -658,13 +665,17 @@ function toolOutput(command: string, args: string[]): string {
 }
 
 function gitOutput(args: string[]): string {
-  const result = spawnSync('git', args, { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync('git', args, {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
   return result.stdout.trimEnd();
 }
 
 function spawnAndWait(command: string, args: string[]): Promise<number> {
-  const child = spawn(command, args, { cwd: process.cwd(), stdio: 'inherit' });
+  const child = spawn(command, args, { cwd: projectRoot, stdio: 'inherit' });
   return new Promise((resolveExit) => {
     child.on('close', (code) => resolveExit(code ?? 1));
     child.on('error', () => resolveExit(1));

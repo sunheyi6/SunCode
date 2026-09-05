@@ -51,17 +51,27 @@ async function executeWithTimeout(
   tool: Tool,
   params: Record<string, unknown>,
   timeoutMs: number = DEFAULT_TOOL_TIMEOUT_MS,
+  onProgress?: (chunk: string) => void,
 ): Promise<ToolResult> {
-  const executePromise = tool.execute(params);
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const executePromise = tool.execute(params, {
+    onProgress,
+    signal: controller.signal,
+  });
 
-  const timeoutPromise = new Promise<ToolResult>((_, reject) =>
-    setTimeout(
-      () => reject(new Error(`Tool execution timed out after ${timeoutMs / 1000}s`)),
-      timeoutMs,
-    ),
-  );
+  const timeoutPromise = new Promise<ToolResult>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`Tool execution timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+  });
 
-  return Promise.race([executePromise, timeoutPromise]);
+  try {
+    return await Promise.race([executePromise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function toolResultMeta(
@@ -240,9 +250,9 @@ export async function executeTools(input: ExecuteToolsInput): Promise<ExecuteToo
           const paramsPreview =
             paramsStr.length > 100 ? `${paramsStr.slice(0, 100)}...` : paramsStr;
           console.log(`[AgentLoop] Tool ${tc.name} executing (params: ${paramsPreview})`);
-          tool.onProgress = (chunk: string) => onToolProgress(tc.id, chunk);
-          const result = await executeWithTimeout(tool, params);
-          tool.onProgress = null;
+          const result = await executeWithTimeout(tool, params, DEFAULT_TOOL_TIMEOUT_MS, (chunk) =>
+            onToolProgress(tc.id, chunk),
+          );
           result.toolCallId = tc.id;
           onToolEnd(result);
           const rawOutputLen = result.output.length;

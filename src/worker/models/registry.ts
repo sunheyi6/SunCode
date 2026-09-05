@@ -69,7 +69,7 @@ export function buildCustomModel(
  * Create a model registry that wraps pi-ai.
  */
 export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
-  const _modelsCache: ModelInfo[] | null = null;
+  const modelsCache = new Map<string, ModelInfo[]>();
   let providersCache: string[] | null = null;
 
   return {
@@ -84,6 +84,7 @@ export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
       }
       try {
         const { getModel } = await import('@earendil-works/pi-ai');
+        // pi-ai's provider generic resolves to never for a dynamic provider ID.
         return getModel(provider as any, modelId);
       } catch {
         console.warn(
@@ -124,10 +125,13 @@ export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
      * Get all models for a given provider.
      */
     async getModels(provider: string): Promise<ModelInfo[]> {
+      const cached = modelsCache.get(provider);
+      if (cached) return cached;
+
       try {
         const { getModels } = await import('@earendil-works/pi-ai');
-        const models = getModels(provider as any);
-        return models.map((m: any) => ({
+        const models = getModels(provider as Parameters<typeof getModels>[0]);
+        const result = models.map((m) => ({
           id: m.id as string,
           name: m.name as string,
           provider: (m.provider as string) || provider,
@@ -136,6 +140,8 @@ export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
           supportsReasoning: Boolean(m.reasoning),
           supportsImages: Array.isArray(m.input) && (m.input as string[]).includes('image'),
         }));
+        modelsCache.set(provider, result);
+        return result;
       } catch {
         console.warn(`Failed to get models for provider: ${provider}`);
         return [];

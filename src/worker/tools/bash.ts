@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, win32 } from 'node:path';
 import type { BackgroundProcess, ToolResult } from '@shared/types';
-import { BaseTool, obj, p } from './types';
+import { BaseTool, obj, p, type ToolExecutionOptions } from './types';
 
 /** Resolve the Windows PowerShell executable path.
  *  Uses the full System32 path to avoid ENOENT in environments where
@@ -115,6 +115,7 @@ const MAX_OUTPUT_BYTES = 50_000;
 /** Kill process if stdout + stderr exceeds this (safety valve). */
 const OVERFLOW_KILL_BYTES = 200_000;
 const SERVICE_OBSERVATION_MS = 1000;
+const SERVICE_OUTPUT_GRACE_MS = 250;
 
 interface ProcessEvidence {
   pid: number;
@@ -638,7 +639,11 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
       ['command'],
     );
 
-    async execute(params: Record<string, unknown>): Promise<ToolResult> {
+    async execute(
+      params: Record<string, unknown>,
+      options: ToolExecutionOptions = {},
+    ): Promise<ToolResult> {
+      const progressCallback = options.onProgress ?? this.onProgress;
       const command = (params.command as string) || '';
       const timeout = Math.min((params.timeout as number) || 60000, 300000);
       const cwd = resolve(workingDir);
@@ -716,10 +721,9 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
 
       // ── Background mode: spawn and detach ──
       if (runInBg) {
-        // Capture progress callback before async gap — agent-loop nulls
-        // tool.onProgress after execute() resolves, but we keep streaming
-        // output for the lifetime of the background process.
-        const progress = this.onProgress;
+        // Capture the per-invocation callback before the async gap. Background
+        // processes can continue emitting output after execute() resolves.
+        const progress = progressCallback;
 
         return new Promise((resolveResult) => {
           let child: ReturnType<typeof spawn>;
@@ -740,6 +744,15 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
               commandFailure(`Failed to start background process: ${(error as Error).message}`),
             );
             return;
+          }
+
+          const abortHandler = () => {
+            if (child.pid) killProcessTree(child.pid);
+          };
+          if (options.signal?.aborted) {
+            abortHandler();
+          } else {
+            options.signal?.addEventListener('abort', abortHandler, { once: true });
           }
 
           // ── Real-time output streaming for background processes ──
@@ -856,6 +869,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
           });
 
           child.on('close', async (code) => {
+            options.signal?.removeEventListener('abort', abortHandler);
             if (!startupSettled) {
               // Exited before spawn event fired — startup failure
               failStartup(`process closed before startup (exit code: ${code ?? 'null'})`);
@@ -935,6 +949,9 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                 : `Background process started (PID: ${pid})\nCommand: ${command}`;
 
             if (backgroundMode === 'service') {
+              const readinessWaitMs = startupMarker
+                ? serviceObservationMs
+                : Math.max(0, serviceObservationMs - SERVICE_OUTPUT_GRACE_MS);
               readinessTimer = setTimeout(async () => {
                 if (startupMarker) {
                   resolveOnce(
@@ -946,6 +963,15 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                   return;
                 }
 
+                // On Windows, the shell can take slightly longer than the
+                // observation window to deliver its first pipe event. Give
+                // that first output a small grace period before taking the
+                // snapshot returned to the caller.
+                if (!combinedOutput) {
+                  await new Promise((resolveGrace) =>
+                    setTimeout(resolveGrace, SERVICE_OUTPUT_GRACE_MS),
+                  );
+                }
                 observeProcessEvidence();
                 const observed = truncateTail(
                   combinedOutput,
@@ -959,7 +985,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
                     commandDetails(null, observed),
                   ),
                 );
-              }, serviceObservationMs);
+              }, readinessWaitMs);
               return;
             }
 
@@ -990,6 +1016,18 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
         let stderr = '';
         let killed = false;
 
+        const abortHandler = () => {
+          if (child.pid) {
+            killed = true;
+            killProcessTree(child.pid);
+          }
+        };
+        if (options.signal?.aborted) {
+          abortHandler();
+        } else {
+          options.signal?.addEventListener('abort', abortHandler, { once: true });
+        }
+
         const killWithTree = (pid: number) => {
           killed = true;
           killProcessTree(pid);
@@ -1001,15 +1039,15 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
         let progressTimer: ReturnType<typeof setTimeout> | null = null;
 
         const flushProgress = () => {
-          if (progressBuf && this.onProgress) {
-            this.onProgress(progressBuf);
+          if (progressBuf && progressCallback) {
+            progressCallback(progressBuf);
             progressBuf = '';
           }
           progressTimer = null;
         };
 
         const pushProgress = (text: string) => {
-          if (!this.onProgress) return;
+          if (!progressCallback) return;
           progressBuf += text;
           if (!progressTimer) {
             progressTimer = setTimeout(flushProgress, 100);
@@ -1035,6 +1073,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
         });
 
         child.on('close', async (code, signal) => {
+          options.signal?.removeEventListener('abort', abortHandler);
           // Flush any remaining buffered progress output
           if (progressTimer) {
             clearTimeout(progressTimer);
@@ -1104,6 +1143,7 @@ Security: Commands that are obviously destructive (rm -rf /, etc.) will be block
         });
 
         child.on('error', (error) => {
+          options.signal?.removeEventListener('abort', abortHandler);
           resolveResult(commandFailure(`Command execution failed: ${error.message}`));
         });
       });

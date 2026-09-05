@@ -13,6 +13,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 type BuiltinProvider = 'anthropic' | 'deepseek' | 'google' | 'openai';
 type Provider = BuiltinProvider | string;
@@ -198,7 +201,7 @@ function buildHarborArgs(options: RunnerOptions, proxyOverlayPath?: string): str
   ];
 
   if (options.agent === 'suncode_agent:SunCodeAgent') {
-    args.push('--agent-env', `SUNCODE_REPO_ROOT=${process.cwd()}`);
+    args.push('--agent-env', `SUNCODE_REPO_ROOT=${projectRoot}`);
     args.push('--agent-env', `SUNCODE_PROVIDER=${options.provider}`);
     args.push('--agent-env', `SUNCODE_MODEL=${modelForSunCode(options.model, options.provider)}`);
     const customEndpoints = loadCustomEndpoints();
@@ -263,7 +266,7 @@ function buildHarborArgs(options: RunnerOptions, proxyOverlayPath?: string): str
 }
 
 function buildEnv(options: RunnerOptions): NodeJS.ProcessEnv {
-  const harborPath = resolve('harbor');
+  const harborPath = resolve(projectRoot, 'harbor');
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PYTHONPATH: [harborPath, process.env.PYTHONPATH].filter(Boolean).join(delimiter),
@@ -355,7 +358,7 @@ function readConfigCustomEndpoints(configPath: string): unknown[] | undefined {
 
 function configPaths(): string[] {
   return [
-    resolve('.suncode', 'config.json'),
+    resolve(projectRoot, '.suncode', 'config.json'),
     process.env.APPDATA
       ? resolve(process.env.APPDATA, 'SunCode', '.suncode', 'config.json')
       : resolve(homedir(), 'AppData', 'Roaming', 'SunCode', '.suncode', 'config.json'),
