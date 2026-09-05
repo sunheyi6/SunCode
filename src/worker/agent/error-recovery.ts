@@ -14,6 +14,7 @@ import {
   RECOVERY_MAX_OUTPUT_TOKENS,
 } from '@shared/constants';
 import type { ContinueSite, RecoveryContext } from '@shared/types';
+import { isUserAuthoredMessage } from './runtime-context';
 
 // ===== Error Classification =====
 
@@ -188,7 +189,8 @@ export function emergencyCompact(
   // Find last 3 user messages and keep everything after the third-to-last
   const userIndices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === 'user') userIndices.push(i);
+    const message = messages[i];
+    if (message && isUserAuthoredMessage(message)) userIndices.push(i);
   }
 
   if (userIndices.length <= 3) {

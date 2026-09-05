@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import type { Message } from '@shared/types';
 import { getAgentDataSubdir } from './agent-data-dir';
 import { buildStructuredTaskPrompt } from './model-structured-content';
+import { isUserAuthoredMessage } from './runtime-context';
 
 const MEMORIES_DIR = '.suncode/memories';
 const MEMORY_INDEX = 'MEMORY.md';
@@ -681,7 +682,7 @@ export function buildSessionSnapshot(input: {
   status: SessionSnapshot['status'];
   messages: Message[];
 }): SessionSnapshot {
-  const lastUser = [...input.messages].reverse().find((message) => message.role === 'user');
+  const lastUser = [...input.messages].reverse().find(isUserAuthoredMessage);
   const lastAssistant = [...input.messages]
     .reverse()
     .find((message) => message.role === 'assistant');

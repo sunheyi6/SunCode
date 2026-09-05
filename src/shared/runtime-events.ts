@@ -13,6 +13,7 @@ export type RuntimeEventFact =
       source: 'dispatch' | 'guidance' | 'recovery';
     }
   | { type: 'system_prompt_committed'; systemPrompt: string }
+  | { type: 'runtime_context_committed'; message: Message }
   | {
       type: 'model_step_committed';
       stepIndex: number;

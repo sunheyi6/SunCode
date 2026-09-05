@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, test, vi } from 'vitest';
 import {
   createSessionRuntimeProjector,
+  projectModelHistory,
   projectSessionRuntime,
 } from '../../src/main/runtime-projector';
 import type { Message } from '../../src/shared/types';
@@ -123,6 +124,49 @@ describe('Runtime Event Log', () => {
         expect(error.existingStatus).toBe('completed');
       }
     }
+  });
+
+  test('keeps runtime context out of UI projection and replays it before the user head', async () => {
+    const sessionId = 'runtime-context-session';
+    const base = { runId: 'run-context', turnId: 'turn-context', invocationId: 'run-context' };
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-context:user',
+      fact: {
+        type: 'user_message_committed',
+        source: 'dispatch',
+        message: { role: 'user', content: 'question' },
+      },
+    });
+    const runtimeMessage: Message = {
+      role: 'user',
+      contextKind: 'runtime_context',
+      content: '{"type":"suncode.runtime_context"}',
+    };
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-context:snapshot',
+      fact: { type: 'runtime_context_committed', message: runtimeMessage },
+    });
+    await appendRuntimeEvent(sessionId, {
+      ...base,
+      eventId: 'run-context:assistant',
+      fact: {
+        type: 'assistant_message_committed',
+        message: { role: 'assistant', content: 'answer' },
+      },
+    });
+
+    const events = await readRuntimeEvents(sessionId);
+    expect(projectSessionRuntime(events).messages.map((message) => message.content)).toEqual([
+      'question',
+      'answer',
+    ]);
+    expect(projectModelHistory(events).map((message) => message.content)).toEqual([
+      runtimeMessage.content,
+      'question',
+      'answer',
+    ]);
   });
 
   test('projects call trace and tool state without reading renderer state', async () => {

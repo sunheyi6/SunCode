@@ -61,6 +61,8 @@ SunCode 的记忆系统旨在帮助 AI agent 持久化和复用重要信息。�
 │  │                        Agent 集成                                    │ │
 │  │  agent.ts  → loadMemoriesWithEntries() + relevanceJudge              │ │
 │  │  agent.ts  → saveSessionMemory() / promoteExplicitDurableFacts()     │ │
+│  │  agent-loop.ts  → 检索内容进入 runtime_context                      │ │
+│  │  subagent.ts    → 主 Agent 将同一份检索结果传给 Subagent            │ │
 │  │  agent-loop.ts  → memoryReferences 随 finalMessage 持久化            │ │
 │  └─────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -233,7 +235,7 @@ LLM 语义精排（可选）
 记录访问（仅内存计数，写时落盘）
     │
     ▼
-返回 { content: 注入 system prompt, entries: 引用展示 }
+返回 { content: 注入 runtime_context, entries: 引用展示 }
 ```
 
 ### 混合评分算法
@@ -460,7 +462,7 @@ Agent.prompt()
     ├── loadMemoriesWithEntries(query, { relevanceJudge })
     │       ├── 常驻通道（主题门控）→ 普通检索 → LLM 精排 → 同源合并
     │       └── 返回 { content, entries }
-    │           ├── content → 注入 system prompt
+    │           ├── content → 注入 runtime_context.snapshot.memory
     │           └── entries → recordMemoryAccess()（内存计数）+ 传递 UI
     │
     ▼
@@ -488,6 +490,7 @@ Agent.saveSessionMemory()
     │
     ▼
 message_end 事件
+    ├── runtime_context: memoryContent（主 Agent 与 Subagent 共用）
     └── memoryReferences: input.memoryEntries
         │
         ▼
@@ -563,7 +566,9 @@ src/
 │       │   └── getAllMemories() / getMemScenes()
 │       ├── agent-data-dir.ts  ← SUNCODE_APP_DATA 路径统一解析
 │       ├── agent.ts           ← 记忆加载、saveSessionMemory、promoteExplicitDurableFacts
-│       └── agent-loop.ts      ← finalMessage 携带 memoryReferences 持久化
+│       ├── runtime-context.ts ← memory / lessons / language 运行时快照
+│       ├── subagent.ts        ← 继承主 Agent 检索结果
+│       └── agent-loop.ts      ← 注入 runtime_context；finalMessage 携带引用
 ├── main/
 │   ├── index.ts               ← 设置 SUNCODE_APP_DATA、flat 记忆迁移
 │   ├── preload.ts             ← IPC API 定义

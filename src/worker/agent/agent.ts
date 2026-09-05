@@ -52,7 +52,7 @@ import {
   saveSessionSnapshot,
   updateMemory,
 } from './memory';
-
+import { isUserAuthoredMessage } from './runtime-context';
 import { createSkillsLoader, preloadSkills } from './skills';
 import { createDefaultStopHookRegistry } from './stop-hooks';
 import { SubagentDispatcher } from './subagent';
@@ -555,7 +555,7 @@ export class Agent {
   ): Promise<{ model: unknown; directResponse?: string }> {
     const imageMessages = this.messages.filter(
       (message) =>
-        message.role === 'user' &&
+        isUserAuthoredMessage(message) &&
         Array.isArray(message.content) &&
         message.content.some((block) => block.type === 'image'),
     );
@@ -563,7 +563,8 @@ export class Agent {
 
     const latestMessage = this.messages.at(-1);
     const latestImageMessage =
-      latestMessage?.role === 'user' &&
+      latestMessage !== undefined &&
+      isUserAuthoredMessage(latestMessage) &&
       Array.isArray(latestMessage.content) &&
       latestMessage.content.some((block) => block.type === 'image')
         ? latestMessage
@@ -732,8 +733,13 @@ export class Agent {
     );
 
     // Share retrieved context with sub-agents
-    this.dispatcher?.updateMemoryContent(memoryContent);
-    this.dispatcher?.updateRelevantLessonsContent(relevantLessonsContent);
+    this.dispatcher?.updateOptions({
+      parentMessages: this.messages,
+      abortSignal: this.abortController!.signal,
+      memoryContent,
+      relevantLessonsContent,
+      responseLanguage: this.currentResponseLanguage,
+    });
 
     // Summary mode is one text-only turn. Ordinary small edits get a tighter
     // turn/thinking policy so a global xhigh setting cannot make them sprawl.
@@ -863,8 +869,9 @@ export class Agent {
       taxonomy: result.decision.decision === 'stop' ? (result.decision.taxonomy as any) : undefined,
     });
 
-    // Add assistant message to history
-    this.messages.push(result.finalMessage);
+    // Preserve the exact provider-facing tool chain so the next user request
+    // extends this run instead of rebuilding a shorter, cache-breaking view.
+    this.messages = result.modelMessages;
 
     // Emit done
     this.onDone(result.finalMessage);
@@ -945,8 +952,13 @@ export class Agent {
     );
 
     // Share retrieved context with sub-agents
-    this.dispatcher?.updateMemoryContent(memoryContent);
-    this.dispatcher?.updateRelevantLessonsContent(relevantLessonsContent);
+    this.dispatcher?.updateOptions({
+      parentMessages: this.messages,
+      abortSignal: this.abortController!.signal,
+      memoryContent,
+      relevantLessonsContent,
+      responseLanguage: this.currentResponseLanguage,
+    });
 
     const contextBudgetPolicy = buildContextBudgetPolicy(
       this.settings,
@@ -1123,7 +1135,7 @@ export class Agent {
   /** Save a summary of the current session to .suncode/memories/. */
   private async saveSessionMemory(): Promise<void> {
     try {
-      const lastUserMsg = [...this.messages].reverse().find((m) => m.role === 'user');
+      const lastUserMsg = [...this.messages].reverse().find(isUserAuthoredMessage);
       if (!lastUserMsg) return;
 
       const userRequest =
@@ -1415,7 +1427,7 @@ function sameFactStem(left: StructuredFact, right: StructuredFact): boolean {
 }
 
 function latestUserText(messages: Message[]): string {
-  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
+  const lastUserMsg = [...messages].reverse().find(isUserAuthoredMessage);
   if (!lastUserMsg) return '';
 
   return typeof lastUserMsg.content === 'string'
@@ -1434,7 +1446,7 @@ function recentUserText(messages: Message[], count = 3, maxLength = 600): string
   const texts: string[] = [];
   for (let i = messages.length - 1; i >= 0 && texts.length < count; i--) {
     const message = messages[i]!;
-    if (message.role !== 'user') continue;
+    if (!isUserAuthoredMessage(message)) continue;
     const text =
       typeof message.content === 'string'
         ? message.content
@@ -1448,7 +1460,7 @@ function recentUserText(messages: Message[], count = 3, maxLength = 600): string
 }
 
 function inferLatestUiLanguage(messages: Message[]): UiLanguage {
-  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
+  const lastUserMsg = [...messages].reverse().find(isUserAuthoredMessage);
   return lastUserMsg?.uiLanguage ?? 'zh';
 }
 

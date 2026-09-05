@@ -21,6 +21,7 @@ import type {
 } from '@shared/types';
 import { countStringTokens } from '../utils/token-counter';
 import { compactMessages } from './compaction';
+import { isUserAuthoredMessage } from './runtime-context';
 import { archiveToolResultBody } from './tool-result-archive';
 
 // ============================================================================
@@ -79,7 +80,8 @@ export function applyContextBudget(
       droppedTurns = turnGroups.length - keptTurnIds.size;
       const msgTurnMap = buildMessageTurnMap(working);
       working = working.filter((msg) => {
-        if (msg.role === 'system' || msg.role === 'user') return true;
+        if (msg.role === 'system' || msg.contextKind === 'runtime_context') return true;
+        if (isUserAuthoredMessage(msg)) return true;
         const turnId = msgTurnMap.get(msg);
         return turnId ? keptTurnIds.has(turnId) : true;
       });
@@ -246,7 +248,7 @@ export function groupMessagesByTurn(
       continue;
     }
 
-    if (msg.role === 'user') {
+    if (isUserAuthoredMessage(msg)) {
       flushCurrentGroup();
     } else if (msg.role === 'assistant' && currentGroup.some((item) => item.role === 'assistant')) {
       flushCurrentGroup();

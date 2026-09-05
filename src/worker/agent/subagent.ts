@@ -21,8 +21,8 @@ import type {
   SubagentProgressDelta,
   SubagentResult,
   ToolCallContent,
-  ToolDefinition,
   ToolResult,
+  UiLanguage,
 } from '@shared/types';
 import { createModelRegistry } from '../models/registry';
 import { createToolRegistry } from '../tools/registry';
@@ -35,7 +35,6 @@ import {
   resolveSubagentThinkingLevel,
   SUBAGENT_BUDGET,
 } from './subagent-budget';
-import { buildSystemPrompt } from './system-prompt';
 import { archiveToolResultBody } from './tool-result-archive';
 
 // ===== Types =====
@@ -61,6 +60,7 @@ export interface SubagentDispatchOptions {
   callbacks: SubagentCallbacks;
   memoryContent?: string;
   relevantLessonsContent?: string;
+  responseLanguage?: UiLanguage;
 }
 
 const MAX_DEPTH = 3;
@@ -285,23 +285,14 @@ export class SubagentDispatcher {
     exceedBudget: (reason: string) => void,
     subToolCalls: ToolCallContent[],
   ) {
-    // Build isolated messages
+    // Build isolated messages. A named session is the authoritative provider
+    // history; parent context is only seeded when that history does not exist.
     const messages: Message[] = [];
-
-    // Build system prompt using the standard builder
-    const toolDefs = this.buildToolDefs(def.tools);
-    const baseSystem = buildSystemPrompt({
-      workingDir: this.opts.workingDir,
-      tools: toolDefs,
-      skillsContent: '',
-      permissionMode: this.opts.settings.permissionMode,
-    });
-    const systemContent = `${baseSystem}\n\n---\n\n## 你的角色\n\n${def.systemPrompt}\n\n请专注完成委托给你的任务，返回简洁的结果。`;
-
-    messages.push({ role: 'system', content: systemContent });
+    const sessionKey = call.session ? this.sessionKey(call) : undefined;
+    const history = sessionKey ? this.namedSessions.get(sessionKey) : undefined;
 
     // Parent context seeding
-    if (call.initialContext === 'parent') {
+    if (!history?.length && call.initialContext === 'parent') {
       for (const msg of this.opts.parentMessages) {
         if (msg.role !== 'system') {
           messages.push(msg);
@@ -314,14 +305,10 @@ export class SubagentDispatcher {
     }
 
     // Persistent session history
-    if (call.session) {
-      const sessionKey = this.sessionKey(call);
-      const history = this.namedSessions.get(sessionKey);
-      if (history && history.length > 0) {
-        for (const msg of history) {
-          if (msg.role !== 'system') {
-            messages.push(msg);
-          }
+    if (history?.length) {
+      for (const msg of history) {
+        if (msg.role !== 'system') {
+          messages.push(msg);
         }
       }
     }
@@ -372,9 +359,12 @@ export class SubagentDispatcher {
       },
       workingDir: this.opts.workingDir,
       skillsContent: '',
+      agentRolePrompt: `${def.systemPrompt}\n\n请专注完成委托给你的任务，返回简洁的结果。`,
       agentsMdContent: '',
       memoryContent: this.opts.memoryContent || '',
       relevantLessonsContent: this.opts.relevantLessonsContent || '',
+      responseLanguage: this.opts.responseLanguage,
+      emitRuntimeContextEvent: false,
       abortSignal: signal,
       runId: executionId,
       // Use parent session + agent name for cache affinity across subagent invocations
@@ -444,26 +434,14 @@ export class SubagentDispatcher {
     // Save to named session
     if (call.session) {
       const sessionKey = this.sessionKey(call);
-      const history = this.namedSessions.get(sessionKey) || [];
-      history.push({ role: 'user', content: call.prompt });
-      history.push(result.finalMessage);
       if (this.namedSessions.size >= MAX_NAMED_SESSIONS && !this.namedSessions.has(sessionKey)) {
         const first = this.namedSessions.keys().next().value;
         if (first) this.namedSessions.delete(first);
       }
-      this.namedSessions.set(sessionKey, history);
+      this.namedSessions.set(sessionKey, result.modelMessages);
     }
 
     return result;
-  }
-
-  /** Build tool definitions for system prompt from a whitelist of names. */
-  private buildToolDefs(names: string[]): ToolDefinition[] {
-    const allTools = createToolRegistry(this.opts.workingDir).getAll();
-    return names
-      .map((n) => allTools.find((t) => t.name === n))
-      .filter((t): t is Tool => t !== undefined)
-      .map((t) => t.getDefinition());
   }
 
   /** Build filtered tool array from whitelist. */

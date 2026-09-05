@@ -81,6 +81,16 @@
         └─────────────────────────────────────────────┘
 ```
 
+### 2.1 Subagent 请求上下文
+
+`subagent` 工具由 `SubagentDispatcher` 执行，最终仍进入公共 `runAgentLoop()`：
+
+- Subagent 的角色定义通过稳定的 `agentRolePrompt` 进入 system envelope。
+- 主 Agent 检索出的 memory、lessons 和当前 response language 通过 `runtime_context` 继承。
+- 命名 Subagent 会话保存完整 `modelMessages`，包括 assistant tool call 与 tool result；下一次同名调用只追加新任务。
+- 命名历史存在时不重复复制 parent context。
+- Subagent 私有 runtime context 不提交到主会话 ledger，防止主 Agent 的恢复投影被委托上下文污染。
+
 ---
 
 ## 3. 工具接口设计
