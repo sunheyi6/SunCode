@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, normalize, resolve } from 'node:path';
 import type { AppSettings } from '@shared/types';
@@ -21,7 +22,11 @@ function resolveMimeType(filePath: string): string | undefined {
   return ext ? mimeByExtension[ext] : undefined;
 }
 
-export function createInspectImageTool(workingDir: string, settings: AppSettings) {
+export function createInspectImageTool(
+  workingDir: string,
+  settings: AppSettings,
+  sessionId: string = randomUUID(),
+) {
   return new (class InspectImageTool extends BaseTool {
     readonly name = 'inspect_image';
     isReadonly = true;
@@ -65,6 +70,7 @@ export function createInspectImageTool(workingDir: string, settings: AppSettings
           activeModel,
           [{ type: 'image', data: image.toString('base64'), mimeType }],
           question,
+          sessionId,
         );
         return this.success(
           `视觉模型：${result.provider}/${result.model}\n图片：${absolutePath}\n问题：${question.trim()}\n\n${result.observation}`,

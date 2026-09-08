@@ -31,6 +31,7 @@ import {
 import { createToolRegistry } from '../tools/registry';
 import { createSubagentTool } from '../tools/subagent';
 import type { Tool } from '../tools/types';
+import { DiagLogger } from '../utils/diag-logger';
 import { getAgentDataSubdir } from './agent-data-dir';
 import { runAgentLoop } from './agent-loop';
 import { applyContextBudget } from './context-budget';
@@ -583,6 +584,7 @@ export class Agent {
           model,
           images,
           question || '请简洁描述图片中的可见内容。',
+          this.sessionId,
         );
         latestImageMessage.content = [
           ...(question ? [{ type: 'text' as const, text: question }] : []),
@@ -619,6 +621,7 @@ export class Agent {
         model,
         images,
         text || '请描述图片中与当前任务有关的可见信息。',
+        this.sessionId,
       );
       message.content = [
         {
@@ -679,6 +682,8 @@ export class Agent {
   }
 
   private async runLoop(runId: string, summaryMode = false): Promise<void> {
+    const diag = new DiagLogger(this.workingDir, runId);
+    diag.enter('PREFLIGHT', 'prepare');
     const modelRegistry = createModelRegistry(this.settings.customEndpoints ?? []);
     let model = await modelRegistry.getModel(
       this.settings.activeProvider,
@@ -719,6 +724,12 @@ export class Agent {
         relevanceJudge: createLLMRelevanceJudge(
           this.settings.activeProvider,
           this.settings.activeModel,
+          {
+            runId,
+            diag,
+            onRunEvent: (event) => this.onRunEvent(event),
+          },
+          this.sessionId,
         ),
       },
     );
@@ -749,6 +760,7 @@ export class Agent {
 
     // Build plan mode instructions if active
     const effectiveTools = summaryMode ? [] : this.getEffectiveTools();
+    diag.exit('PREFLIGHT', 'prepared');
 
     const result = await runAgentLoop({
       model,
@@ -764,6 +776,7 @@ export class Agent {
       responseLanguage: this.currentResponseLanguage,
       abortSignal: this.abortController!.signal,
       runId,
+      diag,
       sessionId: this.sessionId,
       onStream: (event) => {
         this.onStream(event);
@@ -906,6 +919,8 @@ export class Agent {
     runId: string,
     goalDef: import('@shared/types').GoalDefinition,
   ): Promise<void> {
+    const diag = new DiagLogger(this.workingDir, runId);
+    diag.enter('PREFLIGHT', 'prepare_goal');
     const modelRegistry = createModelRegistry(this.settings.customEndpoints ?? []);
     let model = await modelRegistry.getModel(
       this.settings.activeProvider,
@@ -935,6 +950,12 @@ export class Agent {
       relevanceJudge: createLLMRelevanceJudge(
         this.settings.activeProvider,
         this.settings.activeModel,
+        {
+          runId,
+          diag,
+          onRunEvent: (event) => this.onRunEvent(event),
+        },
+        this.sessionId,
       ),
     });
     const relevantLessonsContent = loadRelevantLessons(
@@ -991,6 +1012,7 @@ export class Agent {
       onRunEvent: (event: RunEvent) => {
         this.onRunEvent(event);
       },
+      diag,
       initialTurnCount: 0,
       // Drain mid-run guidance at each turn boundary (no abort/restart).
       drainGuidance: () => this.drainGuidance(),
@@ -1020,6 +1042,7 @@ export class Agent {
       ...loopConfig,
       runId,
     };
+    diag.exit('PREFLIGHT', 'goal_prepared');
 
     const { result: goalResult, messages: goalMessages } = await runGoalLoop({
       loopConfig: goalLoopConfig,

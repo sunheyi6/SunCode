@@ -151,10 +151,14 @@ describe('runAgentLoop — mid-run guidance injection', () => {
         messages: [userMsg('original task')],
         streamImpl,
         settings,
+        model: { provider: 'opencode-go' },
       }),
     );
 
     expect(captured).toHaveLength(3);
+    for (const request of captured) {
+      expect(request.options?.headers).toMatchObject({ 'x-opencode-session': 'test-session' });
+    }
     const mainA = captured[0];
     const compactB = captured[1];
     const mainC = captured[2];

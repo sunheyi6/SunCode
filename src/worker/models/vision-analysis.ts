@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { getProviderHeaders } from '@shared/provider-headers';
 import type { AppSettings, ImageContent } from '@shared/types';
 import { resolveApiKey } from '../utils/env';
 import { createModelRegistry } from './registry';
@@ -61,6 +63,7 @@ export async function analyzeImages(
   activeModel: unknown,
   images: ImageContent[],
   question: string,
+  sessionId: string = randomUUID(),
 ): Promise<VisionAnalysisResult> {
   const target = resolveVisionTarget(settings, activeModel);
   if (!target) {
@@ -90,6 +93,7 @@ export async function analyzeImages(
     buildVisionContext(question, images),
     {
       apiKey: modelApiKey(selectedModel, target.provider, settings),
+      headers: getProviderHeaders(selectedModel, sessionId),
       maxTokens: 2048,
       reasoning: 'low',
       cacheRetention: 'none',

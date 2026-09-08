@@ -875,6 +875,45 @@ export type RunEvent =
       timestamp: string;
     }
   | {
+      type: 'model_response_received';
+      runId: RunId;
+      turnNumber: number;
+      attempt: number;
+      provider: string;
+      model: string;
+      requestKind: 'main' | 'semantic_compact';
+      responseHeadersLatencyMs: number;
+      providerStatus: number;
+      providerRequestId?: string;
+      serverTiming?: string;
+      upstreamServiceTimeMs?: number;
+      timestamp: string;
+    }
+  | {
+      type: 'memory_relevance_started';
+      runId: RunId;
+      provider: string;
+      model: string;
+      candidateCount: number;
+      timestamp: string;
+    }
+  | {
+      type: 'memory_relevance_completed';
+      runId: RunId;
+      provider: string;
+      model: string;
+      candidateCount: number;
+      selectedCount?: number;
+      durationMs: number;
+      responseHeadersLatencyMs?: number;
+      providerStatus?: number;
+      providerRequestId?: string;
+      serverTiming?: string;
+      upstreamServiceTimeMs?: number;
+      error?: string;
+      timestamp: string;
+    }
+  | {
       type: 'model_request_completed';
       runId: RunId;
       turnNumber: number;
@@ -885,6 +924,15 @@ export type RunEvent =
       durationMs: number;
       /** Time to first token (ms). Measured from request start to first text/think delta. */
       firstTokenLatencyMs?: number;
+      /** Time from request start until pi-ai exposes its first provider stream-data event. */
+      firstStreamEventLatencyMs?: number;
+      /** Time from request start until the provider's HTTP response headers arrive. */
+      responseHeadersLatencyMs?: number;
+      providerStatus?: number;
+      providerRequestId?: string;
+      responseId?: string;
+      serverTiming?: string;
+      upstreamServiceTimeMs?: number;
       /** Time spent streaming after first token (ms). durationMs - firstTokenLatencyMs. */
       streamDurationMs?: number;
       inputTokens?: number;

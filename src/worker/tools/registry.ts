@@ -100,7 +100,7 @@ export function createToolRegistry(
   };
 
   registry.register(createReadTool(workingDir));
-  if (settings) registry.register(createInspectImageTool(workingDir, settings));
+  if (settings) registry.register(createInspectImageTool(workingDir, settings, sessionId));
   registry.register(createWriteTool(workingDir));
   registry.register(createEditTool(workingDir));
   registry.register(createBashTool(workingDir, callbacks, bashToolOptions));

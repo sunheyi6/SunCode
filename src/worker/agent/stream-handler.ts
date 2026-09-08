@@ -8,6 +8,7 @@ import type {
   ToolCallContent,
 } from '@shared/types';
 import type { DiagLogger } from '../utils/diag-logger';
+import type { ProviderResponseTelemetry } from './model-request-observability';
 
 export interface StreamHandlerInput {
   stream: AsyncIterable<AssistantMessageEvent>;
@@ -21,6 +22,7 @@ export interface StreamHandlerInput {
   requestAttempt: number;
   requestStartTime: number;
   requestMsgSummaries: RequestMessageTrace[];
+  getProviderResponseTelemetry?: () => ProviderResponseTelemetry | undefined;
   requestKind?: 'main' | 'semantic_compact';
   emitToStream?: boolean;
   /** Optional: called immediately when a tool_use block is complete during streaming. */
@@ -68,6 +70,7 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     requestAttempt,
     requestStartTime,
     requestMsgSummaries,
+    getProviderResponseTelemetry,
     requestKind = 'main',
     emitToStream = true,
     onToolCallComplete,
@@ -87,6 +90,7 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
   let firstTokenTime: number | undefined;
+  let firstStreamEventTime: number | undefined;
   let lastStreamUpdateAt: number | undefined;
   let hasPendingStreamUpdate = false;
 
@@ -110,6 +114,16 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
   if (emitToStream) onStream({ type: 'message_start' });
 
   for await (const event of stream) {
+    // pi-ai's synthetic `start` follows HTTP headers but precedes provider body
+    // consumption. The first subsequent event is the closest portable signal
+    // to the first parsed SSE/WebSocket payload that carries model data.
+    if (event.type !== 'start' && firstStreamEventTime === undefined) {
+      firstStreamEventTime = Date.now();
+      diag.milestone('LLM_STREAM', 'first_event', {
+        latencyMs: firstStreamEventTime - requestStartTime,
+        eventType: event.type,
+      });
+    }
     switch (event.type) {
       case 'start':
       case 'text_start':
@@ -226,6 +240,23 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
   const durationMs = Date.now() - requestStartTime;
   const firstTokenLatencyMs =
     firstTokenTime === undefined ? undefined : firstTokenTime - requestStartTime;
+  const firstStreamEventLatencyMs =
+    firstStreamEventTime === undefined ? undefined : firstStreamEventTime - requestStartTime;
+  const providerResponse = getProviderResponseTelemetry?.();
+  const responseId =
+    typeof assistantMsgRaw?.responseId === 'string' ? assistantMsgRaw.responseId : undefined;
+  diag.log('LLM_TIMING', 'request', {
+    requestKind,
+    durationMs,
+    responseHeadersLatencyMs: providerResponse?.headersLatencyMs,
+    firstStreamEventLatencyMs,
+    firstTokenLatencyMs,
+    providerStatus: providerResponse?.status,
+    providerRequestId: providerResponse?.requestId,
+    responseId,
+    serverTiming: providerResponse?.serverTiming,
+    upstreamServiceTimeMs: providerResponse?.upstreamServiceTimeMs,
+  });
   const usage = assistantMsgRaw?.usage as
     | {
         input?: number;
@@ -253,6 +284,13 @@ export async function handleStream(input: StreamHandlerInput): Promise<StreamHan
     requestKind,
     durationMs,
     firstTokenLatencyMs,
+    firstStreamEventLatencyMs,
+    responseHeadersLatencyMs: providerResponse?.headersLatencyMs,
+    providerStatus: providerResponse?.status,
+    providerRequestId: providerResponse?.requestId,
+    responseId,
+    serverTiming: providerResponse?.serverTiming,
+    upstreamServiceTimeMs: providerResponse?.upstreamServiceTimeMs,
     streamDurationMs:
       firstTokenLatencyMs === undefined ? undefined : durationMs - firstTokenLatencyMs,
     inputTokens: usage?.input,

@@ -13,6 +13,7 @@ import {
 } from '@shared/constants';
 import { validateImageAttachments } from '@shared/image-attachments';
 import { getProviderEnvKey } from '@shared/provider-env';
+import { getProviderHeaders } from '@shared/provider-headers';
 import type { RuntimeEventDraft, RuntimeTerminationStatus } from '@shared/runtime-events';
 import { runtimeIdentityEnvironment } from '@shared/runtime-identity';
 import { getVendorSkillDirectories } from '@shared/skill-directories';
@@ -1603,6 +1604,7 @@ export function registerIpcHandlers(wm: WindowManager): void {
           ],
           tools: [],
         } as any,
+        { headers: getProviderHeaders(model, randomUUID()) },
       );
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2002,7 +2004,7 @@ async function generateTitleWithAI(targetSession: string, userMessage: Message):
         messages: [{ role: 'user', content: text }],
         tools: [],
       },
-      { reasoning: 'minimal' },
+      { reasoning: 'minimal', headers: getProviderHeaders(model, targetSession) },
     );
 
     let raw = '';

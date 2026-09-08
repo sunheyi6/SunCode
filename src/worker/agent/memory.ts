@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
@@ -12,8 +12,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import type { Message } from '@shared/types';
+import type { ProviderResponse } from '@earendil-works/pi-ai';
+import { getProviderHeaders } from '@shared/provider-headers';
+import type { Message, RunEvent } from '@shared/types';
+import type { DiagLogger } from '../utils/diag-logger';
 import { getAgentDataSubdir } from './agent-data-dir';
+import {
+  captureProviderResponse,
+  type ProviderResponseTelemetry,
+} from './model-request-observability';
 import { buildStructuredTaskPrompt } from './model-structured-content';
 
 const MEMORIES_DIR = '.suncode/memories';
@@ -367,6 +374,7 @@ export async function saveMemory(
   modelId?: string,
   sessionId?: string,
 ): Promise<MemoryEntry> {
+  const requestSessionId = sessionId ?? randomUUID();
   const scope = entry.scope ?? (sessionId ? 'session' : 'project');
   const memDir = memoryDirForScope(workingDir, scope, sessionId);
   if (!existsSync(memDir)) {
@@ -384,7 +392,7 @@ export async function saveMemory(
 
   if (!entry.summary && provider && modelId) {
     try {
-      const summary = await generateSummary(entry, provider, modelId);
+      const summary = await generateSummary(entry, provider, modelId, requestSessionId);
       finalEntry = { ...finalEntry, summary: summary.slice(0, MAX_SUMMARY_LENGTH) };
     } catch (e) {
       console.warn('Failed to generate memory summary:', e);
@@ -393,7 +401,7 @@ export async function saveMemory(
 
   if (!entry.facts && provider && modelId) {
     try {
-      const facts = await extractStructuredFacts(entry, provider, modelId);
+      const facts = await extractStructuredFacts(entry, provider, modelId, requestSessionId);
       if (facts.length > 0) {
         finalEntry = { ...finalEntry, facts };
       }
@@ -1610,6 +1618,7 @@ async function generateSummary(
   entry: MemoryEntry,
   provider: string,
   modelId: string,
+  sessionId: string,
 ): Promise<string> {
   try {
     const pi = await import('@earendil-works/pi-ai');
@@ -1655,6 +1664,7 @@ async function generateSummary(
 
     const result = await complete(model, context, {
       maxTokens: 300,
+      headers: getProviderHeaders(model, sessionId),
       temperature: 0.3,
       signal: AbortSignal.timeout(30_000),
     });
@@ -1682,6 +1692,7 @@ async function extractStructuredFacts(
   entry: MemoryEntry,
   provider: string,
   modelId: string,
+  sessionId: string,
 ): Promise<StructuredFact[]> {
   try {
     const pi = await import('@earendil-works/pi-ai');
@@ -1731,6 +1742,7 @@ async function extractStructuredFacts(
 
     const result = await complete(model, context, {
       maxTokens: 500,
+      headers: getProviderHeaders(model, sessionId),
       temperature: 0.2,
       signal: AbortSignal.timeout(30_000),
     });
@@ -1781,8 +1793,61 @@ const CJK_STOP_UNIGRAMS = new Set(
  * returns null (falling back to heuristic retrieval) when the model is
  * unavailable, the call fails, or the response cannot be parsed.
  */
-export function createLLMRelevanceJudge(provider: string, modelId: string): RelevanceJudge {
+export interface RelevanceJudgeObservability {
+  runId: string;
+  diag: DiagLogger;
+  onRunEvent: (event: RunEvent) => void;
+}
+
+export function createLLMRelevanceJudge(
+  provider: string,
+  modelId: string,
+  observability?: RelevanceJudgeObservability,
+  sessionId: string = randomUUID(),
+): RelevanceJudge {
   return async (query, candidates) => {
+    const startedAt = Date.now();
+    let providerResponseTelemetry: ProviderResponseTelemetry | undefined;
+    observability?.diag.enter('MEMORY_JUDGE', 'relevance', {
+      provider,
+      model: modelId,
+      candidates: candidates.length,
+    });
+    observability?.onRunEvent({
+      type: 'memory_relevance_started',
+      runId: observability.runId,
+      provider,
+      model: modelId,
+      candidateCount: candidates.length,
+      timestamp: '',
+    });
+
+    const emitCompleted = (selectedCount?: number, error?: string): void => {
+      const durationMs = Date.now() - startedAt;
+      observability?.diag.exit('MEMORY_JUDGE', error ? 'failed' : 'completed', {
+        durationMs,
+        selectedCount,
+        error,
+        ...providerResponseTelemetry,
+      });
+      observability?.onRunEvent({
+        type: 'memory_relevance_completed',
+        runId: observability.runId,
+        provider,
+        model: modelId,
+        candidateCount: candidates.length,
+        selectedCount,
+        durationMs,
+        responseHeadersLatencyMs: providerResponseTelemetry?.headersLatencyMs,
+        providerStatus: providerResponseTelemetry?.status,
+        providerRequestId: providerResponseTelemetry?.requestId,
+        serverTiming: providerResponseTelemetry?.serverTiming,
+        upstreamServiceTimeMs: providerResponseTelemetry?.upstreamServiceTimeMs,
+        error,
+        timestamp: '',
+      });
+    };
+
     try {
       const pi = await import('@earendil-works/pi-ai');
       const getModel = pi.getModel as unknown as (provider: string, modelId: string) => unknown;
@@ -1794,6 +1859,7 @@ export function createLLMRelevanceJudge(provider: string, modelId: string): Rele
       const model = getModel(provider, modelId);
       if (!model) {
         console.warn('Model not available for memory relevance judging');
+        emitCompleted(undefined, 'model_unavailable');
         return null;
       }
 
@@ -1827,8 +1893,15 @@ ${candidates
 
       const result = await complete(model, context, {
         maxTokens: 200,
+        headers: getProviderHeaders(model, sessionId),
         temperature: 0,
         signal: AbortSignal.timeout(15_000),
+        onResponse: (response: ProviderResponse) => {
+          providerResponseTelemetry = captureProviderResponse(response, startedAt);
+          observability?.diag.milestone('MEMORY_JUDGE_HTTP', 'response_received', {
+            ...providerResponseTelemetry,
+          });
+        },
       });
 
       const text = result?.content
@@ -1839,19 +1912,27 @@ ${candidates
         .map((content) => content.text)
         .join('')
         .trim();
-      if (!text) return null;
+      if (!text) {
+        emitCompleted(undefined, 'empty_response');
+        return null;
+      }
 
       const match = text.match(/\[[\d\s,]*\]/);
-      if (!match) return null;
+      if (!match) {
+        emitCompleted(undefined, 'invalid_response');
+        return null;
+      }
       const indexes = JSON.parse(match[0]) as number[];
       const keys = new Set<string>();
       for (const index of indexes) {
         const candidate = candidates[index - 1];
         if (candidate) keys.add(candidate.key);
       }
+      emitCompleted(keys.size);
       return keys;
     } catch (e) {
       console.warn('Memory relevance judge failed:', e);
+      emitCompleted(undefined, e instanceof Error ? e.message : String(e));
       return null;
     }
   };

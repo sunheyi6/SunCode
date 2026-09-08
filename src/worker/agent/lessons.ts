@@ -26,6 +26,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_MAX_LESSONS } from '@shared/constants';
+import { getProviderHeaders } from '@shared/provider-headers';
 import type {
   LessonEntry,
   LessonExtractionContext,
@@ -693,6 +694,7 @@ function buildExtractionUserPrompt(ctx: LessonExtractionContext): string {
 async function extractLessonWithLLM(
   ctx: LessonExtractionContext,
   provider: string,
+  sessionId: string,
 ): Promise<RawLessonOutput | null> {
   try {
     const pi = await import('@earendil-works/pi-ai');
@@ -743,6 +745,7 @@ async function extractLessonWithLLM(
     let responseText = '';
     const stream = streamSimple(model, context, {
       reasoning: 'minimal',
+      headers: getProviderHeaders(model, sessionId),
       signal: AbortSignal.timeout(30_000),
     });
 
@@ -804,7 +807,7 @@ export async function extractAndSaveLessons(
 ): Promise<void> {
   for (const ctx of contexts) {
     try {
-      const raw = await extractLessonWithLLM(ctx, provider);
+      const raw = await extractLessonWithLLM(ctx, provider, sessionId ?? ctx.runId);
       if (!raw?.extracted || !raw.title || !raw.problem) continue;
 
       // Dedup check

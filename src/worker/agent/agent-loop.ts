@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
+import type { AssistantMessageEvent, ProviderResponse } from '@earendil-works/pi-ai';
 import { MAX_TURNS } from '@shared/constants';
 import { sanitizeStructuredMessageLeak } from '@shared/finalization';
+import { getProviderHeaders } from '@shared/provider-headers';
 import type {
   AppSettings,
   ContentBlock,
@@ -33,6 +34,10 @@ import {
   updateCompletionGateFromEvidence,
 } from './completion-gate';
 import { quickMatchLesson } from './lessons';
+import {
+  captureProviderResponse,
+  type ProviderResponseTelemetry,
+} from './model-request-observability';
 import { buildStructuredTaskPrompt, buildStructuredTextMessage } from './model-structured-content';
 import { createProgressGuardState, updateSimpleTaskProgressGuard } from './progress-guard';
 import { prepareProjectKnowledge } from './project-knowledge';
@@ -118,6 +123,8 @@ export interface AgentLoopInput {
     context: Record<string, unknown>,
     options?: Record<string, unknown>,
   ) => AsyncIterable<AssistantMessageEvent>;
+  /** Optional logger created before run preflight so auxiliary calls share one timeline. */
+  diag?: DiagLogger;
   /** Optional callback fired on each turn_start to keep external state in sync.
    *  tokenUsage is the accumulated token count for the current run so far. */
   onTurnStart?: (
@@ -232,7 +239,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const projectKnowledge = prepareProjectKnowledge({ workingDir, sessionId, settings });
 
   // Diagnostic logger: persists to .suncode/diagnostics/<runId>.log
-  const diag = new DiagLogger(workingDir, runId);
+  const diag = input.diag ?? new DiagLogger(workingDir, runId);
   diag.enter(
     'RUN',
     `model=${settings.activeProvider}/${settings.activeModel} tools=${tools.length} maxTurns=${loopTurnLimit}`,
@@ -352,6 +359,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // Call the LLM with real token-by-token streaming + prompt caching
       const requestStartTime = Date.now();
       const requestAttempt = 1;
+      let providerResponseTelemetry: ProviderResponseTelemetry | undefined;
 
       onRunEvent({
         type: 'model_request_started',
@@ -380,6 +388,27 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         cacheRetention: 'long',
         sessionId,
         apiKey: getModelApiKey(model),
+        headers: getProviderHeaders(model, sessionId),
+        onResponse: (response: ProviderResponse) => {
+          providerResponseTelemetry = captureProviderResponse(response, requestStartTime);
+          const telemetry = providerResponseTelemetry;
+          diag.milestone('LLM_HTTP', 'response_received', { ...telemetry });
+          onRunEvent({
+            type: 'model_response_received',
+            runId,
+            turnNumber: turnCount,
+            attempt: requestAttempt,
+            provider: settings.activeProvider,
+            model: settings.activeModel,
+            requestKind: 'main',
+            responseHeadersLatencyMs: telemetry.headersLatencyMs,
+            providerStatus: telemetry.status,
+            providerRequestId: telemetry.requestId,
+            serverTiming: telemetry.serverTiming,
+            upstreamServiceTimeMs: telemetry.upstreamServiceTimeMs,
+            timestamp: '',
+          });
+        },
       });
 
       const streamResult = await handleStream({
@@ -394,6 +423,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         requestAttempt,
         requestStartTime,
         requestMsgSummaries,
+        getProviderResponseTelemetry: () => providerResponseTelemetry,
         // Pre-execute read-only tools as soon as their blocks are complete
         onToolCallComplete: (tc) => streamingExecutor.onToolCallComplete(tc),
       });
@@ -856,6 +886,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
         if (candidate) {
           const compactStartedAt = Date.now();
+          let compactProviderResponseTelemetry: ProviderResponseTelemetry | undefined;
           onRunEvent({
             type: 'semantic_compact_started',
             runId,
@@ -920,6 +951,33 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               cacheRetention: 'long',
               sessionId,
               apiKey: getModelApiKey(model),
+              headers: getProviderHeaders(model, sessionId),
+              onResponse: (response: ProviderResponse) => {
+                compactProviderResponseTelemetry = captureProviderResponse(
+                  response,
+                  compactStartedAt,
+                );
+                const telemetry = compactProviderResponseTelemetry;
+                diag.milestone('LLM_HTTP', 'response_received', {
+                  requestKind: 'semantic_compact',
+                  ...telemetry,
+                });
+                onRunEvent({
+                  type: 'model_response_received',
+                  runId,
+                  turnNumber: turnCount,
+                  attempt: 1,
+                  provider: settings.activeProvider,
+                  model: settings.activeModel,
+                  requestKind: 'semantic_compact',
+                  responseHeadersLatencyMs: telemetry.headersLatencyMs,
+                  providerStatus: telemetry.status,
+                  providerRequestId: telemetry.requestId,
+                  serverTiming: telemetry.serverTiming,
+                  upstreamServiceTimeMs: telemetry.upstreamServiceTimeMs,
+                  timestamp: '',
+                });
+              },
             });
             const compactResult = await handleStream({
               stream: compactStream,
@@ -933,6 +991,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               requestAttempt: 1,
               requestStartTime: compactStartedAt,
               requestMsgSummaries: compactRequestMessages,
+              getProviderResponseTelemetry: () => compactProviderResponseTelemetry,
               requestKind: 'semantic_compact',
               emitToStream: false,
             });

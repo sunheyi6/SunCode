@@ -1,4 +1,7 @@
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import { completeSimple, type Api, type Model } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
+import { getProviderHeaders } from '../../src/shared/provider-headers';
 import type { CustomEndpoint } from '@shared/types';
 import { buildCustomModel, createModelRegistry } from '../../src/worker/models/registry';
 import {
@@ -20,6 +23,85 @@ function endpoint(over: Partial<CustomEndpoint>): CustomEndpoint {
     ...over,
   };
 }
+
+describe('OpenCode request headers', () => {
+  it('recognizes built-in providers and custom OpenCode endpoints without matching other hosts', () => {
+    for (const model of [
+      { provider: 'opencode' },
+      { provider: 'opencode-go' },
+      { provider: 'custom-go', baseUrl: 'https://opencode.ai/zen/go/v1' },
+    ]) {
+      expect(getProviderHeaders(model, 'conversation-a')).toMatchObject({
+        'x-opencode-session': 'conversation-a',
+        'User-Agent': expect.stringMatching(/^SunCode\//),
+      });
+      expect(getProviderHeaders(model, 'conversation-b')?.['x-opencode-session']).toBe(
+        'conversation-b',
+      );
+    }
+    for (const model of [
+      null,
+      {},
+      { provider: 'openai' },
+      { baseUrl: 'https://opencode.ai.example.com/v1' },
+      { baseUrl: 'https://example.com/opencode.ai' },
+      { baseUrl: 'invalid-url' },
+    ]) {
+      expect(getProviderHeaders(model, 'conversation-a')).toBeUndefined();
+    }
+  });
+
+  it.each(['openai-completions', 'openai-responses', 'anthropic-messages'] as const)(
+    'sends routing headers over HTTP through %s even with caching disabled',
+    async (api) => {
+      const received: IncomingHttpHeaders[] = [];
+      const server = createServer((request, response) => {
+        received.push(request.headers);
+        request.resume();
+        // A terminal response lets us inspect the real SDK request without a provider account.
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({
+          error: { message: 'test response', type: 'invalid_request_error' },
+        }));
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      try {
+        const address = server.address();
+        if (!address || typeof address === 'string') throw new Error('Missing test server port');
+        const model = {
+          ...buildCustomModel(endpoint({ apiFormat: api }), { id: 'test-model' }),
+          provider: 'opencode-go',
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        } as Model<Api>;
+        for (const sessionId of ['conversation-a', 'conversation-a', 'conversation-b']) {
+          await completeSimple(
+            model,
+            { messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }] },
+            {
+              apiKey: 'test-key',
+              cacheRetention: 'none',
+              headers: getProviderHeaders(model, sessionId),
+            },
+          );
+        }
+        expect(received.map((headers) => headers['x-opencode-session'])).toEqual([
+          'conversation-a', 'conversation-a', 'conversation-b',
+        ]);
+        for (const headers of received) {
+          expect(headers['user-agent']).toMatch(/^SunCode\//);
+          expect(headers[api === 'anthropic-messages' ? 'x-api-key' : 'authorization']).toBe(
+            api === 'anthropic-messages' ? 'sk-test' : 'Bearer sk-test',
+          );
+        }
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => error ? reject(error) : resolve());
+        });
+      }
+    },
+  );
+});
 
 describe('buildCustomModel', () => {
   it('用默认值填充 name / contextWindow', () => {

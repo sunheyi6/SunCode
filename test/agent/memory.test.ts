@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSessionSnapshot,
+  createLLMRelevanceJudge,
   deleteMemory,
   flushMemoryAccessCounts,
   getAllMemories,
@@ -25,6 +26,11 @@ import {
 } from '../../src/worker/agent/memory';
 import { promoteExplicitDurableFacts } from '../../src/worker/agent/agent';
 
+vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@earendil-works/pi-ai')>();
+  return { ...actual };
+});
+
 let tempDirs: string[] = [];
 
 function createTempDir(prefix: string): string {
@@ -35,10 +41,47 @@ function createTempDir(prefix: string): string {
 
 describe('memory storage', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
     tempDirs = [];
+  });
+
+  it('uses the conversation session for summary, facts, and repeated relevance requests', async () => {
+    const pi = await import('@earendil-works/pi-ai');
+    const modelId = pi.getModels('opencode-go')[0].id;
+    const complete = vi.spyOn(pi, 'complete').mockResolvedValue({
+      content: [{ type: 'text', text: '[]' }],
+    } as Awaited<ReturnType<typeof pi.complete>>);
+    await saveMemory(createTempDir('suncode-routing-'), {
+      date: '2026-09-08', slug: 'routing', userRequest: 'remember the project', toolsUsed: {},
+    }, 'opencode-go', modelId, 'conversation-a');
+    const judge = createLLMRelevanceJudge('opencode-go', modelId, undefined, 'conversation-a');
+    await judge('first query', []);
+    await judge('second query', []);
+    expect(complete).toHaveBeenCalledTimes(4);
+    for (const call of complete.mock.calls) {
+      expect(call[2]?.headers).toMatchObject({ 'x-opencode-session': 'conversation-a' });
+    }
+    await createLLMRelevanceJudge('opencode-go', modelId, undefined, 'conversation-b')('query', []);
+    expect(complete.mock.lastCall?.[2]?.headers).toMatchObject({ 'x-opencode-session': 'conversation-b' });
+  });
+
+  it('keeps a standalone relevance judge session stable and isolates another judge', async () => {
+    const pi = await import('@earendil-works/pi-ai');
+    const modelId = pi.getModels('opencode-go')[0].id;
+    const complete = vi.spyOn(pi, 'complete').mockResolvedValue({
+      content: [{ type: 'text', text: '[]' }],
+    } as Awaited<ReturnType<typeof pi.complete>>);
+    const judge = createLLMRelevanceJudge('opencode-go', modelId);
+    await judge('first query', []);
+    await judge('second query', []);
+    await createLLMRelevanceJudge('opencode-go', modelId)('query', []);
+    const sessions = complete.mock.calls.map((call) => call[2]?.headers?.['x-opencode-session']);
+    expect(sessions[0]).toBeTruthy();
+    expect(sessions[1]).toBe(sessions[0]);
+    expect(sessions[2]).not.toBe(sessions[0]);
   });
 
   it('stores session memories under app data instead of the workspace', async () => {
