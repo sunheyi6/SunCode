@@ -29,6 +29,12 @@
 | [紧凑流式输出](compact-streaming-progress.md) | 流式过程摘要：模型控制五行限制、中间文本预览 vs 最终回答区分、前端不截断 |
 | [顶部 Token 用量](header-token-usage.md) | Git 分支旁实时 Token 显示：复用 agent store 数据、千分位格式化、0 时隐藏 |
 | [会话切换性能](session-switch-performance.md) | 会话切换异步加载：最近 10 条优先、后台完整加载、竞态保护 |
+| [上下文预算设计](context-budget-design.md) | 容量保护三层管线：Layer 0 工具裁剪（无损）→ Layer 1 token 预算 turn cap → Layer 2 高水位 history compact、诊断字段 |
+| [简单任务进度护栏](progress-guard-design.md) | 防止小改动陷入无限调查：isSimpleTask 门控、8/12/2 轮阈值、guidance 注入与 loopTurnLimit 收紧 |
+| [技能系统设计](skills-system-design.md) | Skills 加载与注入：多来源分层覆盖、扁平 .md 与 SKILL.md、frontmatter、只注入索引按需 read |
+| [子智能体调度设计](subagent-system-design.md) | SubagentDispatcher：逻辑沙箱、工具白名单、四重预算、深度/环守卫、命名会话、全文归档 + 摘要回流 |
+| [无头模式设计](headless-mode-design.md) | 不启动 Electron 复用 runAgentLoop：Harbor/Terminal-Bench/DeepSwe 入口、HTTP 工具桥、环境变量 |
+| [Agent 会话生命周期](agent-session-lifecycle-design.md) | 多 Session 并发 Agent、withSessionLock 串行化（变更加锁/中断免锁）、软停止与总结回合、会话切换 abort |
 
 ## 2026-06~07 架构变更摘要
 

@@ -12,7 +12,7 @@ export interface SystemPromptInput {
   permissionMode: AppSettings['permissionMode'];
   /** Optional: Custom system prompt to override the default */
   customPrompt?: string;
-  /** Optional: Content from .agents.md (Codex-style workspace instructions) */
+  /** Optional: Combined project instructions and global ~/.suncode/AGENTS.md instructions. */
   agentsMdContent?: string;
   /** Optional: Auto-generated memories from prior sessions */
   memoryContent?: string;

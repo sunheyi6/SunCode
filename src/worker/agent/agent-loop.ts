@@ -86,7 +86,7 @@ export interface AgentLoopInput {
   settings: AppSettings;
   workingDir: string;
   skillsContent: string;
-  /** Content from .agents.md / AGENTS.md (Codex-style workspace instructions). */
+  /** Combined project instructions and global ~/.suncode/AGENTS.md instructions. */
   agentsMdContent?: string;
   /** Auto-generated memories from prior sessions. */
   memoryContent?: string;

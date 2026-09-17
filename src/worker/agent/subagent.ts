@@ -1,7 +1,7 @@
 /**
  * Sub-agent dispatcher — manages sub-agent lifecycle within the agent worker thread.
  *
- * Design decisions (from docs/subagent-architecture-comparison.md):
+ * Design decisions (see docs/subagent-system-design.md):
  * - Logical sandbox (not OS process) → ~30ms startup vs 300ms for fork
  * - Context isolation via data-level messages[] construction
  * - Tool whitelist enforcement

@@ -8,6 +8,10 @@ files:
   - dist
 
 extraResources:
+  - from: skills
+    to: skills
+    filter:
+      - "**/*"
   - from: docs
     to: docs
     filter:

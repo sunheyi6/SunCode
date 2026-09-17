@@ -93,12 +93,17 @@ export function createSkillsLoader(
 }
 
 function getBuiltinSkillsDir(): string {
+  if (process.env.SUNCODE_SKILLS_DIR) return process.env.SUNCODE_SKILLS_DIR;
   // Check for Electron production path first.
   if (typeof process !== 'undefined' && process.resourcesPath) {
     return join(process.resourcesPath, 'skills');
   }
   // Development: resolve relative to worker directory.
-  return join(__dirname, '..', '..', 'skills');
+  const candidates = [
+    join(__dirname, '..', '..', 'skills'),
+    join(__dirname, '..', '..', '..', 'skills'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) || candidates[0];
 }
 
 function getSkillsCacheKey(

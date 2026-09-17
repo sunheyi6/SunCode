@@ -593,6 +593,9 @@ function getAgentWorker(): Worker {
         SUNCODE_DOCS_DIR: IS_DEV
           ? join(app.getAppPath(), 'docs')
           : join(process.resourcesPath, 'docs'),
+        SUNCODE_SKILLS_DIR: IS_DEV
+          ? join(app.getAppPath(), 'skills')
+          : join(process.resourcesPath, 'skills'),
       },
     });
     agentWorker = worker;

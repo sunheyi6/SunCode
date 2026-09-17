@@ -26,7 +26,7 @@
 ├─────────────────────────────────────┤
 │ 5. 环境信息 (Environment)            │  ← 你在哪里工作
 ├─────────────────────────────────────┤
-│ 6. <project_context> (如有)          │  ← .agents.md 项目约束 (XML)
+│ 6. <project_context> (如有)          │  ← 项目与全局用户约束
 ├─────────────────────────────────────┤
 │ 7. 工具摘要 (Tools - 一行式)          │  ← ★ 省 token 的工具摘要
 ├─────────────────────────────────────┤
@@ -157,10 +157,10 @@ provider 的 API 层使用，但不再占用系统提示 token。
 
 Skills 和 Workspace 指令采用结构化 XML 标签组织，遵循 pi / Codex 的设计约定：
 
-**`<project_context>`** — 来自 `.agents.md` 的项目级约束：
+**`<project_context>`** — 合并项目文件与 `~/.suncode/AGENTS.md` 的约束：
 ```xml
 <project_context>
-<!-- .agents.md 的内容 -->
+<!-- 项目与全局用户约束的内容 -->
 - 代码风格要求
 - 部署规则
 - 安全约束
@@ -179,14 +179,16 @@ Skills 和 Workspace 指令采用结构化 XML 标签组织，遵循 pi / Codex 
 XML 标签让模型能清晰区分"通用指令"和"项目特定规则"。
 参考 [agentskills.io](https://agentskills.io) 约定和 pi 项目的 `<project_instructions>` 实践。
 
-### 3.8 `.agents.md` 加载
+### 3.8 项目与全局用户约束加载
 
-遵循 Codex 约定，加载两级 `.agents.md`：
-1. 项目级：`<workspace>/.agents.md`（fallback `AGENTS.md`）
-2. 用户级：`~/.agents.md`
+由 `src/worker/agent/agent-instructions.ts` 加载两级约束：
+1. 项目级：依次尝试 `<workspace>/CLAUDE.md`、`<workspace>/AGENTS.md`，成功读取第一个文件后停止
+2. 用户级：`~/.suncode/AGENTS.md`
 
-两者合并后注入 `<project_context>` 标签。该内容通过
+两者合并后注入结构化 System Prompt 的 `context.projectInstructions`。该内容通过
 `AgentLoopInput.agentsMdContent` 传入 `buildSystemPrompt()`。
+
+全局路径与存在状态由 `context.projectKnowledge.entryPath` 指向的运行时文档提供；SunCode 自身相关问题由内置 `suncode` skill 导航到该入口及本目录的主题文档。约束内容仍在每次 Agent 运行开始时自动加载，不依赖 skill 调用。
 
 ---
 
@@ -195,7 +197,7 @@ XML 标签让模型能清晰区分"通用指令"和"项目特定规则"。
 ```
 Agent.runLoop()
     │
-    ├─ loadAgentsMd(workingDir)        // .agents.md / AGENTS.md
+    ├─ loadAgentsMd(workingDir)        // 项目与全局用户约束
     ├─ skillsLoader.loadAll()          // Skills 内容
     │
     ├─ buildSystemPrompt({
@@ -203,7 +205,7 @@ Agent.runLoop()
     │     tools,           // ToolRegistry.getDefinitions()
     │     skillsContent,   // SkillsLoader.loadAll()
     │     maxTurns,        // 用户设置
-    │     agentsMdContent, // .agents.md 内容 (v2026-06 新增)
+    │     agentsMdContent, // 合并后的约束内容
     │     customPrompt,    // 可选的自定义提示词
     │  })
     │

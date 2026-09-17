@@ -20,9 +20,17 @@
 
 ## Agent 项目自认识入口
 
-每次 Agent 运行开始时，SunCode 会生成一份会话级 `runtime/project-info.md`，并把它的绝对路径作为 `context.projectKnowledge` 注入 System Prompt。Agent 遇到关于 SunCode 自身、当前配置、架构、路径、日志或内置行为的问题时，应先通过 `read` 读取该入口，而不是进行全局搜索。
+SunCode 自身的使用、配置和排障统一由内置 `suncode` skill 导航。Agent 遇到相关请求时，先读取 skills 索引中的该 skill，再读取 `context.projectKnowledge.entryPath` 指向的会话级 `runtime/project-info.md`。skill 随应用打包，详细知识复用本目录文档，按需读取。当前工作目录可能是其他项目，不应在其中搜索 SunCode 内部实现。
 
-入口文档包含当前 Provider、当前模型、思考级别、工作目录，以及本目录下设计文档的绝对索引路径；不写入 API Key 等密钥。生产环境文件位于 `{userData}/.suncode/sessions/{sessionId}/runtime/project-info.md`，无头模式写入系统临时目录，避免污染被操作的项目。
+入口文档在每次 Agent 运行开始时生成，包含当前 Provider、模型、思考级别、工作目录、应用数据目录、全局约束文件的实际路径和存在状态，以及设计文档的绝对索引路径；不写入 API Key 等密钥。生产环境文件位于 `{userData}/.suncode/sessions/{sessionId}/runtime/project-info.md`，无头模式写入系统临时目录，避免污染被操作的项目。
+
+### 全局用户约束
+
+全局用户约束文件为 `~/.suncode/AGENTS.md`，位于 SunCode 专属的用户配置目录。主目录按 `HOME`、`USERPROFILE`、系统主目录依次解析，实际路径以运行时入口为准。用户要求保存全局规则时，读取并合并该文件；不存在则创建文件及所需父目录，保留已有内容，完成后回读验证。后续 Agent 新运行会重新加载，对所有项目生效，不依赖 skill 是否被调用或记忆检索是否命中。
+
+旧路径 `~/.agents.md` 不再读取。升级时如需保留旧规则，应将其内容合并到 `~/.suncode/AGENTS.md`，保留新文件中已有的规则。
+
+项目级依次尝试工作目录下的 `CLAUDE.md`、`AGENTS.md`，成功读取第一个文件后停止（即使内容为空），然后合并全局约束。不会自动加载 `~/.codex/AGENTS.md`。加载实现位于 `src/worker/agent/agent-instructions.ts`，运行时入口复用同一个路径解析函数。
 
 ---
 

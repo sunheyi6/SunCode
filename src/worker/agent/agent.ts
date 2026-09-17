@@ -33,6 +33,7 @@ import { createSubagentTool } from '../tools/subagent';
 import type { Tool } from '../tools/types';
 import { DiagLogger } from '../utils/diag-logger';
 import { getAgentDataSubdir } from './agent-data-dir';
+import { loadAgentsMd } from './agent-instructions';
 import { runAgentLoop } from './agent-loop';
 import { applyContextBudget } from './context-budget';
 import { extractGoalDefinition, runGoalLoop } from './goal-loop';
@@ -709,7 +710,7 @@ export class Agent {
     );
     const skillsContent = await skillsLoader.loadAll();
 
-    // Load .agents.md (Codex convention): project-level, then user-level
+    // Load project instructions, then global user instructions.
     const agentsMdContent = await loadAgentsMd(this.workingDir);
 
     // Load auto-generated memories from prior sessions (with semantic search).
@@ -1506,50 +1507,6 @@ function contextWindowFromModel(model: unknown): number {
     if (typeof val === 'number' && val > 0) return val;
   }
   return 128_000;
-}
-
-/**
- * Load .agents.md files following the Codex convention.
- * Reads project-level (.agents.md in project root) and user-level (~/.agents.md).
- * Both are combined into a single instructions block for the system prompt.
- */
-async function loadAgentsMd(workingDir: string): Promise<string> {
-  const parts: string[] = [];
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
-
-  // Project-level agent instructions.
-  // Different ecosystems use different names but serve the same purpose.
-  // Codex → AGENTS.md, Claude Code → CLAUDE.md, Gemini → GEMINI.md.
-  // .agents.md (with dot) is ~/.agents.md for user-level global context.
-  for (const name of ['CLAUDE.md', 'AGENTS.md']) {
-    const projectPath = join(workingDir, name);
-    if (existsSync(projectPath)) {
-      try {
-        const content = await readFile(projectPath, 'utf-8');
-        if (content.trim()) {
-          parts.push(content.trim());
-        }
-        break; // Only load the first one found
-      } catch {
-        // Skip unreadable files
-      }
-    }
-  }
-
-  // User-level ~/.agents.md
-  const userPath = join(homeDir, '.agents.md');
-  if (existsSync(userPath)) {
-    try {
-      const content = await readFile(userPath, 'utf-8');
-      if (content.trim()) {
-        parts.push(content.trim());
-      }
-    } catch {
-      // Skip unreadable files
-    }
-  }
-
-  return parts.join('\n\n');
 }
 
 /**

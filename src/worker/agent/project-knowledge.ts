@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AppSettings } from '@shared/types';
 import { getAgentDataSubdir } from './agent-data-dir';
+import { getGlobalInstructionsPath } from './agent-instructions';
 
 export interface ProjectKnowledgeReference {
   entryPath: string;
@@ -16,7 +17,7 @@ interface PrepareProjectKnowledgeInput {
 }
 
 const PROJECT_KNOWLEDGE_INSTRUCTION =
-  'When the user asks about SunCode itself, its current runtime configuration, architecture, paths, logs, or built-in behavior, read this local document before answering. Treat it and the linked built-in documentation as the primary source instead of performing a global search.';
+  'For questions or changes about SunCode itself (including global user instructions, settings, memory, skills, logs, and architecture), first read the suncode skill from the available skills when present, then this runtime document. Use its resolved paths and linked documentation. The working directory may be an unrelated user project; do not search it for SunCode internals.';
 
 export function prepareProjectKnowledge(
   input: PrepareProjectKnowledgeInput,
@@ -45,6 +46,7 @@ export function buildProjectKnowledgeDocument(
 ): string {
   const docsIndex = docsDir ? join(docsDir, 'README.md') : undefined;
   const staticProjectInfo = docsDir ? join(docsDir, 'project-info.md') : undefined;
+  const globalInstructionsPath = getGlobalInstructionsPath();
 
   return [
     '# SunCode 项目信息入口',
@@ -58,6 +60,13 @@ export function buildProjectKnowledgeDocument(
     `- 当前模型：\`${input.settings.activeModel}\``,
     `- 思考级别：\`${input.settings.thinkingLevel}\``,
     `- 当前工作目录：\`${input.workingDir}\``,
+    `- 应用数据目录：${process.env.SUNCODE_APP_DATA ? `\`${process.env.SUNCODE_APP_DATA}\`` : '未设置（无头模式）'}`,
+    '',
+    '## 用户约束',
+    '',
+    `- 全局用户约束文件：\`${globalInstructionsPath}\``,
+    `- 文件状态：${existsSync(globalInstructionsPath) ? '已存在（修改前读取）' : '尚未创建（可按用户要求创建）'}`,
+    '- 此文件由 Agent 在每次运行开始时读取，对所有项目生效；运行中写入后，后续新运行会重新加载。',
     '',
     '## 内置文档',
     '',
