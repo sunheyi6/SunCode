@@ -457,7 +457,7 @@
   --shadow-sm: 2px 2px 0 rgba(0, 0, 0, 0.6);
   --shadow-md: 3px 3px 0 rgba(0, 0, 0, 0.7);
   --shadow-lg: 5px 5px 0 rgba(0, 0, 0, 0.8);
-  --color-bubble-user: #dcf23e;
+  --color-bubble-user: #f35b2a;
   --color-bubble-user-text: #171715;
   --color-on-accent: #171715;
   --sidebar-bg: #1f1e1b;
@@ -861,7 +861,7 @@
   --shadow-sm: 2px 2px 0 rgba(23, 23, 21, 0.4);
   --shadow-md: 3px 3px 0 rgba(23, 23, 21, 0.5);
   --shadow-lg: 5px 5px 0 rgba(23, 23, 21, 0.6);
-  --color-bubble-user: #dcf23e;
+  --color-bubble-user: #f35b2a;
   --color-bubble-user-text: #171715;
   --color-on-accent: #171715;
   --sidebar-bg: #eae5d9;
