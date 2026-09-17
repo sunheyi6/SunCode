@@ -28,7 +28,14 @@ const isDark = computed(() => settingsStore.resolvedTheme === 'dark');
 
 <template>
   <div class="tool-markdown-output" :class="{ streaming: isStreaming }">
+    <!-- While the tool is still writing output, render the raw text directly.
+         Feeding the full accumulated output through Markdown parsing + shiki
+         highlighting on every progress tick (~100ms) re-renders the entire
+         block each time and saturates the renderer main thread; the formatted
+         view is swapped in once the tool has finished. -->
+    <pre v-if="isStreaming">{{ output }}</pre>
     <MarkdownRender
+      v-else
       custom-id="tool-output"
       mode="chat"
       :content="markdown"
