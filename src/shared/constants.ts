@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS = {
     providers: {},
   },
   thinkingLevel: 'low' as const,
-  maxTurns: 50,
+  maxTurns: 200,
   autoCompact: true,
   compactThreshold: 0.7,
   semanticCompactMode: 'off' as const,
@@ -41,25 +41,25 @@ export const RECOMMENDED_MODELS: Array<{ provider: string; model: string; label:
   { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
   { provider: 'anthropic', model: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
   { provider: 'anthropic', model: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-  { provider: 'openai', model: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
-  { provider: 'openai', model: 'gpt-5-codex', label: 'GPT-5 Codex' },
+  { provider: 'openai', model: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+  { provider: 'openai', model: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
   { provider: 'openai', model: 'o4-mini', label: 'o4 Mini' },
   { provider: 'google', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
   { provider: 'google', model: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite' },
   { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
   { provider: 'deepseek', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-  { provider: 'xai', model: 'grok-code-fast-1', label: 'Grok Code Fast' },
+  { provider: 'xai', model: 'grok-4.5', label: 'Grok 4.5' },
   { provider: 'xai', model: 'grok-4.3', label: 'Grok 4.3' },
-  { provider: 'mistral', model: 'mistral.mistral-large-3-675b-instruct', label: 'Mistral Large 3' },
+  { provider: 'mistral', model: 'mistral-large-2512', label: 'Mistral Large 3' },
   {
     provider: 'groq',
-    model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
-    label: 'Llama 4 Maverick',
+    model: 'llama-3.3-70b-versatile',
+    label: 'Llama 3.3 70B',
   },
   { provider: 'openrouter', model: 'openai/gpt-5.1-codex', label: 'GPT-5.1 Codex (OpenRouter)' },
   {
     provider: 'openrouter',
-    model: 'anthropic/claude-sonnet-4-5',
+    model: 'anthropic/claude-sonnet-4.5',
     label: 'Claude Sonnet 4.5 (OpenRouter)',
   },
 ];
@@ -74,9 +74,9 @@ export const LITE_MODELS: Record<string, string> = {
   anthropic: 'claude-haiku-4-5',
   openai: 'o4-mini',
   google: 'gemini-3.1-flash-lite-preview',
-  xai: 'grok-code-fast-1',
-  groq: 'meta-llama/llama-4-scout-17b-128e-instruct',
-  mistral: 'mistral.mistral-small-3-1-24b-instruct',
+  xai: 'grok-4.3',
+  groq: 'llama-3.1-8b-instant',
+  mistral: 'mistral-small-latest',
   openrouter: 'google/gemini-3.1-flash-lite-preview',
 };
 
@@ -152,7 +152,7 @@ Rules:
 - Return only JSON in this shape: {"title":"..."}`;
 
 /** Maximum number of turns before forcing a stop */
-export const MAX_TURNS = 50;
+export const MAX_TURNS = 200;
 
 /** Token estimation: rough chars per token */
 export const CHARS_PER_TOKEN = 4;

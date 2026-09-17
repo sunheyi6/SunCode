@@ -1,4 +1,5 @@
-﻿/**
+import { modelCatalog } from '@shared/model-catalog';
+/**
  * Failure Lessons — automatic extraction and retrieval of coding lessons.
  *
  * Stores structured lessons under `.suncode/lessons/` so the agent
@@ -697,7 +698,7 @@ async function extractLessonWithLLM(
   sessionId: string,
 ): Promise<RawLessonOutput | null> {
   try {
-    const pi = await import('@earendil-works/pi-ai');
+    const pi = await import('@earendil-works/pi-ai/compat');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const streamSimple = (pi as any).streamSimple as
       | ((
@@ -714,11 +715,7 @@ async function extractLessonWithLLM(
     const liteModelId = LITE_MODELS[provider] || undefined;
     if (!liteModelId) return null;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const getModel = (pi as any).getModel as ((p: string, m: string) => unknown) | undefined;
-    if (!getModel) return null;
-
-    const model = getModel(provider, liteModelId);
+    const model = await modelCatalog.getModel(provider, liteModelId);
     if (!model) return null;
 
     const prompt = EXTRACTION_PROMPT.replace('{triggerType}', ctx.triggerType)

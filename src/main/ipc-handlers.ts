@@ -12,6 +12,7 @@ import {
   TITLE_GENERATION_PROMPT,
 } from '@shared/constants';
 import { validateImageAttachments } from '@shared/image-attachments';
+import { modelCatalog } from '@shared/model-catalog';
 import { getProviderEnvKey } from '@shared/provider-env';
 import { getProviderHeaders } from '@shared/provider-headers';
 import type { RuntimeEventDraft, RuntimeTerminationStatus } from '@shared/runtime-events';
@@ -90,9 +91,6 @@ function loadSettings(): AppSettings {
     if (existsSync(CONFIG_PATH)) {
       const raw = readFileSync(CONFIG_PATH, 'utf-8');
       const saved = JSON.parse(raw) as Partial<AppSettings>;
-      // Migrate the old 200-turn default. Goal mode has its own explicit budget;
-      // ordinary tasks should not inherit an effectively unbounded legacy value.
-      if (saved.maxTurns === 200) saved.maxTurns = DEFAULT_SETTINGS.maxTurns;
       return { ...DEFAULT_SETTINGS, ...saved, permissionMode: 'full_access' };
     }
   } catch (e) {
@@ -1585,10 +1583,11 @@ export function registerIpcHandlers(wm: WindowManager): void {
       });
       if (!diff.trim()) return { message: 'chore: update' };
 
-      const pi = await import('@earendil-works/pi-ai');
-      // pi-ai uses template literal types for providers — cast to any for dynamic usage
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const model = pi.getModel(currentSettings.activeProvider as any, currentSettings.activeModel);
+      const pi = await import('@earendil-works/pi-ai/compat');
+      const model = await modelCatalog.getModel(
+        currentSettings.activeProvider,
+        currentSettings.activeModel,
+      );
       // pi-ai's TS types for completeSimple params differ from its runtime API — safe to cast
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await pi.completeSimple(
@@ -1972,13 +1971,8 @@ async function generateTitleWithAI(targetSession: string, userMessage: Message):
 
     console.log(`[Main] Title AI: using lite model ${provider}/${modelId}`);
 
-    const pi = await import('@earendil-works/pi-ai');
-    const model = (pi as unknown as Record<string, unknown>).getModel
-      ? (pi as unknown as { getModel: (p: string, m: string) => unknown }).getModel(
-          provider,
-          modelId,
-        )
-      : null;
+    const pi = await import('@earendil-works/pi-ai/compat');
+    const model = await modelCatalog.getModel(provider, modelId);
 
     if (!model) {
       console.log('[Main] Title AI: model not available');

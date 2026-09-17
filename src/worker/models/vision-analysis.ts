@@ -86,7 +86,7 @@ export async function analyzeImages(
     );
   }
 
-  const pi = await import('@earendil-works/pi-ai');
+  const pi = await import('@earendil-works/pi-ai/compat');
   const completeVision = pi.completeSimple as unknown as CompleteVision;
   const result = await completeVision(
     target.forcedImageSupport ? withImageInput(selectedModel) : selectedModel,

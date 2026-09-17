@@ -26,9 +26,15 @@ import {
 } from '../../src/worker/agent/memory';
 import { promoteExplicitDurableFacts } from '../../src/worker/agent/agent';
 
-vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@earendil-works/pi-ai')>();
+vi.mock('@earendil-works/pi-ai/compat', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@earendil-works/pi-ai/compat')>();
   return { ...actual };
+});
+
+vi.mock('../../src/shared/model-catalog', async () => {
+  const pi = await import('@earendil-works/pi-ai/compat');
+  return { modelCatalog: { getModel: async (provider: string, id: string) =>
+    pi.getModels(provider as Parameters<typeof pi.getModels>[0]).find((model) => model.id === id) } };
 });
 
 let tempDirs: string[] = [];
@@ -49,7 +55,7 @@ describe('memory storage', () => {
   });
 
   it('uses the conversation session for summary, facts, and repeated relevance requests', async () => {
-    const pi = await import('@earendil-works/pi-ai');
+    const pi = await import('@earendil-works/pi-ai/compat');
     const modelId = pi.getModels('opencode-go')[0].id;
     const complete = vi.spyOn(pi, 'complete').mockResolvedValue({
       content: [{ type: 'text', text: '[]' }],
@@ -69,7 +75,7 @@ describe('memory storage', () => {
   });
 
   it('keeps a standalone relevance judge session stable and isolates another judge', async () => {
-    const pi = await import('@earendil-works/pi-ai');
+    const pi = await import('@earendil-works/pi-ai/compat');
     const modelId = pi.getModels('opencode-go')[0].id;
     const complete = vi.spyOn(pi, 'complete').mockResolvedValue({
       content: [{ type: 'text', text: '[]' }],

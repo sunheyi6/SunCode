@@ -318,6 +318,8 @@ export interface AppSettings {
   envApiKeys: Record<string, string>;
   /** 自定义端点列表（仅全局存储）。 */
   customEndpoints: CustomEndpoint[];
+  /** 对话切换列表中的模型；旧设置未配置时仅显示当前模型。 */
+  chatModels?: Array<{ provider: string; model: string }>;
   /** Max lessons to retain. Default 200. */
   maxLessons?: number;
   /** Goal mode: max goal-level turns (each turn = one full agent run). Default 5. */

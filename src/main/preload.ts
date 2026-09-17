@@ -281,7 +281,10 @@ const suncodeAPI = {
   },
 
   /** Get all models for a specific provider */
-  async getModels(provider: string): Promise<
+  async getModels(
+    provider: string,
+    refresh?: boolean,
+  ): Promise<
     Array<{
       id: string;
       name: string;
@@ -292,7 +295,7 @@ const suncodeAPI = {
       supportsImages: boolean;
     }>
   > {
-    return ipcRenderer.invoke('models:getModels', provider);
+    return ipcRenderer.invoke('models:getModels', provider, refresh);
   },
 
   /** Get recommended coding models */

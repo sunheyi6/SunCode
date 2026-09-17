@@ -139,7 +139,10 @@ declare global {
 
       // Model Discovery
       getProviders(): Promise<string[]>;
-      getModels(provider: string): Promise<
+      getModels(
+        provider: string,
+        refresh?: boolean,
+      ): Promise<
         Array<{
           id: string;
           name: string;

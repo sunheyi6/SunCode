@@ -169,7 +169,10 @@ export const bridge = {
     return api().getProviders();
   },
 
-  async getModels(provider: string): Promise<
+  async getModels(
+    provider: string,
+    refresh?: boolean,
+  ): Promise<
     Array<{
       id: string;
       name: string;
@@ -180,7 +183,7 @@ export const bridge = {
       supportsImages: boolean;
     }>
   > {
-    return api().getModels(provider);
+    return api().getModels(provider, refresh);
   },
 
   async getRecommendedModels(): Promise<Array<{ provider: string; model: string; label: string }>> {

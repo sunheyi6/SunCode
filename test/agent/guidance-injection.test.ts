@@ -11,7 +11,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
+import type { AssistantMessageEvent, Message as PiMessage } from '@earendil-works/pi-ai';
+import { estimateMessageTokens } from '@earendil-works/pi-ai/utils/estimate';
 import { Agent } from '../../src/worker/agent/agent';
 import { runAgentLoop } from '../../src/worker/agent/agent-loop';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
@@ -79,6 +80,40 @@ describe('runAgentLoop — mid-run guidance injection', () => {
     tempDataDir = mkdtempSync(join(tmpdir(), 'suncode-guidance-'));
     process.env.SUNCODE_APP_DATA = tempDataDir;
   });
+
+  it.each(['Inspect the file before answering.', ''])(
+    'replays thinking and tool results through pi-ai token estimation (%j)',
+    async (thinking) => {
+      const captured: Array<{ messages: unknown[] }> = [];
+      const respond = mockStream(['The file was inspected.'], captured);
+      const result = await runAgentLoop(buildInput({
+        messages: [
+          userMsg('Inspect the file'),
+          {
+            role: 'assistant',
+            content: [{ type: 'thinking', text: thinking }],
+            toolCalls: [{ type: 'tool_call', id: 'call-1', name: 'read', arguments: '{}' }],
+          },
+          { role: 'tool', toolCallId: 'call-1', content: [{ type: 'text', text: 'file contents' }] },
+        ],
+        streamImpl: (model, context) => {
+          const messages = context.messages as PiMessage[];
+          for (const message of messages) {
+            expect(Number.isFinite(estimateMessageTokens(message))).toBe(true);
+          }
+          const assistant = messages.find((message) => message.role === 'assistant');
+          const block = assistant?.content.find((item) => item.type === 'thinking');
+          expect(block).toBeDefined();
+          if (block?.type === 'thinking') {
+            expect(JSON.parse(block.thinking).content.text).toBe(thinking);
+          }
+          return respond(model, context);
+        },
+      }));
+      expect(captured).toHaveLength(1);
+      expect(result.turnCount).toBe(1);
+    },
+  );
 
   it('forks semantic compact from the exact main prefix and consumes the accepted projection', async () => {
     const captured: Array<{

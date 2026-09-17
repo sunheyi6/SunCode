@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import type { ProviderResponse } from '@earendil-works/pi-ai';
+import { modelCatalog } from '@shared/model-catalog';
 import { getProviderHeaders } from '@shared/provider-headers';
 import type { Message, RunEvent } from '@shared/types';
 import type { DiagLogger } from '../utils/diag-logger';
@@ -1621,14 +1622,13 @@ async function generateSummary(
   sessionId: string,
 ): Promise<string> {
   try {
-    const pi = await import('@earendil-works/pi-ai');
-    const getModel = pi.getModel as unknown as (provider: string, modelId: string) => unknown;
+    const pi = await import('@earendil-works/pi-ai/compat');
     const complete = pi.complete as unknown as (
       model: unknown,
       context: Record<string, unknown>,
       options: Record<string, unknown>,
     ) => Promise<{ content?: Array<{ type: string; text?: string }> } | undefined>;
-    const model = getModel(provider, modelId);
+    const model = await modelCatalog.getModel(provider, modelId);
     if (!model) {
       console.warn('Model not available for summary generation');
       return '';
@@ -1695,14 +1695,13 @@ async function extractStructuredFacts(
   sessionId: string,
 ): Promise<StructuredFact[]> {
   try {
-    const pi = await import('@earendil-works/pi-ai');
-    const getModel = pi.getModel as unknown as (provider: string, modelId: string) => unknown;
+    const pi = await import('@earendil-works/pi-ai/compat');
     const complete = pi.complete as unknown as (
       model: unknown,
       context: Record<string, unknown>,
       options: Record<string, unknown>,
     ) => Promise<{ content?: Array<{ type: string; text?: string }> } | undefined>;
-    const model = getModel(provider, modelId);
+    const model = await modelCatalog.getModel(provider, modelId);
     if (!model) {
       console.warn('Model not available for fact extraction');
       return [];
@@ -1849,14 +1848,13 @@ export function createLLMRelevanceJudge(
     };
 
     try {
-      const pi = await import('@earendil-works/pi-ai');
-      const getModel = pi.getModel as unknown as (provider: string, modelId: string) => unknown;
+      const pi = await import('@earendil-works/pi-ai/compat');
       const complete = pi.complete as unknown as (
         model: unknown,
         context: Record<string, unknown>,
         options: Record<string, unknown>,
       ) => Promise<{ content?: Array<{ type: string; text?: string }> } | undefined>;
-      const model = getModel(provider, modelId);
+      const model = await modelCatalog.getModel(provider, modelId);
       if (!model) {
         console.warn('Model not available for memory relevance judging');
         emitCompleted(undefined, 'model_unavailable');

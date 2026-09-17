@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CustomEndpoint, VisionRoutingSettings } from '@shared/types';
 import { computed, onMounted, ref } from 'vue';
-import { type ModelOption, useModelsStore } from '../../stores/models';
+import { type ModelOption, modelFamily, useModelsStore } from '../../stores/models';
 import { useSettingsStore } from '../../stores/settings';
 // biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
 import AppIcon from '../icons/AppIcon.vue';
@@ -13,6 +13,28 @@ const settingsStore = useSettingsStore();
 const activeSource = ref<'builtin' | 'custom'>('builtin');
 const selectedProvider = ref('');
 const searchQuery = ref('');
+/** 只看已勾选「对话中显示」的模型 */
+const onlyVisible = ref(false);
+const refreshing = ref(false);
+const refreshMessage = ref('');
+
+async function refreshModels(): Promise<void> {
+  refreshing.value = true;
+  refreshMessage.value = '';
+  try {
+    const providers = selectedProvider.value
+      ? [selectedProvider.value]
+      : modelsStore.builtinProviders;
+    await Promise.all(providers.map((provider) => modelsStore.loadModels(provider, true)));
+    refreshMessage.value = '目录已重新加载；网络不可用时保留缓存目录。';
+  } finally {
+    refreshing.value = false;
+  }
+}
+
+function setChatVisibility(provider: string, model: string, event: Event): void {
+  void modelsStore.setChatModel(provider, model, (event.target as HTMLInputElement).checked);
+}
 
 // 内联 Key 输入状态
 const keyInputProvider = ref('');
@@ -38,6 +60,10 @@ const displayModels = computed(() => {
     source = modelsStore.allModels.filter((m) => builtinProviderSet.has(m.provider));
   }
 
+  if (onlyVisible.value) {
+    source = source.filter((m) => modelsStore.isChatModel(m.provider, m.model));
+  }
+
   if (!q) return source;
   return source.filter(
     (m) =>
@@ -45,6 +71,18 @@ const displayModels = computed(() => {
       m.provider.toLowerCase().includes(q) ||
       m.model.toLowerCase().includes(q),
   );
+});
+
+/** 连续的同系列模型聚为一组；family 为空的组不渲染组标题（保持原样）。 */
+const groupedDisplayModels = computed(() => {
+  const groups: Array<{ family: string; models: ModelOption[] }> = [];
+  for (const opt of displayModels.value) {
+    const family = modelFamily(opt.provider, opt.model);
+    const last = groups.at(-1);
+    if (last && last.family === family) last.models.push(opt);
+    else groups.push({ family, models: [opt] });
+  }
+  return groups;
 });
 
 const builtinProviders = computed(() => modelsStore.builtinProviders);
@@ -128,13 +166,6 @@ function setCapabilityOverride(modelId: string, event: Event): void {
   };
   void settingsStore.update({ visionRouting });
 }
-
-const otherModels = computed(() =>
-  displayModels.value.filter(
-    (model) =>
-      model.provider !== modelsStore.activeProvider || model.model !== modelsStore.activeModel,
-  ),
-);
 
 const enabledProviders = computed(() =>
   modelsStore.enabledProviders.map((provider) => {
@@ -386,7 +417,7 @@ function providerLabel(id: string): string {
     <div class="list-heading">
       <div>
         <h4>启用的供应商</h4>
-        <p>配置过 Key 的供应商会启用，其下所有模型都可在输入框切换。</p>
+        <p>配置 Key 后，勾选需要在对话中显示的模型。</p>
       </div>
     </div>
 
@@ -404,9 +435,14 @@ function providerLabel(id: string): string {
     <div class="list-heading available-heading">
       <div>
         <h4>可用模型</h4>
-        <p>同一供应商只需配置一次 Key，点击任意模型即可切换。</p>
+        <p>勾选“对话中显示”来精简切换列表；点击模型名称可设为当前模型。</p>
       </div>
     </div>
+
+    <button class="manage-key-btn refresh-models" :disabled="refreshing" @click="refreshModels">
+      {{ refreshing ? '正在刷新目录…' : '刷新模型目录' }}
+    </button>
+    <p v-if="refreshMessage" class="custom-source-desc" role="status">{{ refreshMessage }}</p>
 
     <!-- 来源切换：内置 / 自定义 -->
     <div class="tab-bar source-tabs">
@@ -421,8 +457,12 @@ function providerLabel(id: string): string {
     <!-- 内置模型 -->
     <template v-if="activeSource === 'builtin'">
       <!-- 搜索 -->
-      <div class="search-bar">
+      <div class="search-bar search-row">
         <input v-model="searchQuery" class="search-input" placeholder="搜索模型..." />
+        <label class="only-visible-toggle">
+          <input type="checkbox" v-model="onlyVisible" />
+          只看已显示
+        </label>
       </div>
 
       <!-- Provider 筛选 -->
@@ -441,41 +481,53 @@ function providerLabel(id: string): string {
 
       <!-- 模型列表 -->
       <div class="model-list">
-        <div
-          v-for="opt in otherModels"
-          :key="`${opt.provider}/${opt.model}`"
-          class="model-option"
-          :class="{ active: isActive(opt.provider, opt.model) }"
-          role="button"
-          tabindex="0"
-          @click="selectModel(opt.provider, opt.model)"
-        >
-          <div class="model-main">
-            <span class="model-name">{{ opt.label }}</span>
-            <div class="model-meta">
-              <span class="model-provider">{{ providerLabel(opt.provider) }}</span>
-              <span v-if="opt.supportsImages" class="vision-model-badge">图片</span>
-              <span class="model-key-badge" :class="{ has: modelsStore.hasKey(opt.provider) }">
-                <template v-if="modelsStore.hasKey(opt.provider)">
-                  <AppIcon name="check" :size="12" /> Key
-                </template>
-                <template v-else>
-                  <AppIcon name="alert-triangle" :size="12" /> 需 Key
-                </template>
-              </span>
+        <template v-for="group in groupedDisplayModels" :key="group.family || 'plain'">
+          <div v-if="group.family" class="model-family-header">{{ group.family }}</div>
+          <div
+            v-for="opt in group.models"
+            :key="`${opt.provider}/${opt.model}`"
+            class="model-option"
+            :class="{ active: isActive(opt.provider, opt.model) }"
+            role="button"
+            tabindex="0"
+            @click="selectModel(opt.provider, opt.model)"
+            @keydown.enter.self="selectModel(opt.provider, opt.model)"
+          >
+            <div class="model-main">
+              <span class="model-name">{{ opt.label }}</span>
+              <div class="model-meta">
+                <span class="model-provider">{{ providerLabel(opt.provider) }}</span>
+                <span v-if="opt.supportsImages" class="vision-model-badge">图片</span>
+                <span class="model-key-badge" :class="{ has: modelsStore.hasKey(opt.provider) }">
+                  <template v-if="modelsStore.hasKey(opt.provider)">
+                    <AppIcon name="check" :size="12" /> Key
+                  </template>
+                  <template v-else>
+                    <AppIcon name="alert-triangle" :size="12" /> 需 Key
+                  </template>
+                </span>
+              </div>
             </div>
+            <label class="chat-visibility" @click.stop @keydown.stop>
+              <input type="checkbox" :checked="modelsStore.isChatModel(opt.provider, opt.model)"
+                :disabled="modelsStore.modelSelectionSaving"
+                @change="setChatVisibility(opt.provider, opt.model, $event)" />
+              对话中显示
+            </label>
+            <span v-if="isActive(opt.provider, opt.model)" class="check-icon">
+              <AppIcon name="check" :size="14" />
+            </span>
           </div>
-          <span v-if="isActive(opt.provider, opt.model)" class="check-icon">
-            <AppIcon name="check" :size="14" />
-          </span>
-        </div>
+        </template>
 
-        <div v-if="otherModels.length === 0" class="empty-hint">暂无其他模型</div>
+        <div v-if="displayModels.length === 0" class="empty-hint">
+          {{ onlyVisible ? '未勾选任何「对话中显示」的模型' : '暂无其他模型' }}
+        </div>
       </div>
     </template>
     <!-- 自定义模型 -->
     <template v-else>
-      <p class="custom-source-desc">接入 OpenAI / Anthropic 兼容端点。供应商配置 Key 后，其模型会进入输入框切换列表。</p>
+      <p class="custom-source-desc">接入 OpenAI / Anthropic 兼容端点。配置 Key 后，勾选需要在对话中显示的模型。</p>
 
       <div v-if="customEndpoints.length === 0" class="empty-hint">
         尚未配置自定义端点。填写下方表单即可添加。
@@ -495,6 +547,7 @@ function providerLabel(id: string): string {
             role="button"
             tabindex="0"
             @click="selectModel(ep.id, m.id)"
+            @keydown.enter.self="selectModel(ep.id, m.id)"
           >
             <div class="model-main">
               <span class="model-name">{{ m.name || m.id }}</span>
@@ -503,6 +556,12 @@ function providerLabel(id: string): string {
                 <span class="model-key-badge has"><AppIcon name="check" :size="12" /></span>
               </div>
             </div>
+            <label class="chat-visibility" @click.stop @keydown.stop>
+              <input type="checkbox" :checked="modelsStore.isChatModel(ep.id, m.id)"
+                :disabled="modelsStore.modelSelectionSaving"
+                @change="setChatVisibility(ep.id, m.id, $event)" />
+              对话中显示
+            </label>
             <span v-if="isActive(ep.id, m.id)" class="check-icon">
               <AppIcon name="check" :size="14" />
             </span>
@@ -517,6 +576,10 @@ function providerLabel(id: string): string {
 </template>
 
 <style scoped>
+.chat-visibility { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--color-text-secondary); font-size: 12px; cursor: pointer; }
+.chat-visibility input { accent-color: var(--color-accent); }
+.refresh-models { margin-bottom: 12px; }
+
 .model-selector { display: flex; flex-direction: column; gap: 0; }
 
 .active-model-card {
@@ -680,6 +743,19 @@ function providerLabel(id: string): string {
 .custom-group-url { font-size: 10px; color: var(--color-text-muted); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .search-bar { margin-bottom: 8px; }
+.search-row { display: flex; align-items: center; gap: 8px; }
+.search-row .search-input { flex: 1; }
+.only-visible-toggle {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.only-visible-toggle input { accent-color: var(--color-accent); }
 .search-input {
   width: 100%; padding: 6px 10px; font-size: 13px;
   border-radius: var(--border-radius-sm);
@@ -705,6 +781,14 @@ function providerLabel(id: string): string {
 .model-list {
   display: flex; flex-direction: column; gap: 3px;
   max-height: 280px; overflow-y: auto; padding-right: 2px;
+}
+.model-family-header {
+  padding: 6px 10px 2px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 .enabled-provider-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .enabled-provider {

@@ -12,7 +12,7 @@ export const useSettingsStore = defineStore('settings', () => {
       providers: {},
     },
     thinkingLevel: 'low',
-    maxTurns: 50,
+    maxTurns: 200,
     autoCompact: true,
     compactThreshold: 0.7,
     semanticCompactMode: 'off',
@@ -60,7 +60,13 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function update(partial: Partial<AppSettings>): Promise<void> {
     try {
-      const updated = await bridge.updateSettings({ ...partial, permissionMode: 'full_access' });
+      // Settings are persisted as JSON, and IPC uses structured clone which
+      // rejects Vue reactive proxies ("An object could not be cloned") — e.g.
+      // chatModels entries read from this store. Normalize to plain data first.
+      const plain = JSON.parse(
+        JSON.stringify({ ...partial, permissionMode: 'full_access' }),
+      ) as Partial<AppSettings> & { permissionMode: 'full_access' };
+      const updated = await bridge.updateSettings(plain);
       settings.value = updated;
       if ('backgroundColor' in partial) {
         applyBackgroundColor(updated.backgroundColor);

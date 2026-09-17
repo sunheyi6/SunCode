@@ -1,3 +1,4 @@
+import { modelCatalog } from '../src/shared/model-catalog';
 // scripts/test-ai.ts
 // 直接测试 pi-ai + DeepSeek API 调用，绕过 Electron
 import { readFileSync } from 'node:fs';
@@ -25,10 +26,10 @@ if (!apiKey || apiKey.includes('在此输入')) {
 process.env.DEEPSEEK_API_KEY = apiKey;
 
 console.log('\n⏳ 加载 pi-ai...');
-const pi = await import('@earendil-works/pi-ai');
+const pi = await import('@earendil-works/pi-ai/compat');
 
 console.log('⏳ 查找模型...');
-const model = pi.getModel(provider, modelId);
+const model = await modelCatalog.getModel(provider, modelId);
 
 if (!model) {
   console.log('❌ 模型未找到！');

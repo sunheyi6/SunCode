@@ -1,6 +1,14 @@
 import { createServer, type IncomingHttpHeaders } from 'node:http';
-import { completeSimple, type Api, type Model } from '@earendil-works/pi-ai';
-import { describe, expect, it } from 'vitest';
+import { completeSimple } from '@earendil-works/pi-ai/compat';
+import type { Api, Model } from '@earendil-works/pi-ai';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { getModels } from '@earendil-works/pi-ai/compat';
+import { createModelCatalog, mergeCatalogModels, modelCatalog } from '../../src/shared/model-catalog';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+afterEach(() => vi.restoreAllMocks());
 import { getProviderHeaders } from '../../src/shared/provider-headers';
 import type { CustomEndpoint } from '@shared/types';
 import { buildCustomModel, createModelRegistry } from '../../src/worker/models/registry';
@@ -206,11 +214,119 @@ describe('createModelRegistry.getModel 自定义短路', () => {
 
 describe('createModelRegistry OpenCode Go', () => {
   it('可发现并加载 OpenCode Go 模型', async () => {
+    vi.spyOn(modelCatalog, 'getModels').mockResolvedValue(getModels('opencode-go'));
+    vi.spyOn(modelCatalog, 'getModel').mockImplementation(async (_provider, id) => getModels('opencode-go').find((m) => m.id === id));
     const reg = createModelRegistry();
     const models = await reg.getModels('opencode-go');
 
     expect(models.length).toBeGreaterThan(0);
     expect(models.every((model) => model.provider === 'opencode-go')).toBe(true);
     expect(await reg.getModel('opencode-go', models[0].id)).not.toBeNull();
+  });
+});
+
+
+const remoteGo = {
+  npm: '@ai-sdk/openai-compatible',
+  models: {
+    'deepseek-v4-flash': { id: 'deepseek-v4-flash', family: 'deepseek-flash' },
+    'deepseek-v4.1-flash': {
+      id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', family: 'deepseek-flash',
+      tool_call: true, reasoning: true, modalities: { input: ['text', 'image'] },
+      limit: { context: 1000000, output: 384000 },
+    },
+  },
+};
+
+function directoryFetch() {
+  return vi.fn(async (url: string | URL | Request) => Response.json(
+    String(url).includes('models.dev') ? { 'opencode-go': remoteGo } : {
+      data: [{ id: 'deepseek-v4-flash' }, { id: 'deepseek-v4.1-flash' }],
+    },
+  ));
+}
+
+describe('shared online model catalog', () => {
+  it('resolves newly discovered models with family reasoning compatibility and image capabilities', async () => {
+    const fetcher = directoryFetch();
+    const catalog = createModelCatalog(fetcher as typeof fetch);
+    const list = await catalog.getModels('opencode-go');
+    const model = await catalog.getModel('opencode-go', 'deepseek-v4.1-flash');
+    expect(list).toContainEqual(model);
+    expect(model).toMatchObject({
+      id: 'deepseek-v4.1-flash', provider: 'opencode-go', api: 'openai-completions',
+      baseUrl: 'https://opencode.ai/zen/go/v1', input: ['text', 'image'],
+      contextWindow: 1000000, maxTokens: 384000,
+      compat: { thinkingFormat: 'deepseek', requiresReasoningContentOnAssistantMessages: true },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces concurrent directory requests and refreshes on demand', async () => {
+    const fetcher = directoryFetch();
+    const catalog = createModelCatalog(fetcher as typeof fetch);
+    await Promise.all([catalog.getModels('opencode-go'), catalog.getModels('opencode-go')]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await catalog.getModels('opencode-go', true);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('falls back offline and retains a successful directory after refresh failure', async () => {
+    const fetcher = directoryFetch();
+    const catalog = createModelCatalog(fetcher as typeof fetch);
+    await catalog.getModels('opencode-go');
+    fetcher.mockRejectedValue(new Error('offline'));
+    expect(await catalog.getModels('opencode-go', true)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'deepseek-v4.1-flash' })]),
+    );
+    const offline = createModelCatalog(fetcher as typeof fetch);
+    expect(await offline.getModels('opencode-go')).toEqual(getModels('opencode-go'));
+    const calls = fetcher.mock.calls.length;
+    await offline.getModels('opencode-go');
+    expect(fetcher).toHaveBeenCalledTimes(calls);
+  });
+
+  it('shares persisted metadata with another process and survives an offline restart', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'suncode-catalog-'));
+    try {
+      const cacheFile = () => join(dir, 'models.json');
+      await createModelCatalog(directoryFetch() as typeof fetch, cacheFile).getModels('opencode-go');
+      const offline = vi.fn().mockRejectedValue(new Error('offline'));
+      const restarted = createModelCatalog(offline as typeof fetch, cacheFile);
+      expect(await restarted.getModel('opencode-go', 'deepseek-v4.1-flash')).toMatchObject({
+        id: 'deepseek-v4.1-flash', input: ['text', 'image'],
+      });
+      expect(offline.mock.calls.every(([url]) => !String(url).includes('models.dev'))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('supports other providers and preserves mixed protocols without leaking family-specific settings', () => {
+    const builtin = getModels('opencode-go');
+    const minimax = builtin.find((m) => m.id === 'minimax-m3')!;
+    const merged = mergeCatalogModels(builtin, {
+      npm: '@ai-sdk/openai-compatible', models: {
+        ...remoteGo.models,
+        'minimax-new': { id: 'minimax-new', provider: { npm: '@ai-sdk/anthropic' },
+          limit: { context: 1000000, output: 8192 } },
+        'unknown': { id: 'unknown', limit: { context: 128000, output: 8192 } },
+        'unsafe': { id: 'unsafe', provider: { api: 'https://different.example/v1' },
+          limit: { context: 128000, output: 8192 } },
+      },
+    });
+    expect(merged.find((m) => m.id === 'minimax-new')).toMatchObject({
+      api: 'anthropic-messages', baseUrl: minimax.baseUrl,
+    });
+    expect(merged.find((m) => m.id === 'unknown')?.compat).toBeUndefined();
+    expect(merged.find((m) => m.id === 'unsafe')).toBeUndefined();
+    const openai = mergeCatalogModels(getModels('openai'), {
+      npm: '@ai-sdk/openai', models: { future: {
+        id: 'future', limit: { context: 128000, output: 8192 },
+      } },
+    });
+    expect(openai.find((m) => m.id === 'future')).toMatchObject({
+      provider: 'openai', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1',
+    });
   });
 });

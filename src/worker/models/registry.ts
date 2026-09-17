@@ -1,3 +1,7 @@
+import { type ModelInfo, modelCatalog, modelInfo } from '@shared/model-catalog';
+
+export type { ModelInfo } from '@shared/model-catalog';
+
 import { normalizeCustomEndpointBaseUrl } from '@shared/custom-endpoints';
 import type { CustomEndpoint, CustomModelEntry } from '@shared/types';
 
@@ -13,16 +17,6 @@ import type { CustomEndpoint, CustomModelEntry } from '@shared/types';
  * - xai: Grok-3/4 series
  * - groq, mistral, together, fireworks, cerebras, openrouter, and many more
  */
-
-export interface ModelInfo {
-  id: string;
-  name: string;
-  provider: string;
-  contextWindow: number;
-  maxTokens: number;
-  supportsReasoning: boolean;
-  supportsImages: boolean;
-}
 
 /** 由自定义 endpoint + 模型条目构造的 pi-ai Model 兼容对象。 */
 export interface CustomModelSpec {
@@ -69,9 +63,6 @@ export function buildCustomModel(
  * Create a model registry that wraps pi-ai.
  */
 export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
-  const modelsCache = new Map<string, ModelInfo[]>();
-  let providersCache: string[] | null = null;
-
   return {
     /**
      * Get a specific model by provider and model ID.
@@ -82,70 +73,15 @@ export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
         const entry = ep.models.find((m) => m.id === modelId);
         return entry ? buildCustomModel(ep, entry) : null;
       }
-      try {
-        const { getModel } = await import('@earendil-works/pi-ai');
-        // pi-ai's provider generic resolves to never for a dynamic provider ID.
-        return getModel(provider as any, modelId);
-      } catch {
-        console.warn(
-          '@earendil-works/pi-ai not available. Install it for multi-provider model support.',
-        );
-        return null;
-      }
+      return modelCatalog.getModel(provider, modelId);
     },
 
-    /**
-     * Get all available providers.
-     */
-    async getProviders(): Promise<string[]> {
-      if (providersCache) return providersCache;
-
-      try {
-        const { getProviders } = await import('@earendil-works/pi-ai');
-        providersCache = getProviders();
-        return providersCache;
-      } catch {
-        // Fallback: return commonly available providers
-        providersCache = [
-          'anthropic',
-          'openai',
-          'google',
-          'deepseek',
-          'xai',
-          'groq',
-          'mistral',
-          'openrouter',
-          'opencode-go',
-        ];
-        return providersCache;
-      }
+    getProviders(): Promise<string[]> {
+      return modelCatalog.getProviders();
     },
 
-    /**
-     * Get all models for a given provider.
-     */
     async getModels(provider: string): Promise<ModelInfo[]> {
-      const cached = modelsCache.get(provider);
-      if (cached) return cached;
-
-      try {
-        const { getModels } = await import('@earendil-works/pi-ai');
-        const models = getModels(provider as Parameters<typeof getModels>[0]);
-        const result = models.map((m) => ({
-          id: m.id as string,
-          name: m.name as string,
-          provider: (m.provider as string) || provider,
-          contextWindow: (m.contextWindow as number) || 128000,
-          maxTokens: (m.maxTokens as number) || 4096,
-          supportsReasoning: Boolean(m.reasoning),
-          supportsImages: Array.isArray(m.input) && (m.input as string[]).includes('image'),
-        }));
-        modelsCache.set(provider, result);
-        return result;
-      } catch {
-        console.warn(`Failed to get models for provider: ${provider}`);
-        return [];
-      }
+      return (await modelCatalog.getModels(provider)).map(modelInfo);
     },
 
     /**
@@ -156,11 +92,11 @@ export function createModelRegistry(customEndpoints: CustomEndpoint[] = []) {
       return [
         { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
         { provider: 'anthropic', model: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
-        { provider: 'openai', model: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
-        { provider: 'openai', model: 'gpt-5-codex', label: 'GPT-5 Codex' },
+        { provider: 'openai', model: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+        { provider: 'openai', model: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
         { provider: 'google', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
         { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-        { provider: 'xai', model: 'grok-code-fast-1', label: 'Grok Code Fast' },
+        { provider: 'xai', model: 'grok-4.5', label: 'Grok 4.5' },
         {
           provider: 'openrouter',
           model: 'openai/gpt-5.1-codex',

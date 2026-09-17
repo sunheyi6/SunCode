@@ -1,6 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AssistantMessageEvent, ProviderResponse } from '@earendil-works/pi-ai';
+import type {
+  AssistantMessageEvent,
+  ProviderResponse,
+  ThinkingContent,
+} from '@earendil-works/pi-ai';
 import { MAX_TURNS } from '@shared/constants';
 import { sanitizeStructuredMessageLeak } from '@shared/finalization';
 import { getProviderHeaders } from '@shared/provider-headers';
@@ -205,7 +209,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     input.streamImpl ??
     (await (async () => {
       try {
-        const pi = await import('@earendil-works/pi-ai');
+        const pi = await import('@earendil-works/pi-ai/compat');
         const fn = pi.streamSimple as unknown as typeof streamSimpleFn;
         if (!fn) {
           throw new Error('streamSimple not found in pi-ai exports');
@@ -1227,8 +1231,8 @@ function convertMessage(msg: Message): Record<string, unknown> {
     if (block.type === 'thinking') {
       return {
         type: 'thinking',
-        text: buildStructuredTextMessage({ role: structuredRole, text: block.text }),
-      };
+        thinking: buildStructuredTextMessage({ role: structuredRole, text: block.text }),
+      } satisfies ThinkingContent;
     }
     if (block.type === 'tool_call')
       return {

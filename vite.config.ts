@@ -30,7 +30,7 @@ export default defineConfig({
                 'electron-log',
                 'electron-log/main',
                 'electron-updater',
-                '@earendil-works/pi-ai',
+                /^@earendil-works\/pi-ai(\/.*)?$/,
                 '@modelcontextprotocol/sdk',
               ],
             },
@@ -74,7 +74,7 @@ export default defineConfig({
             rollupOptions: {
               external: [
                 'electron',
-                '@earendil-works/pi-ai',
+                /^@earendil-works\/pi-ai(\/.*)?$/,
                 '@modelcontextprotocol/sdk',
                 'node:worker_threads',
                 'node:fs',

@@ -22,8 +22,8 @@ const BUILTIN_RECOMMENDED: ModelOption[] = [
   { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (200K)' },
   { provider: 'anthropic', model: 'claude-opus-4-5', label: 'Claude Opus 4.5 (200K)' },
   { provider: 'anthropic', model: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (200K)' },
-  { provider: 'openai', model: 'gpt-5.1-codex', label: 'GPT-5.1 Codex (128K)' },
-  { provider: 'openai', model: 'gpt-5-codex', label: 'GPT-5 Codex (128K)' },
+  { provider: 'openai', model: 'gpt-5.3-codex', label: 'GPT-5.3 Codex (400K)' },
+  { provider: 'openai', model: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark (128K)' },
   { provider: 'openai', model: 'o4-mini', label: 'o4 Mini (200K)' },
   { provider: 'google', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (1M)' },
   {
@@ -31,22 +31,22 @@ const BUILTIN_RECOMMENDED: ModelOption[] = [
     model: 'gemini-3.1-flash-lite-preview',
     label: 'Gemini 3.1 Flash Lite (1M)',
   },
-  { provider: 'xai', model: 'grok-code-fast-1', label: 'Grok Code Fast (128K)' },
+  { provider: 'xai', model: 'grok-4.5', label: 'Grok 4.5 (500K)' },
   { provider: 'xai', model: 'grok-4.3', label: 'Grok 4.3 (128K)' },
   {
     provider: 'mistral',
-    model: 'mistral.mistral-large-3-675b-instruct',
-    label: 'Mistral Large 3 (128K)',
+    model: 'mistral-large-2512',
+    label: 'Mistral Large 3 (256K)',
   },
   {
     provider: 'groq',
-    model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
-    label: 'Llama 4 Maverick (128K)',
+    model: 'llama-3.3-70b-versatile',
+    label: 'Llama 3.3 70B (128K)',
   },
   { provider: 'openrouter', model: 'openai/gpt-5.1-codex', label: 'GPT-5.1 Codex (OpenRouter)' },
   {
     provider: 'openrouter',
-    model: 'anthropic/claude-sonnet-4-5',
+    model: 'anthropic/claude-sonnet-4.5',
     label: 'Claude Sonnet 4.5 (OpenRouter)',
   },
 ];
@@ -68,6 +68,42 @@ export const BUILTIN_PROVIDERS = [
   'moonshotai',
   'minimax',
 ];
+
+/** 聚合型供应商（opencode-go 等）按模型 id 前缀归出的系列分组标题。 */
+const FAMILY_PREFIXES: ReadonlyArray<readonly [prefix: string, label: string]> = [
+  ['deepseek', 'DeepSeek'],
+  ['qwen', 'Qwen'],
+  ['kimi', 'Kimi'],
+  ['glm', 'GLM'],
+  ['grok', 'Grok'],
+  ['minimax', 'MiniMax'],
+  ['mimo', 'Mimo'],
+  ['muse', 'Muse'],
+  ['hy', 'Hy'],
+  ['gpt', 'GPT'],
+  ['claude', 'Claude'],
+  ['gemini', 'Gemini'],
+  ['llama', 'Llama'],
+  ['mistral', 'Mistral'],
+  ['longcat', 'LongCat'],
+  ['ox', 'Ox'],
+  ['omen', 'Omen'],
+];
+
+/**
+ * 聚合型供应商（opencode-go / opencode / openrouter）的列表混排了多家模型，
+ * 按模型 id 归出「系列」用于分组展示；普通供应商返回空字符串（不分组）。
+ */
+export function modelFamily(provider: string, modelId: string): string {
+  if (provider === 'openrouter') {
+    const vendor = modelId.split('/')[0];
+    return vendor && vendor !== modelId ? vendor : '其他';
+  }
+  if (provider !== 'opencode-go' && provider !== 'opencode') return '';
+  const lower = modelId.toLowerCase();
+  const match = FAMILY_PREFIXES.find(([prefix]) => lower.startsWith(prefix));
+  return match ? match[1] : '其他系列';
+}
 
 function mergeModelOptions(...groups: ModelOption[][]): ModelOption[] {
   const models = new Map<string, ModelOption>();
@@ -115,11 +151,45 @@ export const useModelsStore = defineStore('models', () => {
   }
 
   const allModels = computed<ModelOption[]>(() => {
-    return mergeModelOptions(recommendedModels.value, ...providerModels.value.values());
+    return mergeModelOptions(
+      recommendedModels.value.filter((model) => !providerModels.value.has(model.provider)),
+      ...providerModels.value.values(),
+    );
   });
 
+  const modelSelectionSaving = ref(false);
+  const chatModels = computed(
+    () =>
+      useSettingsStore().settings.chatModels ?? [
+        {
+          provider: useSettingsStore().settings.activeProvider,
+          model: useSettingsStore().settings.activeModel,
+        },
+      ],
+  );
+
+  function isChatModel(provider: string, model: string): boolean {
+    return chatModels.value.some((entry) => entry.provider === provider && entry.model === model);
+  }
+
+  async function setChatModel(provider: string, model: string, visible: boolean): Promise<void> {
+    if (modelSelectionSaving.value) return;
+    const selected = chatModels.value.filter(
+      (entry) => entry.provider !== provider || entry.model !== model,
+    );
+    if (visible) selected.push({ provider, model });
+    modelSelectionSaving.value = true;
+    try {
+      await useSettingsStore().update({ chatModels: selected });
+    } finally {
+      modelSelectionSaving.value = false;
+    }
+  }
+
   const switchableModelOptions = computed<ModelOption[]>(() =>
-    allModels.value.filter((model) => hasKey(model.provider)),
+    allModels.value.filter(
+      (model) => hasKey(model.provider) && isChatModel(model.provider, model.model),
+    ),
   );
 
   const enabledProviders = computed<string[]>(() =>
@@ -209,12 +279,13 @@ export const useModelsStore = defineStore('models', () => {
     }
   }
 
-  async function loadModels(provider: string): Promise<void> {
-    if (providerModels.value.has(provider) || loadingProviders.value.has(provider)) return;
+  async function loadModels(provider: string, refresh = false): Promise<void> {
+    if ((!refresh && providerModels.value.has(provider)) || loadingProviders.value.has(provider))
+      return;
     loadingProviders.value.add(provider);
     try {
-      const models = await bridge.getModels(provider);
-      if (models?.length) {
+      const models = await bridge.getModels(provider, refresh);
+      if (models) {
         providerModels.value.set(
           provider,
           models.map((m) => ({
@@ -226,33 +297,43 @@ export const useModelsStore = defineStore('models', () => {
         );
       }
     } catch {
-      providerModels.value.set(provider, []);
+      /* Keep the last directory when refreshing fails. */
     } finally {
       loadingProviders.value.delete(provider);
     }
   }
 
   async function selectModel(provider: string, model: string): Promise<void> {
+    const selected = [...chatModels.value];
     activeProvider.value = provider;
     activeModel.value = model;
     try {
-      await bridge.updateSettings({ activeModel: model, activeProvider: provider });
+      await useSettingsStore().update({
+        activeModel: model,
+        activeProvider: provider,
+        chatModels: selected,
+      });
     } catch {
       /* non-fatal */
     }
   }
 
   function getCurrentLabel(): string {
+    const discovered = providerModels.value
+      .get(activeProvider.value)
+      ?.find((model) => model.model === activeModel.value);
+    if (discovered) return discovered.label;
     const r = recommendedModels.value.find(
       (m) => m.provider === activeProvider.value && m.model === activeModel.value,
     );
     if (r) return r.label;
-    const pm = providerModels.value.get(activeProvider.value);
-    const m = pm?.find((x) => x.model === activeModel.value);
-    return m?.label || `${activeProvider.value}/${activeModel.value}`;
+    return `${activeProvider.value}/${activeModel.value}`;
   }
 
   return {
+    isChatModel,
+    setChatModel,
+    modelSelectionSaving,
     activeProvider,
     activeModel,
     providers,

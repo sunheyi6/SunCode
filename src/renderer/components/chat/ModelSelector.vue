@@ -26,17 +26,9 @@ const ownDropdown = useDropdown(false);
 const dropdown = computed<DropdownState>(() => props.dropdown ?? ownDropdown);
 const isOpen = computed(() => getDropdownOpenState(dropdown.value));
 
-const availableModels = computed(() =>
-  modelsStore.switchableModelOptions.filter((m) => modelsStore.hasKey(m.provider)),
-);
+const availableModels = computed(() => modelsStore.switchableModelOptions);
 
-const currentModelLabel = computed(() => {
-  const model = availableModels.value.find(
-    (option) =>
-      option.model === modelsStore.activeModel && option.provider === modelsStore.activeProvider,
-  );
-  return model?.label ?? `${modelsStore.activeProvider}/${modelsStore.activeModel}`;
-});
+const currentModelLabel = computed(() => modelsStore.getCurrentLabel());
 
 async function selectModel(option: { provider: string; model: string }): Promise<void> {
   const chatStore = useChatStore();
@@ -106,7 +98,7 @@ defineExpose({
         <span class="item-provider">{{ model.provider }}</span>
       </button>
       <div v-if="availableModels.length === 0" class="empty-models">
-        请先在设置中配置供应商 Key
+        请在设置中配置 Key，并勾选“对话中显示”
       </div>
     </div>
   </div>
