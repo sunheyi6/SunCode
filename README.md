@@ -1,4 +1,4 @@
-# SunCode
+# SunCode 使用说明
 
 <div align="center">
   <a href="https://github.com/sunheyi6/SunCode"><img src="https://img.shields.io/github/stars/sunheyi6/SunCode?style=social" alt="Stars"></a>
